@@ -1,0 +1,65 @@
+{
+  "id": "cli:api:snapshot",
+  "result": {
+    "type": "snapshot",
+    "snapshot": {
+      "version": 1,
+      "protocol": 1,
+      "focused_workspace_id": "w_demo1",
+      "focused_tab_id": "w_demo1:1",
+      "focused_pane_id": "w_demo1:1:1",
+      "panes": [
+        {
+          "pane_id": "w_demo1:1:1",
+          "terminal_id": "term_a1b2c3d4e5f607",
+          "workspace_id": "w_demo1",
+          "tab_id": "w_demo1:1",
+          "cwd": "/home/demo/proj-a",
+          "foreground_cwd": "/home/demo/proj-a",
+          "focused": true,
+          "revision": 12,
+          "scroll": { "offset_from_bottom": 0, "max_offset_from_bottom": 0, "viewport_rows": 40 },
+          "agent": "claude",
+          "agent_status": "working",
+          "agent_session": {
+            "source": "herdr:claude",
+            "agent": "claude",
+            "kind": "id",
+            "value": "5d27595b-908e-4fe5-9283-890acdbd075f"
+          },
+          "terminal_title": "✳ Fix flaky login test",
+          "terminal_title_stripped": "Fix flaky login test"
+        },
+        {
+          "pane_id": "w_demo1:2:1",
+          "terminal_id": "term_65e13dfbb5fca2",
+          "workspace_id": "w_demo1",
+          "tab_id": "w_demo1:2",
+          "cwd": "/home/demo/proj-b",
+          "foreground_cwd": "/home/demo/proj-b",
+          "focused": false,
+          "revision": 3,
+          "scroll": { "offset_from_bottom": 0, "max_offset_from_bottom": 0, "viewport_rows": 40 },
+          "agent": "codex",
+          "agent_status": "idle",
+          "terminal_title": "proj-b - codex",
+          "terminal_title_stripped": "proj-b - codex"
+        },
+        {
+          "pane_id": "w_demo1:3:1",
+          "terminal_id": "term_0f0f0f0f0f0f01",
+          "workspace_id": "w_demo1",
+          "tab_id": "w_demo1:3",
+          "cwd": "/home/demo",
+          "foreground_cwd": "/home/demo",
+          "focused": false,
+          "revision": 1,
+          "scroll": { "offset_from_bottom": 0, "max_offset_from_bottom": 0, "viewport_rows": 40 },
+          "agent_status": "unknown",
+          "terminal_title": "zsh",
+          "terminal_title_stripped": "zsh"
+        }
+      ]
+    }
+  }
+}
