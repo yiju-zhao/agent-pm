@@ -1,0 +1,100 @@
+<style>
+  .m{font:13px/1.45 -apple-system,"PingFang SC",sans-serif;color:#1f2328;background:#fafafa;border-radius:8px;padding:14px}
+  .m *{box-sizing:border-box}
+  .row{display:flex;gap:12px}
+  .tag{display:inline-block;font-size:11px;padding:1px 6px;border-radius:10px;background:#eef;color:#335;margin-right:4px}
+  .p0{background:#fde2e1;color:#a11}.p1{background:#fff1d6;color:#8a5a00}.p2{background:#e7eef7;color:#34557a}
+  .dim{color:#777;font-size:12px}
+  .blk{color:#b42318;font-size:12px}
+  .h{font-weight:600;font-size:12px;color:#555;letter-spacing:.04em;margin:2px 0 6px}
+  .btn{display:inline-block;border:1px solid #ccc;border-radius:5px;padding:1px 8px;font-size:12px;margin:3px 4px 0 0;background:#fff}
+  .sess{display:inline-flex;align-items:center;gap:4px;font-size:11px;border:1px solid #ddd;background:#fff;border-radius:12px;padding:1px 8px;margin:2px 4px 0 0;white-space:nowrap}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%}
+  .w{background:#2da44e}.b{background:#e5534b}.i{background:#bbb}
+  .proj{background:#fff;border:1px solid #e3e3e3;border-radius:8px;padding:10px 12px;margin-bottom:8px}
+  .proj.sel{border-color:#4c8bf5;box-shadow:0 0 0 2px #dbe7fd}
+  .ms{display:flex;gap:3px;margin:5px 0}
+  .ms span{flex:1;height:5px;border-radius:2px;background:#e6e6e6}
+  .ms span.d{background:#4c8bf5}.ms span.n{background:#9fc0fa}
+  .todo{font-size:12px;margin:2px 0}
+  .q{background:#fffaf0;border:1px solid #f0d58a;border-radius:6px;padding:7px 9px;margin-top:6px;font-size:12px}
+  .lane{position:relative;height:22px;margin:3px 0}
+  .lane .bar{position:absolute;top:3px;height:16px;border-radius:4px;font-size:10px;color:#fff;padding:0 5px;line-height:16px;white-space:nowrap;overflow:hidden}
+  .axis{display:flex;justify-content:space-between;font-size:10px;color:#999;border-top:1px solid #ddd;padding-top:2px}
+  .tray{background:#fff;border:1px dashed #bbb;border-radius:8px;padding:8px 10px}
+</style>
+
+<h2>重新理顺：session 是临时的"工人"，project 是持久的"账本"</h2>
+<p class="subtitle">Session 来来去去，干完活、被删掉都没关系，它对项目的贡献会作为记录留在项目里。首页以项目为主体，活跃的 session 挂在它正在推进的那一步下面。</p>
+
+<div class="mockup"><div class="mockup-header">首页：项目为主，session 挂在项目里</div><div class="mockup-body"><div class="m">
+  <div class="row">
+    <div style="flex:1">
+      <div class="h">项目 · 按优先级 · 8 个推进中 · 4 个休眠</div>
+
+      <div class="proj sel">
+        <div><span class="tag p0">P0</span><b>dLLM 评测框架</b> <span class="dim">· 构建中 · 里程碑 3/5</span></div>
+        <div class="dim">给 Diffusion LLM 做统一评测和负载分析，产出可复现的对比报告</div>
+        <div class="ms"><span class="d"></span><span class="d"></span><span class="d"></span><span class="n"></span><span></span></div>
+        <div class="todo">▸ <b>当前里程碑：</b>接入 cannbench 负载数据
+          <span class="sess"><i class="dot w"></i>gx10-090e · claude · 运行中</span>
+          <span class="sess"><i class="dot i"></i>gx10-090e · codex · 空闲</span></div>
+        <div class="todo dim">下一个：评测报告模板</div>
+        <div class="q"><span class="blk">⛔ 等你决定</span>　评测集用哪个？ <span class="btn">公开 v2</span><span class="btn">自建</span><span class="btn">两个都跑</span></div>
+      </div>
+
+      <div class="proj">
+        <div><span class="tag p0">P0</span><b>open-evo RSI 流水线</b> <span class="dim">· 探索中 · 1/4</span></div>
+        <div class="ms"><span class="d"></span><span class="n"></span><span></span><span></span></div>
+        <div class="todo">▸ 框架 agent 集成验收
+          <span class="sess"><i class="dot i"></i>gx10-090e · claude</span></div>
+        <div class="todo">▸ 流水线自我评估指标
+          <span class="sess"><i class="dot i"></i>gx10-090e · claude</span></div>
+      </div>
+
+      <div class="proj">
+        <div><span class="tag p1">P1</span><b>loopwm 循环方法</b> <span class="dim">· 探索中</span> <span class="blk">⛔ 显存不够跑对照组</span></div>
+        <div class="todo">▸ 实验仓布局
+          <span class="sess"><i class="dot i"></i>gx10-c757 · claude</span>
+          <span class="sess"><i class="dot i"></i>gx10-c757 · claude</span></div>
+      </div>
+
+      <div class="proj" style="opacity:.6">
+        <div><span class="tag p2">P2</span><b>TradingAgents</b> <span class="dim">· idea · 休眠 9 天 · 无活跃 session</span></div>
+      </div>
+    </div>
+
+    <div style="width:30%">
+      <div class="h">需要你 · 3</div>
+      <div class="q" style="margin-top:0"><b>dLLM 评测</b>：评测集用哪个？<div class="dim">在项目卡片里作答</div></div>
+      <div class="q"><b>family-os</b>：做完的标准是什么？<div style="margin-top:4px;border:1px solid #ddd;border-radius:4px;padding:3px 6px;color:#999;background:#fff">一句话描述…</div></div>
+      <div class="q"><b>knowledge-bank</b>：Noteweaver 和 okf 功能重复，合并成一个项目？<div><span class="btn">合并</span><span class="btn">保持分开</span></div></div>
+
+      <div class="h" style="margin-top:14px">待归属的 session · 2</div>
+      <div class="tray">
+        <div class="todo"><span class="sess"><i class="dot w"></i>mac-mini · claude</span><br>"Rea reverse engineering on macOS"
+          <div class="dim">AI 判断：像是新课题（置信度 低）</div>
+          <span class="btn">新建项目</span><span class="btn">归入 openlingo</span><span class="btn">不追踪</span></div>
+        <div class="todo" style="margin-top:6px"><span class="sess"><i class="dot i"></i>mac-mini · claude</span><br>"power-of compounding repo 大小"
+          <div class="dim">AI 判断：一次性问题，不追踪</div></div>
+      </div>
+    </div>
+  </div>
+</div></div></div>
+
+<div class="mockup" style="margin-top:16px"><div class="mockup-header">点开项目：时间线上能看到每个 session 什么时候参与、做了哪一段（包括已删除的）</div><div class="mockup-body"><div class="m">
+  <div><span class="tag p0">P0</span><b>dLLM 评测框架</b> <span class="dim">· 10/02 诞生于一次讨论 · 已推进 27 天 · 共 6 个 session 参与过</span></div>
+  <div style="margin:10px 0 4px" class="h">参与过的 session</div>
+  <div class="lane"><div class="bar" style="left:0;width:14%;background:#aaa">讨论 → 诞生 idea（已删除）</div></div>
+  <div class="lane"><div class="bar" style="left:12%;width:22%;background:#9a9a9a">定义评测维度（已结束）</div></div>
+  <div class="lane"><div class="bar" style="left:30%;width:30%;background:#7d8fb3">跑通 baseline（已结束）</div></div>
+  <div class="lane"><div class="bar" style="left:55%;width:45%;background:#2da44e">gx10-090e · claude · 接入 cannbench 数据</div></div>
+  <div class="lane"><div class="bar" style="left:78%;width:22%;background:#8fbf9a">gx10-090e · codex · 负载梳理</div></div>
+  <div class="axis"><span>10/02</span><span>10/09</span><span>10/16</span><span>10/23</span><span>今天</span></div>
+  <div class="row" style="margin-top:10px">
+    <div style="flex:1" class="dim"><b style="color:#333">里程碑</b><br>✓ 确定评测维度 · ✓ baseline · ✓ 数据管线 · ◐ 接入负载 · ○ 报告</div>
+    <div style="flex:1" class="dim"><b style="color:#333">关键决策（可追溯到来源 session）</b><br>10/04 只评 8B 以下模型<br>10/15 弃用 lm-eval，自写 harness</div>
+  </div>
+</div></div></div>
+
+<p class="subtitle" style="margin-top:16px">"需要你"现在只放项目层面的决定。agent 卡在授权弹窗这类 session 层面的等待，herdr 本身已经在提醒了，这里只在项目卡片上显示成红点。</p>

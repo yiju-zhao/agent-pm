@@ -1,0 +1,131 @@
+<style>
+  .m{font:13px/1.45 -apple-system,"PingFang SC",sans-serif;color:#1f2328;background:#fafafa;border-radius:8px;padding:14px}
+  .m *{box-sizing:border-box}
+  .row{display:flex;gap:10px}
+  .card{background:#fff;border:1px solid #e3e3e3;border-radius:8px;padding:10px}
+  .tag{display:inline-block;font-size:11px;padding:1px 6px;border-radius:10px;background:#eef;color:#335;margin-right:4px}
+  .p0{background:#fde2e1;color:#a11}.p1{background:#fff1d6;color:#8a5a00}.p2{background:#e7eef7;color:#34557a}
+  .dim{color:#777;font-size:12px}
+  .blk{color:#b42318;font-size:12px}
+  .bar{height:5px;background:#eee;border-radius:3px;overflow:hidden;margin:4px 0}
+  .bar i{display:block;height:100%;background:#4c8bf5}
+  .h{font-weight:600;font-size:12px;color:#555;text-transform:uppercase;letter-spacing:.04em;margin:2px 0 6px}
+  .q{background:#fff;border:1px solid #f0d58a;border-left:4px solid #e6a700;border-radius:6px;padding:8px;margin-bottom:6px}
+  .btn{display:inline-block;border:1px solid #ccc;border-radius:5px;padding:1px 8px;font-size:12px;margin:3px 4px 0 0;background:#fff}
+  table.t{width:100%;border-collapse:collapse;background:#fff;font-size:12px}
+  table.t td,table.t th{padding:6px 8px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
+  table.t th{color:#666;font-weight:500;background:#f4f4f4}
+  .col{flex:1;background:#f0f0f0;border-radius:6px;padding:6px;min-width:0}
+  .mini{background:#fff;border:1px solid #e3e3e3;border-radius:6px;padding:6px;margin-bottom:6px;font-size:12px}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:4px}
+</style>
+
+<h2>首页长什么样？三种思路</h2>
+<p class="subtitle">用的是你 herdr 里现在真实的课题。点一个最接近你想要的，可以多选，也可以在终端里说"A 的这里 + B 的那里"。</p>
+
+<div class="options" data-multiselect>
+
+<!-- A -->
+<div class="option" data-choice="a" onclick="toggleSelect(this)">
+  <div class="letter">A</div>
+  <div class="content">
+    <h3>项目卡片墙：按优先级排列，每张卡回答 5 个问题</h3>
+    <p>一眼扫过所有项目的全貌，最直观，但项目一多就要滚动。"需要我做什么"埋在卡片里。</p>
+    <div class="mockup"><div class="mockup-body"><div class="m">
+      <div class="row">
+        <div class="card" style="flex:1">
+          <span class="tag p0">P0</span><span class="tag">构建中</span><b>dLLM 评测框架</b>
+          <div class="dim">给 Diffusion LLM 做统一评测和负载分析</div>
+          <div class="bar"><i style="width:55%"></i></div>
+          <div class="dim">里程碑 3/5 · 2 个 session · gx10-090e</div>
+          <div style="margin-top:4px">▸ 接入 cannbench 负载数据</div>
+          <div class="blk">⛔ 等你决定：评测集用 v2 还是自建</div>
+        </div>
+        <div class="card" style="flex:1">
+          <span class="tag p0">P0</span><span class="tag">探索中</span><b>open-evo RSI 流水线</b>
+          <div class="dim">让演进流水线可以自我改进</div>
+          <div class="bar"><i style="width:30%"></i></div>
+          <div class="dim">里程碑 1/4 · 2 个 session · gx10-090e</div>
+          <div style="margin-top:4px">▸ 框架 agent 集成验收</div>
+          <div class="dim">无阻塞</div>
+        </div>
+        <div class="card" style="flex:1">
+          <span class="tag p1">P1</span><span class="tag">探索中</span><b>loopwm 循环方法</b>
+          <div class="dim">找出真正有效的 loop 方式</div>
+          <div class="bar"><i style="width:20%"></i></div>
+          <div class="dim">2 个 session · gx10-c757</div>
+          <div style="margin-top:4px">▸ 整理实验仓布局</div>
+          <div class="blk">⛔ 技术：显存不够跑对照组</div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div class="card" style="flex:1"><span class="tag p1">P1</span><b>family-os 投资规划</b> <span class="dim">· 构建中</span></div>
+        <div class="card" style="flex:1"><span class="tag p2">P2</span><b>Herdr Lens 插件</b> <span class="dim">· 验证中</span></div>
+        <div class="card" style="flex:1"><span class="tag p2">P2</span><b>TradingAgents</b> <span class="dim">· idea</span></div>
+      </div>
+    </div></div></div>
+  </div>
+</div>
+
+<!-- B -->
+<div class="option" data-choice="b" onclick="toggleSelect(this)">
+  <div class="letter">B</div>
+  <div class="content">
+    <h3>注意力优先：左边是"需要你的"，右边是项目总表</h3>
+    <p>首页回答的第一个问题是"我现在该处理什么"。AI 的提问和卡在你身上的阻塞放最前面，其余项目压成一行一行的表，点开再看详情。</p>
+    <div class="mockup"><div class="mockup-body"><div class="m">
+      <div class="row">
+        <div style="width:36%">
+          <div class="h">需要你 · 4</div>
+          <div class="q"><b>dLLM 评测</b> 卡在你身上<br>评测集用哪个？
+            <div><span class="btn">公开 v2</span><span class="btn">自建</span><span class="btn">两个都跑</span></div></div>
+          <div class="q"><b>新课题？</b> mac-mini 上的 session "Rea reverse engineering" 不属于任何已知项目
+            <div><span class="btn">新建项目</span><span class="btn">归入 openlingo</span><span class="btn">忽略</span></div></div>
+          <div class="q"><b>family-os</b> 做完的标准是什么？
+            <div style="margin-top:4px;border:1px solid #ddd;border-radius:4px;padding:3px 6px;color:#999;background:#fff">一句话描述…</div></div>
+          <div class="q"><b>knowledge-bank</b> Noteweaver 和 okf 功能重复，AI 建议合并
+            <div><span class="btn">同意合并</span><span class="btn">保留两个</span></div></div>
+        </div>
+        <div style="flex:1">
+          <div class="h">项目 · 11 个活跃 · 3 个 idea</div>
+          <table class="t">
+            <tr><th></th><th>项目</th><th>阶段</th><th>下一步</th><th>阻塞</th></tr>
+            <tr><td><span class="tag p0">P0</span></td><td><b>dLLM 评测</b><div class="dim">2 session · 10 分钟前</div></td><td>构建 3/5</td><td>接入 cannbench 数据</td><td class="blk">等你</td></tr>
+            <tr><td><span class="tag p0">P0</span></td><td><b>open-evo RSI</b><div class="dim">2 session · 1 小时前</div></td><td>探索 1/4</td><td>agent 集成验收</td><td class="dim">—</td></tr>
+            <tr><td><span class="tag p1">P1</span></td><td><b>loopwm</b><div class="dim">2 session · 3 小时前</div></td><td>探索</td><td>整理实验仓</td><td class="blk">显存</td></tr>
+            <tr><td><span class="tag p1">P1</span></td><td><b>family-os</b><div class="dim">1 session · 昨天</div></td><td>构建</td><td>账户规划表</td><td class="dim">—</td></tr>
+            <tr><td><span class="tag p2">P2</span></td><td><b>Herdr Lens</b><div class="dim">今天</div></td><td>验证</td><td>点击路径测试</td><td class="dim">—</td></tr>
+            <tr><td><span class="tag p2">P2</span></td><td style="color:#999">TradingAgents</td><td style="color:#999">idea</td><td style="color:#999">—</td><td></td></tr>
+          </table>
+        </div>
+      </div>
+    </div></div></div>
+  </div>
+</div>
+
+<!-- C -->
+<div class="option" data-choice="c" onclick="toggleSelect(this)">
+  <div class="letter">C</div>
+  <div class="content">
+    <h3>生命周期看板：按阶段分列，从 idea 一路流向完成</h3>
+    <p>最能体现"从 idea 到 end"的流动，一眼看出哪里堆积（比如 idea 一堆、构建只有两个）。但优先级和"需要我做什么"不突出。</p>
+    <div class="mockup"><div class="mockup-body"><div class="m">
+      <div class="row">
+        <div class="col"><div class="h">Idea · 3</div>
+          <div class="mini">TradingAgents</div><div class="mini">power-of-compounding</div><div class="mini">Rea 逆向 <span class="tag">新</span></div></div>
+        <div class="col"><div class="h">探索 · 3</div>
+          <div class="mini"><span class="tag p0">P0</span>open-evo RSI</div><div class="mini"><span class="tag p1">P1</span>loopwm <span class="blk">⛔</span></div><div class="mini">evo-cannbench</div></div>
+        <div class="col"><div class="h">构建 · 2</div>
+          <div class="mini"><span class="tag p0">P0</span>dLLM 评测 <span class="blk">⛔</span><div class="bar"><i style="width:55%"></i></div></div><div class="mini"><span class="tag p1">P1</span>family-os</div></div>
+        <div class="col"><div class="h">验证 · 1</div>
+          <div class="mini"><span class="tag p2">P2</span>Herdr Lens</div></div>
+        <div class="col"><div class="h">完成 / 搁置</div>
+          <div class="mini" style="color:#999">nasa718 目录迁移 ✓</div></div>
+      </div>
+    </div></div></div>
+  </div>
+</div>
+
+</div>
+
+<p class="subtitle" style="margin-top:16px">我的倾向：用 B 做首页，C 做成可以切换的第二视图。点开任意项目进入详情页（big picture、里程碑、todo、阻塞、时间线），下一步再画详情页。</p>
