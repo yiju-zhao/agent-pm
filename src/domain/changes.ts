@@ -41,7 +41,10 @@ function checkedColumns(values: Values): [string, SqlValue][] {
   return entries;
 }
 
-export function readRow(db: DatabaseSync, table: DomainTable, id: string): Record<string, unknown> | undefined {
+/** A row as read from SQLite, keyed by column. */
+export type Row = Record<string, unknown>;
+
+export function readRow(db: DatabaseSync, table: DomainTable, id: string): Row | undefined {
   const pk = primaryKeyOf(table);
   const row = db.prepare(`SELECT * FROM ${table} WHERE ${pk} = ?`).get(id);
   return row === undefined ? undefined : { ...row };
@@ -129,29 +132,55 @@ export type EventInput = {
 };
 
 /**
- * Appends one event row; `before` / `after` are JSON objects keyed by `${table}:${id}`. Returns the event id.
- * Several Changes to one row (an insert, then updates) collapse into one entry: the earliest `before`
- * (null for an insert) and the latest `after` values.
+ * The net effect of `changes`, one Change per row in first-touched order: the earliest `before` (null for an insert)
+ * and the latest `after` values. Columns that end where they started are dropped, and so are updated rows left with
+ * no column; an insert always stays. Does not alter `changes`.
  */
-export function appendEvent(db: DatabaseSync, e: EventInput): number {
-  const before: Record<string, Record<string, unknown> | null> = {};
-  const after: Record<string, Record<string, unknown>> = {};
-  for (const c of e.changes) {
+export function netChanges(changes: Change[]): Change[] {
+  const byRow = new Map<string, Change>();
+  for (const c of changes) {
     const key = `${c.table}:${c.id}`;
-    if (!Object.hasOwn(after, key)) {
-      before[key] = c.before && { ...c.before };
-      after[key] = { ...c.after };
+    const net = byRow.get(key);
+    if (!net) {
+      byRow.set(key, { table: c.table, id: c.id, before: c.before && { ...c.before }, after: { ...c.after } });
       continue;
     }
-    const earliest = before[key];
-    if (earliest && c.before) {
+    if (net.before && c.before) {
       for (const col of Object.keys(c.before)) {
-        if (!Object.hasOwn(earliest, col)) earliest[col] = c.before[col];
+        if (!Object.hasOwn(net.before, col)) net.before[col] = c.before[col];
       }
     }
-    Object.assign(after[key], c.after);
+    Object.assign(net.after, c.after);
   }
-  const first = e.changes[0];
+  const result: Change[] = [];
+  for (const net of byRow.values()) {
+    if (net.before) {
+      for (const col of Object.keys(net.after)) {
+        if (net.before[col] === net.after[col]) {
+          delete net.before[col];
+          delete net.after[col];
+        }
+      }
+      if (Object.keys(net.after).length === 0) continue;
+    }
+    result.push(net);
+  }
+  return result;
+}
+
+/**
+ * Appends one event row; `before` / `after` are JSON objects keyed by `${table}:${id}`, holding the `netChanges` of
+ * `e.changes`, and `entity` is the first of them. Returns the event id.
+ */
+export function appendEvent(db: DatabaseSync, e: EventInput): number {
+  const changes = netChanges(e.changes);
+  const before: Record<string, Record<string, unknown> | null> = {};
+  const after: Record<string, Record<string, unknown>> = {};
+  for (const c of changes) {
+    before[`${c.table}:${c.id}`] = c.before;
+    after[`${c.table}:${c.id}`] = c.after;
+  }
+  const first = changes[0];
   const result = db
     .prepare(
       `INSERT INTO events (occurred_at, recorded_at, actor, op, entity, project_id, args, before, after,

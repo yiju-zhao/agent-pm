@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, expect, test } from 'vitest';
-import { addLocks, appendEvent, ChangeSet, LOCKABLE, readLocks, readRow } from '../../src/domain/changes.ts';
+import { addLocks, appendEvent, ChangeSet, LOCKABLE, netChanges, readLocks, readRow } from '../../src/domain/changes.ts';
 import type { Change } from '../../src/domain/changes.ts';
 import { openDb } from '../../src/server/db.ts';
 
@@ -227,6 +227,32 @@ test('appendEvent collapses an insert followed by updates into one net insert', 
   expect(JSON.parse(row.after as string)).toEqual({
     'projects:p_1': { id: 'p_1', title: 'B', summary: 's', why: 'because' },
   });
+});
+
+test('netChanges drops columns that end where they started and rows left with nothing', () => {
+  const cs = new ChangeSet(db);
+  cs.insert('projects', { id: 'p_1', title: 'A', summary: 's' });
+  cs.insert('projects', { id: 'p_2', title: 'X', summary: 's' });
+  const later = new ChangeSet(db);
+  later.update('projects', 'p_1', { title: 'B', summary: 't' });
+  later.update('projects', 'p_1', { title: 'A' });
+  later.update('projects', 'p_2', { title: 'Y' });
+  later.update('projects', 'p_2', { title: 'X' });
+  expect(netChanges(later.changes)).toEqual([
+    { table: 'projects', id: 'p_1', before: { summary: 's' }, after: { summary: 't' } },
+  ]);
+  expect(netChanges([{ table: 'projects', id: 'p_1', before: { title: 'A' }, after: { title: 'A' } }])).toEqual([]);
+});
+
+test('appendEvent records only the net change of a column changed and changed back', () => {
+  seedProject();
+  const cs = new ChangeSet(db);
+  cs.update('projects', 'p_1', { title: 'B', summary: 't' });
+  cs.update('projects', 'p_1', { title: 'A' });
+  const id = appendEvent(db, { ...baseEvent, changes: cs.changes });
+  const row = db.prepare('SELECT * FROM events WHERE id = ?').get(id) as Record<string, unknown>;
+  expect(JSON.parse(row.before as string)).toEqual({ 'projects:p_1': { summary: 's' } });
+  expect(JSON.parse(row.after as string)).toEqual({ 'projects:p_1': { summary: 't' } });
 });
 
 test('appendEvent does not alter the changes it was given', () => {
