@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import { getProject, listProjects } from '../../src/domain/read.ts';
 import type { ProjectCard, ProjectDetail } from '../../src/domain/read.ts';
-import { renderBrief, renderProjectIndex, renderProjectMarkdown } from '../../src/understand/render.ts';
+import { renderBrief, renderProjectIndex, renderProjectMarkdown, renderTombstones } from '../../src/understand/render.ts';
 import { NOW, setup } from '../domain/helpers.ts';
 import type { Setup } from '../domain/helpers.ts';
 
@@ -179,6 +179,15 @@ test('project markdown marks reverted events and what the user deleted, so the c
   expect(md).toContain('## 用户删除过（不要重建）\n- todos:t_1 · 用户删掉的 todo · 2026-10-29');
   expect(md).toContain(`update_project · projects:${p} · r（已被撤销）`);
   expect(md).toContain(`revert_event · projects:${p}（撤销 #${edit.event_id}）`);
+});
+
+test('renderTombstones gives the same lines the markdown lists, and nothing when there are none', () => {
+  const p = t.user('create_project', { title: 'p' }).id;
+  expect(renderTombstones(detail(p).tombstones)).toBe('');
+
+  const todo = t.user('upsert_todo', { project: p, title: '用户删掉的\ntodo' }).id;
+  t.user('delete_todo', { project: p, id: todo });
+  expect(renderTombstones(detail(p).tombstones)).toBe(`- todos:${todo} · 用户删掉的 todo · 2026-10-29`);
 });
 
 // ---- renderProjectIndex ------------------------------------------------------------------------------------------

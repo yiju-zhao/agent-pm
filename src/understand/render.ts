@@ -83,6 +83,13 @@ function contributionLine(c: ProjectDetail['contributions'][number]): string {
   return `- ${parts.join(' · ')}`;
 }
 
+/** The heading over a project's tombstones, also used where they sit next to a brief. */
+export const TOMBSTONES_TITLE = '用户删除过（不要重建）';
+
+function tombstoneLines(tombstones: ProjectDetail['tombstones']): string[] {
+  return tombstones.map((x) => `- ${x.table}:${x.id} · ${oneLine(x.label)} · ${day(x.deleted_at)}`);
+}
+
 function eventLine(e: EventView): string {
   const parts = [`#${e.id}`, minute(e.occurred_at), e.actor, e.op];
   if (e.entity !== null) parts.push(e.entity);
@@ -143,12 +150,14 @@ export function renderProjectMarkdown(p: ProjectDetail): string {
     ...section('决策', p.decisions.flatMap((d) => decisionLines(d, true))),
     ...section('活跃 session', p.active_sessions.map((s) => `- ${sessionText(s)}`)),
     ...section('贡献记录', p.contributions.map(contributionLine)),
-    ...section(
-      '用户删除过（不要重建）',
-      p.tombstones.map((x) => `- ${x.table}:${x.id} · ${oneLine(x.label)} · ${day(x.deleted_at)}`),
-    ),
+    ...section(TOMBSTONES_TITLE, tombstoneLines(p.tombstones)),
     ...section('最近事件', p.events.slice(0, MARKDOWN_EVENTS).map(eventLine)),
   ].join('\n');
+}
+
+/** What the user deleted or unlinked from a project, one line each; empty when there is nothing. */
+export function renderTombstones(tombstones: ProjectDetail['tombstones']): string {
+  return tombstoneLines(tombstones).join('\n');
 }
 
 /**

@@ -65,28 +65,30 @@ export type DigestWindow = {
 type ChunkRow = { id: number; kind: string; ts_start: string; ts_end: string; text: string };
 
 /**
- * Turns every opening or closing `chunk` tag in untrusted text into literal `&lt;chunk` / `&lt;/chunk`, so the text
- * cannot close its own data block early or forge a chunk id.
+ * Turns every opening or closing tag named in `tags` (compared without case, so `<CHUNK` too) in untrusted text into
+ * literal `&lt;chunk` / `&lt;/chunk`, so the text cannot close its own data block early or forge a tag of the prompt.
+ * `tags` are plain names, spliced into a pattern.
  */
-function neutralizeChunkTags(text: string): string {
-  return text.replace(/<(\s*\/?\s*)chunk\b/gi, '&lt;$1chunk');
+export function neutralizeTags(text: string, ...tags: string[]): string {
+  const pattern = new RegExp(`<(\\s*/?\\s*)(${tags.join('|')})\\b`, 'gi');
+  return text.replace(pattern, (_match, space: string, tag: string) => `&lt;${space}${tag.toLowerCase()}`);
 }
 
 function chunkTag(chunk: ChunkRow): string {
   const attrs = chunk.kind === 'report' ? ` id="${chunk.id}" kind="report"` : ` id="${chunk.id}"`;
-  return `<chunk${attrs}>${neutralizeChunkTags(chunk.text)}</chunk>`;
+  return `<chunk${attrs}>${neutralizeTags(chunk.text, 'chunk')}</chunk>`;
 }
 
 /** Session metadata comes from conversation content and sits outside the data tags: one line, no chunk tags. */
 function metaLine(text: string): string {
-  return neutralizeChunkTags(text.replace(/\s+/g, ' ').trim());
+  return neutralizeTags(text.replace(/\s+/g, ' ').trim(), 'chunk');
 }
 
 /**
  * The next batch of a session's unprocessed chunks for one mode, or `null` when there are none. Transcript and report
  * chunks are taken oldest first until the next one would pass the cap (a chunk bigger than the cap goes alone). Of the
  * screen chunks, which are overlapping snapshots, only the newest goes in; the rest come back as stale. The newest
- * screen chunk counts against the cap too. Chunk tags inside the text are escaped (see `neutralizeChunkTags`); the
+ * screen chunk counts against the cap too. Chunk tags inside the text are escaped (see `neutralizeTags`); the
  * caps and `totalChars` count the original text.
  */
 export function nextWindow(db: DatabaseSync, sessionKey: string, mode: 'realtime' | 'backfill'): DigestWindow | null {
