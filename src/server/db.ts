@@ -44,6 +44,131 @@ export const MIGRATIONS: string[] = [
     UNIQUE(session_key, offset_start)
   );
   `,
+  // v2: domain layer. Every *_at / ts_* column is an ISO-8601 UTC string; JSON columns hold JSON text.
+  `
+  CREATE TABLE projects (
+    id TEXT PRIMARY KEY,
+    title TEXT,
+    stage TEXT,
+    stage_before_park TEXT,
+    priority TEXT,
+    summary TEXT,
+    why TEXT,
+    done_criteria TEXT,
+    merged_into TEXT,
+    locks TEXT DEFAULT '[]',
+    created_by TEXT,
+    user_touched INTEGER DEFAULT 0,
+    created_at TEXT,
+    deleted_at TEXT,
+    vetoed INTEGER DEFAULT 0
+  );
+  CREATE TABLE milestones (
+    id TEXT PRIMARY KEY,
+    project_id TEXT,
+    title TEXT,
+    status TEXT,
+    position INTEGER,
+    locks TEXT DEFAULT '[]',
+    created_by TEXT,
+    created_at TEXT,
+    deleted_at TEXT,
+    vetoed INTEGER DEFAULT 0
+  );
+  CREATE TABLE todos (
+    id TEXT PRIMARY KEY,
+    project_id TEXT,
+    milestone_id TEXT,
+    title TEXT,
+    status TEXT,
+    priority TEXT,
+    locks TEXT DEFAULT '[]',
+    created_by TEXT,
+    created_at TEXT,
+    deleted_at TEXT,
+    vetoed INTEGER DEFAULT 0
+  );
+  CREATE TABLE decisions (
+    id TEXT PRIMARY KEY,
+    project_id TEXT,
+    text TEXT,
+    decided_at TEXT,
+    evidence TEXT,
+    created_by TEXT,
+    created_at TEXT,
+    deleted_at TEXT,
+    vetoed INTEGER DEFAULT 0
+  );
+  CREATE TABLE blockers (
+    id TEXT PRIMARY KEY,
+    project_id TEXT,
+    text TEXT,
+    kind TEXT,
+    status TEXT,
+    cleared_at TEXT,
+    created_by TEXT,
+    created_at TEXT,
+    deleted_at TEXT,
+    vetoed INTEGER DEFAULT 0
+  );
+  CREATE TABLE contributions (
+    id TEXT PRIMARY KEY,
+    session_key TEXT,
+    project_id TEXT,
+    milestone_id TEXT,
+    summary TEXT,
+    ts_start TEXT,
+    ts_end TEXT,
+    confidence REAL,
+    actor TEXT,
+    created_at TEXT,
+    deleted_at TEXT,
+    vetoed INTEGER DEFAULT 0,
+    UNIQUE(session_key, project_id)
+  );
+  CREATE TABLE questions (
+    id TEXT PRIMARY KEY,
+    kind TEXT,
+    prompt TEXT,
+    options TEXT,
+    project_id TEXT,
+    session_key TEXT,
+    status TEXT,
+    answer TEXT,
+    evidence TEXT,
+    guards TEXT,
+    dedupe_key TEXT,
+    rejected INTEGER DEFAULT 0,
+    resolution_note TEXT,
+    created_by TEXT,
+    created_at TEXT,
+    resolved_at TEXT
+  );
+  CREATE TABLE events (
+    id INTEGER PRIMARY KEY,
+    occurred_at TEXT,
+    recorded_at TEXT,
+    actor TEXT,
+    op TEXT,
+    entity TEXT,
+    project_id TEXT,
+    args TEXT,
+    before TEXT,
+    after TEXT,
+    reason TEXT,
+    evidence TEXT,
+    question_id TEXT,
+    reverts INTEGER,
+    reverted_by INTEGER,
+    is_veto INTEGER DEFAULT 0
+  );
+  CREATE INDEX idx_events_project ON events(project_id, id);
+  CREATE INDEX idx_questions_status ON questions(status);
+  CREATE INDEX idx_questions_dedupe ON questions(dedupe_key);
+  CREATE INDEX idx_contributions_project ON contributions(project_id);
+  CREATE INDEX idx_todos_project ON todos(project_id);
+  CREATE INDEX idx_milestones_project ON milestones(project_id);
+  `,
 ];
 
 /** Opens (creating if needed) the central database in WAL mode and applies pending migrations. */
