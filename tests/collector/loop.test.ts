@@ -1,4 +1,4 @@
-import { appendFile, mkdir, mkdtemp, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, mkdir, mkdtemp, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import type { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -104,18 +104,18 @@ function snapshotOf(panes: Pane[]): unknown {
   };
 }
 
-type Calls = { readScreen: string[]; paneProcess: string[]; processStartTime: number[] };
+type Calls = { readScreen: string[]; paneProcess: string[]; processStartTime: number[]; log: string[] };
 
 function fakeDeps(
   panes: () => Pane[],
   opts: {
     screen?: () => string;
-    process?: { pid: number; cwd: string } | null;
+    process?: { pid: number; cwd: string } | null | (() => { pid: number; cwd: string } | null);
     processStart?: Date | null;
     readSnapshot?: () => Promise<unknown>;
   } = {},
 ): Deps & { calls: Calls } {
-  const calls: Calls = { readScreen: [], paneProcess: [], processStartTime: [] };
+  const calls: Calls = { readScreen: [], paneProcess: [], processStartTime: [], log: [] };
   return {
     calls,
     readSnapshot: opts.readSnapshot ?? (async () => snapshotOf(panes())),
@@ -125,7 +125,7 @@ function fakeDeps(
     },
     paneProcess: async (paneId) => {
       calls.paneProcess.push(paneId);
-      return opts.process ?? null;
+      return typeof opts.process === 'function' ? opts.process() : (opts.process ?? null);
     },
     processStartTime: async (pid) => {
       calls.processStartTime.push(pid);
@@ -134,6 +134,7 @@ function fakeDeps(
     client,
     now: () => now,
     startedAt: STARTED_AT,
+    log: (line) => calls.log.push(line),
   };
 }
 
@@ -192,7 +193,7 @@ test('first run reads transcript from 0 and marks old chunks as backfill', async
 
   const result = await collectOnce(cfg, store, fakeDeps(() => [claudePane()]));
 
-  expect(result).toEqual({ sessions: 1, chunksPushed: 1 });
+  expect(result).toEqual({ sessions: 1, chunksPushed: 1, errors: 0 });
   const end = await size(transcript);
   const rows = chunks();
   expect(rows).toHaveLength(1);
@@ -302,7 +303,7 @@ test('id-less codex resolved via matchRollout becomes native key with full fidel
   const result = await collectOnce(cfg, store, deps);
 
   const key = `codex:${CODEX_ID}`;
-  expect(result).toEqual({ sessions: 1, chunksPushed: 1 });
+  expect(result).toEqual({ sessions: 1, chunksPushed: 1, errors: 0 });
   expect(deps.calls.processStartTime).toEqual([4242]);
   expect(sessionRow(key)).toMatchObject({ native_id: CODEX_ID, fidelity: 'full', transcript_path: rollout, terminal_id: 'term_2' });
   expect(sessionRow(`pending:${MACHINE}:term_2`)).toBeUndefined();
@@ -331,7 +332,7 @@ test('unresolvable session falls back to screen and dedupes identical screens', 
   const store = await CursorStore.load(cfg.stateFile);
   const deps = fakeDeps(() => [pane()], { screen: () => screen });
 
-  expect(await collectOnce(cfg, store, deps)).toEqual({ sessions: 1, chunksPushed: 1 });
+  expect(await collectOnce(cfg, store, deps)).toEqual({ sessions: 1, chunksPushed: 1, errors: 0 });
   const key = `pending:${MACHINE}:term_3`;
   expect(sessionRow(key)).toMatchObject({ fidelity: 'screen', transcript_path: null });
   expect(chunks()[0]).toMatchObject({
@@ -418,7 +419,7 @@ test('a session reported twice is processed once (last wins)', async () => {
   await writeLines(transcript, [claudeUser(NEW_TS, 'hello')]);
   const deps = fakeDeps(() => [claudePane({ pane_id: 'w1:p1' }), claudePane({ pane_id: 'w1:p9' })]);
   const result = await collectOnce(cfg, await CursorStore.load(cfg.stateFile), deps);
-  expect(result).toEqual({ sessions: 1, chunksPushed: 1 });
+  expect(result).toEqual({ sessions: 1, chunksPushed: 1, errors: 0 });
   expect(sessionRow(CLAUDE_KEY)).toMatchObject({ pane_id: 'w1:p9' });
   expect(chunks()).toHaveLength(1);
 });
@@ -480,4 +481,65 @@ test('backoffDelay doubles pollMs per consecutive failure up to 5 minutes', () =
   expect(backoffDelay(10_000, 3)).toBe(80_000);
   expect(backoffDelay(10_000, 5)).toBe(MAX_BACKOFF_MS);
   expect(backoffDelay(10_000, 5000)).toBe(MAX_BACKOFF_MS);
+});
+
+test('a failing session is logged and skipped; later sessions are still collected', async () => {
+  if (process.getuid?.() === 0) return; // root can read a chmod 000 file
+  const badId = '11111111-2222-3333-4444-555555555555';
+  const bad = join(cfg.claudeDir, 'projects', '-home-demo-proj', `${badId}.jsonl`);
+  await writeLines(bad, [claudeUser(NEW_TS, 'secret')]);
+  await chmod(bad, 0o000);
+  await writeLines(transcript, [claudeUser(NEW_TS, 'healthy')]);
+  const store = await CursorStore.load(cfg.stateFile);
+  const deps = fakeDeps(() => [
+    claudePane({ pane_id: 'w1:p0', terminal_id: 'term_0', agent_session: { kind: 'id', value: badId } }),
+    claudePane(),
+  ]);
+
+  try {
+    const result = await collectOnce(cfg, store, deps);
+    expect(result).toEqual({ sessions: 2, chunksPushed: 1, errors: 1 });
+  } finally {
+    await chmod(bad, 0o600);
+  }
+  expect(chunks().map((c) => c.session_key)).toEqual([CLAUDE_KEY]);
+  // The bad session's cursor stays where the server says (0); nothing past it is claimed.
+  expect(store.get(`claude:${badId}`)).toEqual({ path: bad, offset: 0, fidelity: 'full' });
+  expect(deps.calls.log).toHaveLength(1);
+  expect(deps.calls.log[0]).toContain(`claude:${badId}`);
+  expect(deps.calls.log[0]).toMatch(/EACCES/);
+});
+
+test('a server outage during one session still fails the whole tick', async () => {
+  await writeLines(transcript, [claudeUser(NEW_TS, 'hello')]);
+  failChunks = true;
+  await expect(collectOnce(cfg, await CursorStore.load(cfg.stateFile), fakeDeps(() => [claudePane()]))).rejects.toBeInstanceOf(
+    RetryableError,
+  );
+});
+
+test('a resolved id-less codex keeps its native key when the process lookup fails transiently', async () => {
+  const startedAt = new Date(now.getTime() - 60_000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const dayDir = join(cfg.codexDir, 'sessions', String(now.getFullYear()), pad(now.getMonth() + 1), pad(now.getDate()));
+  await mkdir(dayDir, { recursive: true });
+  const rollout = join(dayDir, `rollout-2026-10-29T10-09-00-${CODEX_ID}.jsonl`);
+  const metaTs = startedAt.toISOString();
+  await writeLines(rollout, [
+    JSON.stringify({ timestamp: metaTs, type: 'session_meta', payload: { id: CODEX_ID, cwd: CWD, timestamp: metaTs } }),
+  ]);
+  let proc: { pid: number; cwd: string } | null = { pid: 4242, cwd: CWD };
+  const pane: Pane = { pane_id: 'w1:p2', terminal_id: 'term_2', agent: 'codex', agent_status: 'idle' };
+  const store = await CursorStore.load(cfg.stateFile);
+  const deps = fakeDeps(() => [pane], { process: () => proc, processStart: startedAt, screen: () => 'codex> ' });
+  await collectOnce(cfg, store, deps);
+  const key = `codex:${CODEX_ID}`;
+  expect(sessionRow(key)).toMatchObject({ fidelity: 'full', lifecycle: 'live' });
+
+  proc = null;
+  now = new Date(now.getTime() + 10_000);
+  await collectOnce(cfg, store, deps);
+  expect(sessionRow(key)).toMatchObject({ fidelity: 'full', lifecycle: 'live', transcript_path: rollout });
+  expect(sessionRow(`pending:${MACHINE}:term_2`)).toBeUndefined();
+  expect(deps.calls.readScreen).toEqual([]);
 });

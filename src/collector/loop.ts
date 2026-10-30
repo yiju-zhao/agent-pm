@@ -3,7 +3,7 @@ import { stat } from 'node:fs/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { SnapshotSession } from '../shared/protocol.ts';
 import { makeSessionKey } from '../shared/session-key.ts';
-import { createPmClient } from './client.ts';
+import { createPmClient, RetryableError } from './client.ts';
 import type { PmClient } from './client.ts';
 import type { CollectorConfig } from './config.ts';
 import { CursorStore } from './cursor-store.ts';
@@ -31,6 +31,8 @@ export type Deps = {
   client: PmClient;
   now(): Date;
   startedAt: Date;
+  /** One-line diagnostics for failures that do not abort the tick; defaults to stderr. */
+  log?(line: string): void;
 };
 
 type Tick = {
@@ -60,12 +62,13 @@ function once<T>(fn: () => Promise<T>): () => Promise<T> {
 /**
  * The rollout of an id-less codex pane: its foreground process's start time and cwd matched against
  * recent rollouts. Cached per pending key and pid, so a match is looked up once and a miss is retried
- * only every RESOLVE_RETRY_MS.
+ * only every RESOLVE_RETRY_MS. When the process lookup fails (herdr hiccup), a cached match is kept
+ * rather than flipping the session back to its pending key for one tick.
  */
 async function resolveIdlessCodex(s: SnapshotSession, t: Tick): Promise<{ id: string; path: string } | null> {
   const proc = await t.deps.paneProcess(s.pane_id);
-  if (proc === null) return null;
   const cached = t.store.getResolution(s.key);
+  if (proc === null) return cached?.match ?? null;
   if (cached !== undefined && cached.pid === proc.pid) {
     if (cached.match !== null) return cached.match;
     if (t.now.getTime() - Date.parse(cached.checkedAt) < RESOLVE_RETRY_MS) return null;
@@ -206,13 +209,15 @@ async function pushScreen(s: SnapshotSession, t: Tick): Promise<number> {
 /**
  * One collection tick: reads the herdr snapshot, resolves every agent's transcript, pushes the
  * snapshot (with purged sessions, checked hourly), then pushes new transcript chunks and changed
- * screens. Throws on any failure that should make the caller back off (herdr, server).
+ * screens. Throws on any failure that should make the caller back off (herdr, snapshot push, server
+ * unavailable). Any other failure in one session's push is logged, counted in `errors` and skipped,
+ * so one bad transcript cannot stop the machine's heartbeat or the other sessions.
  */
 export async function collectOnce(
   cfg: CollectorConfig,
   store: CursorStore,
   deps: Deps,
-): Promise<{ sessions: number; chunksPushed: number }> {
+): Promise<{ sessions: number; chunksPushed: number; errors: number }> {
   const now = deps.now();
   const parsed = parseHerdrSnapshot(await deps.readSnapshot(), cfg.machine);
   const t: Tick = { cfg, store, deps, now, rollouts: once(() => listRecentRollouts(cfg.codexDir, now)), dirty: false };
@@ -235,11 +240,19 @@ export async function collectOnce(
   }
   if (t.dirty) await store.save();
 
+  const log = deps.log ?? ((line: string) => console.error(line));
   let chunksPushed = 0;
+  let errors = 0;
   for (const s of sessions) {
-    chunksPushed += s.fidelity === 'full' ? await pushTranscript(s, t) : await pushScreen(s, t);
+    try {
+      chunksPushed += s.fidelity === 'full' ? await pushTranscript(s, t) : await pushScreen(s, t);
+    } catch (err) {
+      if (err instanceof RetryableError) throw err;
+      errors += 1;
+      log(`${now.toISOString()} herdr-pm collector: session ${s.key}: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
-  return { sessions: sessions.length, chunksPushed };
+  return { sessions: sessions.length, chunksPushed, errors };
 }
 
 /** Wait before the next tick after `failures` consecutive failed ticks: pollMs doubling per failure, capped. */
@@ -263,7 +276,8 @@ export async function runCollector(cfg: CollectorConfig): Promise<never> {
   for (;;) {
     let error: unknown = null;
     try {
-      await collectOnce(cfg, store, deps);
+      const { errors } = await collectOnce(cfg, store, deps);
+      if (errors > 0) console.error(`${new Date().toISOString()} herdr-pm collector: tick finished with ${errors} failed session(s)`);
       failures = 0;
     } catch (err) {
       failures += 1;
