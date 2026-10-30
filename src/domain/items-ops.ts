@@ -197,13 +197,23 @@ function clearBlocker(ctx: OpContext, args: OpArgs<'clear_blocker'>): void {
 
 /**
  * The user's delete is a veto: a tombstone the AI may not touch. An AI may delete what it made itself and the user
- * never edited; deleting anything else it can only propose. Deleting a milestone detaches its todos.
+ * never edited; deleting anything else it can only propose. Deleting a milestone detaches its todos, so an AI that
+ * would clear a todo's locked `milestone_id` may only propose it too.
  */
 function deleteItem(ctx: OpContext, table: ItemTable, args: { project: string; id: string }): void {
   loadProject(ctx, args.project);
   const row = loadItem(ctx, table, args.project, args.id);
 
-  if (ctx.ai && (row.created_by === 'user' || readLocks(row).length > 0)) {
+  const attached =
+    table === 'milestones'
+      ? (ctx.db
+          .prepare('SELECT id, locks FROM todos WHERE milestone_id = ? AND deleted_at IS NULL ORDER BY rowid')
+          .all(args.id) as Array<{ id: string; locks: string }>)
+      : [];
+
+  const touchesUserWork =
+    row.created_by === 'user' || readLocks(row).length > 0 || attached.some((todo) => readLocks(todo).includes('milestone_id'));
+  if (ctx.ai && touchesUserWork) {
     ctx.propose({
       kind: 'confirm',
       prompt: `AI 想删除你编辑过的${LABEL[table]}「${String(row.title ?? row.text)}」：${ctx.reason}`,
@@ -218,13 +228,7 @@ function deleteItem(ctx: OpContext, table: ItemTable, args: { project: string; i
 
   ctx.changes.update(table, args.id, { deleted_at: now(ctx), vetoed: ctx.ai ? 0 : 1 });
   if (!ctx.ai) ctx.isVeto = true;
-
-  if (table === 'milestones') {
-    const todos = ctx.db
-      .prepare('SELECT id FROM todos WHERE milestone_id = ? AND deleted_at IS NULL ORDER BY rowid')
-      .all(args.id) as Array<{ id: string }>;
-    for (const todo of todos) ctx.changes.update('todos', todo.id, { milestone_id: null });
-  }
+  for (const todo of attached) ctx.changes.update('todos', todo.id, { milestone_id: null });
 }
 
 export const ITEM_HANDLERS: Partial<Record<OpName, Handler>> = {

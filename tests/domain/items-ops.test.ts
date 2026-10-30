@@ -461,6 +461,56 @@ test('an ai deleting an ai-created milestone also detaches the todos', () => {
   expect(row(t.db, 'milestones', m)).toMatchObject({ vetoed: 0, deleted_at: NOW });
 });
 
+test('ai deleting its own milestone is proposed when a user-locked todo is attached to it', () => {
+  const p = aiProject();
+  const m = aiMilestone(p, 'AI 的里程碑');
+  const todo = t.user('upsert_todo', { project: p, title: '用户的 todo', milestone_id: m }).id;
+  expect(locks('todos', todo)).toContain('milestone_id');
+  const before = eventCount();
+
+  const r = t.ai('delete_milestone', { project: p, id: m }, { reason: '里程碑重复了' });
+
+  expect(r).toMatchObject({ status: 'proposed', question_ids: [expect.any(String)] });
+  expect(eventCount()).toBe(before);
+  expect(row(t.db, 'milestones', m)).toMatchObject({ deleted_at: null, vetoed: 0 });
+  expect(row(t.db, 'todos', todo).milestone_id).toBe(m);
+
+  const q = question(r.question_ids[0]);
+  expect(q).toMatchObject({
+    kind: 'confirm',
+    prompt: 'AI 想删除你编辑过的里程碑「AI 的里程碑」：里程碑重复了',
+    project_id: p,
+    dedupe_key: `delete:milestones:${m}`,
+  });
+  expect(JSON.parse(q.guards as string)).toEqual([{ table: 'milestones', id: m, col: 'deleted_at', equals: null }]);
+  expect(JSON.parse(q.options as string)).toEqual([
+    { label: '确认', op: 'delete_milestone', args: { project: p, id: m } },
+    { label: '拒绝', op: null },
+  ]);
+
+  const option = JSON.parse(q.options as string)[0];
+  expect(t.user(option.op, option.args)).toMatchObject({ status: 'applied' });
+  expect(row(t.db, 'milestones', m)).toMatchObject({ vetoed: 1, deleted_at: NOW });
+  expect(row(t.db, 'todos', todo).milestone_id).toBeNull();
+});
+
+test('ai deleting its own milestone applies when no live attached todo has a locked milestone_id', () => {
+  const p = aiProject();
+  const m = aiMilestone(p);
+  // The user made this todo (title locked) but the AI attached it, so milestone_id is not locked.
+  const userTodo = t.user('upsert_todo', { project: p, title: '用户的 todo' }).id;
+  t.ai('upsert_todo', { project: p, id: userTodo, milestone_id: m });
+  // A user-locked todo that was deleted no longer holds the milestone.
+  const gone = t.user('upsert_todo', { project: p, title: '已删除', milestone_id: m }).id;
+  t.user('delete_todo', { project: p, id: gone });
+  expect(locks('todos', userTodo)).not.toContain('milestone_id');
+
+  expect(t.ai('delete_milestone', { project: p, id: m })).toMatchObject({ status: 'applied', question_ids: [] });
+  expect(row(t.db, 'milestones', m)).toMatchObject({ vetoed: 0, deleted_at: NOW });
+  expect(row(t.db, 'todos', userTodo).milestone_id).toBeNull();
+  expect(row(t.db, 'todos', gone).milestone_id).toBe(m);
+});
+
 test('a proposed milestone delete leaves the todos attached', () => {
   const p = userProject();
   const m = t.user('upsert_milestone', { project: p, title: 'm' }).id;
