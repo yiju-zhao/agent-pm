@@ -572,6 +572,25 @@ test('an ai may not ask its own way to close, merge or park a project; those com
   expect(createQuestion(db, deps, draft())).toMatchObject({ deduped: false });
 });
 
+test('an AI text option binding transition_stage with text_arg stage is invalid, and says why', () => {
+  const option = { label: '输入阶段', op: 'transition_stage', args: { project: 'p_1' }, text_arg: 'stage' };
+  const result = askUser(db, deps, { kind: 'text', ...askBase, option }, 'ai:curator');
+  // The message is ours (names text_arg), not the generic "args do not fit" one a probe value would give.
+  expect(result).toMatchObject({ status: 'rejected', code: 'invalid', message: expect.stringContaining('text_arg') });
+  // Even when args already carry a stage, the user would be typing over it.
+  const withStage = { ...option, args: { project: 'p_1', stage: 'build' } };
+  expect(askUser(db, deps, { kind: 'text', ...askBase, topic: 'b', option: withStage }, 'ai:curator')).toMatchObject({
+    status: 'rejected',
+    code: 'invalid',
+    message: expect.stringContaining('text_arg'),
+  });
+  expect(countQuestions()).toBe(0);
+
+  // Free text for other ops is unaffected.
+  const other = { kind: 'text', ...askBase, topic: 'other', option: { label: '补充', op: 'record_decision', args: { project: 'p_1' }, text_arg: 'text' } };
+  expect(askUser(db, deps, other, 'ai:curator')).toMatchObject({ status: 'proposed' });
+});
+
 test('askUser validates option args at creation and reports it as invalid', () => {
   const bad = { label: '关联', op: 'link_session', args: { session: 'claude:abc' } };
   const result = askUser(db, deps, { kind: 'choice', ...askBase, options: [bad, { label: '否', op: null }] }, 'ai:curator');

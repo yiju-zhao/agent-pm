@@ -230,13 +230,14 @@ const label = z.string().trim().min(1).max(200);
 const args = z.record(z.string(), z.unknown()).optional();
 
 /** An option that may do nothing (`op: null`). */
-const ChoiceOption = z.object({ label, op: z.enum(OP_NAMES).nullable(), args }).strict();
+export const ChoiceOption = z.object({ label, op: z.enum(OP_NAMES).nullable(), args }).strict();
 /** The user's free text fills `text_arg`, so both an op and the path are required. */
-const TextOption = z.object({ label, op: z.enum(OP_NAMES), args, text_arg: z.string().min(1) }).strict();
+export const TextOption = z.object({ label, op: z.enum(OP_NAMES), args, text_arg: z.string().min(1) }).strict();
 /** The single thing the user is asked to approve; `askUser` adds the 拒绝 option. */
-const ConfirmOption = z.object({ label, op: z.enum(OP_NAMES), args }).strict();
+export const ConfirmOption = z.object({ label, op: z.enum(OP_NAMES), args }).strict();
 
-const common = {
+/** The fields every kind of `AskUserInput` shares; exported so a tool can offer them as a flat input shape. */
+export const ASK_COMMON_SHAPE = {
   prompt: z.string().trim().min(1).max(2000),
   project_id: z.string().min(1).nullish(),
   session_key: z.string().min(1).nullish(),
@@ -246,9 +247,9 @@ const common = {
 };
 
 export const AskUserInput = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('choice'), ...common, options: z.array(ChoiceOption).min(2).max(6) }).strict(),
-  z.object({ kind: z.literal('text'), ...common, option: TextOption }).strict(),
-  z.object({ kind: z.literal('confirm'), ...common, option: ConfirmOption }).strict(),
+  z.object({ kind: z.literal('choice'), ...ASK_COMMON_SHAPE, options: z.array(ChoiceOption).min(2).max(6) }).strict(),
+  z.object({ kind: z.literal('text'), ...ASK_COMMON_SHAPE, option: TextOption }).strict(),
+  z.object({ kind: z.literal('confirm'), ...ASK_COMMON_SHAPE, option: ConfirmOption }).strict(),
 ]);
 export type AskUserInput = z.infer<typeof AskUserInput>;
 
@@ -259,6 +260,13 @@ export type AskUserInput = z.infer<typeof AskUserInput>;
 const PROPOSAL_ONLY_STAGES: readonly string[] = ['done', 'abandoned', 'merged', 'parked'];
 
 function checkAiOption(option: QuestionOption): void {
+  if (option.op === 'transition_stage' && option.text_arg === 'stage') {
+    // Answering would ask the user to type the stage by hand ("done"), and an AI must not steer them into that.
+    throw new OpRejected(
+      'invalid',
+      `invalid option ${JSON.stringify(option.label)}: an AI cannot make the user type a stage (text_arg 'stage' on transition_stage); offer fixed options instead`,
+    );
+  }
   const stage = option.args?.stage;
   if (option.op === 'transition_stage' && typeof stage === 'string' && PROPOSAL_ONLY_STAGES.includes(stage)) {
     throw new OpRejected(
@@ -271,7 +279,8 @@ function checkAiOption(option: QuestionOption): void {
 /**
  * Lets an actor put a question to the user. Returns `proposed` with the question's id (the existing one when the
  * question was a duplicate) or `rejected` (`invalid`, `question_limit`, `recently_rejected`). An AI may not bind
- * `transition_stage` to done, abandoned, merged or parked here (`invalid`). Runs in its own transaction.
+ * `transition_stage` to done, abandoned, merged or parked here, nor to free text for the stage (`invalid`).
+ * Runs in its own transaction.
  */
 export function askUser(db: DatabaseSync, deps: DomainDeps, input: unknown, actor: Actor): OpResult {
   const parsed = AskUserInput.safeParse(input);
