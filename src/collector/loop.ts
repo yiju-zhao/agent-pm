@@ -144,12 +144,16 @@ async function pushTranscript(s: SnapshotSession, t: Tick): Promise<number> {
     offset = local;
   } else {
     // First push of this session in this process (Ruling R9), or no local cursor for this file (first
-    // sight, state file lost): never resume past the server, whose database may have been restored
-    // from an older backup. Re-reading [server max, local cursor) cannot duplicate: every chunk the
-    // server holds has offset_start < its max offset_end * 1000, every re-read chunk starts at or
-    // above it, and a range the local cursor passed without the server advancing yields no chunks.
-    const serverMax = (await deps.client.getOffset(s.key)) ?? 0;
-    offset = local === null ? serverMax : Math.min(local, serverMax);
+    // sight, state file lost): the server's max offset_end is the position, whatever the local cursor says.
+    //  - Server ahead of the cursor: the collector crashed after the server accepted a window but before
+    //    the cursor was saved. Re-reading from the cursor would regroup that window together with new
+    //    lines into chunks that start at an offset_start the server already has; those count as
+    //    duplicates and the new lines would be lost.
+    //  - Server behind the cursor: its database was restored from an older backup. Re-reading
+    //    [server max, local cursor) cannot duplicate: every chunk the server holds has offset_start <
+    //    its max offset_end * 1000, every re-read chunk starts at or above it, and a range the local
+    //    cursor passed without the server advancing yields no chunks.
+    offset = (await deps.client.getOffset(s.key)) ?? 0;
     store.serverChecked.add(s.key);
     store.set(s.key, { path, offset, fidelity: 'full' });
     await store.save();

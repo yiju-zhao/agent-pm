@@ -347,6 +347,70 @@ test('server database restored from an older backup: only the lost gap is re-sen
   expect(after[1]!.text).toContain('lost two');
 });
 
+test('first push per process resumes from server max when server is ahead of local cursor (crash window)', async () => {
+  const lines = ['one', 'two', 'three', 'four', 'five', 'six'].map((w) => claudeUser(NEW_TS, `line ${w}`));
+  await writeLines(transcript, lines.slice(0, 2));
+  const deps = fakeDeps(() => [claudePane()]);
+  const store = await CursorStore.load(cfg.stateFile);
+  await collectOnce(cfg, store, deps);
+  const end2 = await size(transcript);
+  await appendLines(transcript, lines.slice(2, 4));
+  await collectOnce(cfg, store, deps);
+  const end4 = await size(transcript);
+  expect(chunks().map((c) => c.offset_end)).toEqual([end2, end4]);
+
+  // The collector crashed after the server accepted lines 3-4 but before saving the cursor.
+  store.set(CLAUDE_KEY, { path: transcript, offset: end2, fidelity: 'full' });
+  await store.save();
+  await appendLines(transcript, lines.slice(4));
+  const end6 = await size(transcript);
+
+  pushResults = [];
+  const restarted = await CursorStore.load(cfg.stateFile);
+  expect(restarted.get(CLAUDE_KEY)!.offset).toBe(end2);
+  await collectOnce(cfg, restarted, deps);
+
+  expect(pushResults).toEqual([{ inserted: 1, duplicates: 0 }]);
+  const rows = chunks();
+  expect(rows).toHaveLength(3);
+  expect(rows[2]).toMatchObject({ offset_start: end4 * 1000, offset_end: end6 });
+  expect(rows[2]!.text).toContain('line five');
+  expect(rows[2]!.text).toContain('line six');
+  expect(rows[2]!.text).not.toContain('line four');
+  expect(rows.slice(0, 2).map((c) => c.text).join('\n')).not.toContain('line five');
+  expect(restarted.get(CLAUDE_KEY)!.offset).toBe(end6);
+});
+
+test('first push per process resumes from server max when server is behind (restored db)', async () => {
+  const lines = ['one', 'two', 'three', 'four', 'five', 'six'].map((w) => claudeUser(NEW_TS, `line ${w}`));
+  await writeLines(transcript, lines.slice(0, 2));
+  const deps = fakeDeps(() => [claudePane()]);
+  const store = await CursorStore.load(cfg.stateFile);
+  await collectOnce(cfg, store, deps);
+  const end2 = await size(transcript);
+  await appendLines(transcript, lines.slice(2, 4));
+  await collectOnce(cfg, store, deps);
+  const end4 = await size(transcript);
+  await appendLines(transcript, lines.slice(4));
+  const end6 = await size(transcript);
+
+  // Restoring a backup taken after line 2 drops what the server stored since; the local cursor is at line 4.
+  db.prepare('DELETE FROM chunks WHERE offset_start >= ?').run(end2 * 1000);
+  expect(chunks()).toHaveLength(1);
+  pushResults = [];
+  const restarted = await CursorStore.load(cfg.stateFile);
+  expect(restarted.get(CLAUDE_KEY)!.offset).toBe(end4);
+  await collectOnce(cfg, restarted, deps);
+
+  expect(pushResults).toEqual([{ inserted: 1, duplicates: 0 }]);
+  const rows = chunks();
+  expect(rows).toHaveLength(2);
+  expect(rows[1]).toMatchObject({ offset_start: end2 * 1000, offset_end: end6 });
+  for (const w of ['three', 'four', 'five', 'six']) expect(rows[1]!.text).toContain(`line ${w}`);
+  expect(rows[1]!.text).not.toContain('line two');
+  expect(restarted.get(CLAUDE_KEY)!.offset).toBe(end6);
+});
+
 test('a normal collector restart against the same server database re-sends nothing', async () => {
   await writeLines(transcript, [claudeUser(OLD_TS, 'q'), claudeAssistant(OLD_TS, 'a')]);
   const deps = fakeDeps(() => [claudePane()]);

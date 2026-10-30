@@ -360,6 +360,47 @@ test('insertChunks is all-or-nothing', () => {
   expect(db.prepare('SELECT count(*) AS n FROM chunks').get()).toEqual({ n: 0 });
 });
 
+test('chunks pushed to a merged pending key are stored under the native key', () => {
+  const P = 'pending:laptop:term_1';
+  applySnapshot(db, push('laptop', [session(P, 'term_1')]), t0);
+  applySnapshot(db, push('laptop', [session(Y, 'term_1')]), t1);
+  expect(row(P)).toMatchObject({ merged_into: Y });
+
+  // A collector that has not yet seen the merge keeps pushing under the pending key.
+  expect(insertChunks(db, { machine: 'laptop', chunks: [chunk(P, 0, 300), chunk(Y, 300, 500)] }, t2))
+    .toEqual({ inserted: 2, duplicates: 0 });
+
+  expect(chunkKeys().map((c) => [c.session_key, c.offset_start])).toEqual([
+    [Y, 0],
+    [Y, 300],
+  ]);
+  expect(maxOffset(db, Y)).toBe(500);
+  expect(maxOffset(db, P)).toBeNull();
+  // Re-pushing the same range under either key is a duplicate.
+  expect(insertChunks(db, { machine: 'laptop', chunks: [chunk(P, 300, 500)] }, t2))
+    .toEqual({ inserted: 0, duplicates: 1 });
+});
+
+test('chunks of a merged key follow merged_into at most 5 hops', () => {
+  const keys = Array.from({ length: 8 }, (_, i) => `pending:laptop:term_${i}`);
+  // keys[0] -> keys[1] -> ... -> keys[7]: a chain longer than the hop cap.
+  keys.forEach((k, i) => {
+    db.prepare(
+      `INSERT INTO sessions (key, agent_kind, machine, lifecycle, merged_into) VALUES (?, 'codex', 'laptop', 'ended', ?)`,
+    ).run(k, keys[i + 1] ?? null);
+  });
+  insertChunks(db, { machine: 'laptop', chunks: [chunk(keys[2]!, 0, 10), chunk(keys[0]!, 10, 20)] }, t0);
+  // From keys[2], five hops reach keys[7] (the end of the chain); from keys[0] the cap stops at keys[5].
+  expect(chunkKeys().map((c) => [c.session_key, c.offset_start])).toEqual([
+    [keys[5], 10],
+    [keys[7], 0],
+  ]);
+
+  // A cycle cannot loop forever.
+  db.prepare('UPDATE sessions SET merged_into = ? WHERE key = ?').run(keys[0]!, keys[7]!);
+  expect(() => insertChunks(db, { machine: 'laptop', chunks: [chunk(keys[3]!, 99, 100)] }, t0)).not.toThrow();
+});
+
 test('maxOffset returns max offset_end or null', () => {
   expect(maxOffset(db, A)).toBeNull();
   insertChunks(db, { machine: 'laptop', chunks: [chunk(A, 0, 100), chunk(A, 100, 250), chunk(B, 0, 999)] }, t0);

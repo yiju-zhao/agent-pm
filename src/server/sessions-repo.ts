@@ -170,7 +170,14 @@ export function applySnapshot(db: DatabaseSync, push: SnapshotPush, now: Date): 
   });
 }
 
-/** Stores one push atomically; chunks already stored at the same (session_key, offset_start) count as duplicates. */
+/** How many `merged_into` links `insertChunks` follows from a pushed session key. */
+const MAX_MERGE_HOPS = 5;
+
+/**
+ * Stores one push atomically; chunks already stored at the same (session_key, offset_start) count as
+ * duplicates. Chunks pushed under a key that was merged into another (a pending key whose session got
+ * its native id) are stored under the merge target, so they stay with the session they belong to.
+ */
 export function insertChunks(
   db: DatabaseSync,
   push: ChunkPush,
@@ -183,10 +190,25 @@ export function insertChunks(
          (session_key, kind, offset_start, offset_end, ts_start, ts_end, text, backfill, received_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
+    const mergedInto = db.prepare('SELECT merged_into FROM sessions WHERE key = ?');
+    const targets = new Map<string, string>();
+    const targetOf = (key: string): string => {
+      let target = targets.get(key);
+      if (target === undefined) {
+        target = key;
+        for (let hop = 0; hop < MAX_MERGE_HOPS; hop++) {
+          const row = mergedInto.get(target) as { merged_into: string | null } | undefined;
+          if (row?.merged_into == null) break;
+          target = row.merged_into;
+        }
+        targets.set(key, target);
+      }
+      return target;
+    };
     let inserted = 0;
     for (const c of push.chunks) {
       const { changes } = insert.run(
-        c.session_key, c.kind, c.offset_start, c.offset_end, c.ts_start, c.ts_end, c.text,
+        targetOf(c.session_key), c.kind, c.offset_start, c.offset_end, c.ts_start, c.ts_end, c.text,
         c.backfill ? 1 : 0, receivedAt,
       );
       inserted += Number(changes);
