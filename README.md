@@ -21,10 +21,9 @@
 
 ## 已确认的环境事实
 
-- gx10-090e：`uname -m` = `aarch64`（Linux arm64），有 node v22.23.3，**没有 bun**。因此采集器在笔记本上用 bun 交叉编译成 `bun-linux-arm64` 二进制再拷过去，不在 gx10 上装任何运行时。
+- gx10-090e 和 gx10-c757：`uname -m` 都是 `aarch64`（Linux arm64，已验证），有 node 22（gx10-090e 是 v22.23.3），**没有 bun**。因此采集器在笔记本上用 bun 交叉编译成 `bun-linux-arm64` 二进制再拷过去，不在 gx10 上装任何运行时。
 - 笔记本、mac-mini：macOS arm64，使用 `bun-darwin-arm64` 二进制。
-- gx10-c757：部署前先跑一次 `uname -m`。如果也是 `aarch64`，和 gx10-090e 完全一样；如果是 `x86_64`，需要在 `scripts/build-collector.sh` 里加上 `bun-linux-x64` 目标。
-- 笔记本直接 ssh 不到 mac-mini（只能经 herdr 访问）；下面的"拷贝二进制"一步用任何可行的方式即可，能 scp 就 scp（走 Tailscale）。
+- 从笔记本直接 ssh mac-mini 曾经超时（只有 herdr 能连上），所以"拷贝二进制"一步用任何能通的方式即可，例如 Tailscale 上的 scp。gx10-c757 的 ssh 用户是 `bz`（`bz@100.87.40.81`），下面命令里的 `gx10-090e` / `gx10-c757` 主机名按你的 ssh 配置（别名）替换，没有别名就写 `用户@Tailscale-IP`。
 
 ## 安装
 
@@ -139,7 +138,8 @@ launchd 起的进程 PATH 很短，plist 里已经把 `~/.local/bin`（herdr 装
 
 ```bash
 # 在笔记本上
-scp dist/herdr-pm-bun-linux-arm64 gx10-090e:~/herdr-pm            # gx10-c757 同理
+scp dist/herdr-pm-bun-linux-arm64 gx10-090e:~/herdr-pm                # 没有 ssh 别名就写 用户@Tailscale-IP
+scp dist/herdr-pm-bun-linux-arm64 bz@100.87.40.81:~/herdr-pm          # gx10-c757
 # 在 gx10 上
 mkdir -p ~/.local/bin ~/.config/herdr-pm ~/.config/systemd/user
 mv ~/herdr-pm ~/.local/bin/herdr-pm && chmod +x ~/.local/bin/herdr-pm
