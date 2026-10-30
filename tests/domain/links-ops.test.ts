@@ -309,6 +309,76 @@ test('a user link takes over an AI link, so the AI can no longer unlink it direc
   expect(contribution().deleted_at).toBeNull();
 });
 
+test('an AI relink of a live link the user made only widens its time range', () => {
+  const p = userProject();
+  const m = t.user('upsert_milestone', { project: p, title: '基线' }).id;
+  const m2 = t.user('upsert_milestone', { project: p, title: '第二期' }).id;
+  t.user('link_session', {
+    session: S,
+    project: p,
+    milestone_id: m,
+    summary: '我写的',
+    confidence: 1,
+    ts_start: '2026-10-29T10:00:00Z',
+    ts_end: '2026-10-29T11:00:00Z',
+  });
+  const r = t.ai('link_session', {
+    session: S,
+    project: p,
+    milestone_id: m2,
+    summary: 'AI 写的',
+    confidence: 0.3,
+    ts_start: '2026-10-29T09:00:00Z',
+    ts_end: '2026-10-29T12:00:00Z',
+  });
+  expect(r).toMatchObject({ status: 'applied', warnings: [expect.stringContaining('confidence, milestone_id, summary')] });
+  expect(contribution()).toMatchObject({
+    actor: 'user',
+    milestone_id: m,
+    summary: '我写的',
+    confidence: 1,
+    ts_start: '2026-10-29T09:00:00.000Z',
+    ts_end: '2026-10-29T12:00:00.000Z',
+  });
+  expect(parse(lastEvent(t.db).after)).toEqual({
+    'contributions:c_1': { ts_start: '2026-10-29T09:00:00.000Z', ts_end: '2026-10-29T12:00:00.000Z' },
+  });
+
+  // With nothing to widen, nothing happens.
+  const before = count(t.db, 'events');
+  expect(t.ai('link_session', { session: S, project: p, milestone_id: null, summary: 'x' })).toMatchObject({ event_id: null });
+  expect(contribution()).toMatchObject({ milestone_id: m, summary: '我写的' });
+  expect(count(t.db, 'events')).toBe(before);
+
+  // The user still edits their own link freely.
+  t.user('link_session', { session: S, project: p, summary: '我又改了', milestone_id: m2 });
+  expect(contribution()).toMatchObject({ summary: '我又改了', milestone_id: m2 });
+});
+
+test('an AI may not link an ignored session; the user may', () => {
+  addSession('claude:ignored1', { ignored: 1 });
+  const p = userProject();
+  const before = count(t.db, 'events');
+  expect(t.ai('link_session', { session: 'claude:ignored1', project: p })).toMatchObject({
+    status: 'rejected',
+    code: 'not_allowed',
+    message: expect.stringContaining('claude:ignored1'),
+  });
+  expect(t.ai('create_project', { title: 'AI 开的', from_session: 'claude:ignored1' })).toMatchObject({ code: 'not_allowed' });
+  expect(count(t.db, 'contributions')).toBe(0);
+  expect(count(t.db, 'events')).toBe(before);
+
+  expect(t.user('link_session', { session: 'claude:ignored1', project: p })).toMatchObject({ status: 'applied' });
+  expect(contribution()).toMatchObject({ session_key: 'claude:ignored1', actor: 'user' });
+});
+
+test('an AI may not link an ignored session through its merged pending key', () => {
+  addSession('claude:native1', { ignored: 1 });
+  addSession('claude:pending-1', { merged_into: 'claude:native1' });
+  const p = userProject();
+  expect(t.ai('link_session', { session: 'claude:pending-1', project: p })).toMatchObject({ code: 'not_allowed' });
+});
+
 test('linking a merged pending key links its native session', () => {
   const P = 'pending:laptop:term_1';
   addSession(P, { merged_into: S });

@@ -48,10 +48,15 @@ function widen(stored: unknown, given: string | undefined, pick: 'min' | 'max'):
 
 /**
  * Links a session (by its final key) to a project: one row per pair, whose time range only ever widens. A tombstone is
- * revived, except one the user vetoed, which an AI may only ask about. Also used by `create_project` with `from_session`.
+ * revived, except one the user vetoed, which an AI may only ask about. An AI may not link a session the user ignores
+ * (`not_allowed`), and on a live link the user made it only widens the time range. Also used by `create_project`
+ * with `from_session`.
  */
 export function linkSession(ctx: OpContext, args: OpArgs<'link_session'>): { id: string } | void {
   const session = requireSession(ctx, args.session);
+  if (ctx.ai && readRow(ctx.db, 'sessions', session)?.ignored === 1) {
+    throw new OpRejected('not_allowed', `session ${session} is ignored; only the user may link it`);
+  }
   const project = loadProject(ctx, args.project);
   if (typeof args.milestone_id === 'string') checkMilestone(ctx, args.project, args.milestone_id);
 
@@ -87,8 +92,15 @@ export function linkSession(ctx: OpContext, args: OpArgs<'link_session'>): { id:
     return;
   }
 
+  let fields = definedFields({ milestone_id: args.milestone_id, summary: args.summary, confidence: args.confidence });
+  // The user's own description of a live link stays theirs; an AI may only add to its time range.
+  if (ctx.ai && existing.deleted_at === null && existing.actor === 'user') {
+    const dropped = Object.keys(fields);
+    if (dropped.length > 0) ctx.warnings.push(`the user made this link; ${dropped.join(', ')} left as they are`);
+    fields = {};
+  }
   ctx.changes.update('contributions', id, {
-    ...definedFields({ milestone_id: args.milestone_id, summary: args.summary, confidence: args.confidence }),
+    ...fields,
     ts_start: widen(existing.ts_start, args.ts_start, 'min'),
     ts_end: widen(existing.ts_end, args.ts_end, 'max'),
     deleted_at: null,
