@@ -440,12 +440,60 @@ test('an exception inside a tick is logged and does not break the next tick', as
     return ok();
   };
   const s = scheduler(runner);
-  expect(await s.tick()).toBe('idle');
+  expect(await s.tick()).toBe('skipped');
   expect(errors).toHaveBeenCalled();
   expect(String(errors.mock.calls[0])).toContain('runner exploded');
   expect(s.status().last_error).toContain('runner exploded');
   expect(s.status().running).toBeNull();
   expect(await s.tick()).toBe('digested');
+});
+
+test('a session whose digest keeps throwing cools down after three ticks while another session proceeds', async () => {
+  addSession(A);
+  addSession(B);
+  const bad = addChunk(A, `${BIG} poison`, { receivedAt: iso(clock - 60_000) });
+  const good = addChunk(B, BIG);
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  let calls = 0;
+  // Breaks the runner's never-throw contract on purpose.
+  const runner: LlmRunner = async (call) => {
+    calls += 1;
+    if (call.prompt.includes('poison')) throw new Error('sdk crashed');
+    return ok();
+  };
+  const s = scheduler(runner);
+
+  expect(await s.tick()).toBe('skipped');
+  expect(await s.tick()).toBe('digested');
+  expect(digested(good)).toBe(1);
+  expect(await s.tick()).toBe('skipped');
+  expect(await s.tick()).toBe('skipped');
+  expect(s.status().last_error).toMatch(/sdk crashed.*冷却/);
+  expect(await s.tick()).toBe('idle');
+  expect(calls).toBe(4);
+  expect(digested(bad)).toBe(0);
+});
+
+test('a curator that keeps throwing is given up on like a failing one, and digesting goes on', async () => {
+  for (let i = 0; i < CURATE_BATCH; i++) addDigest();
+  addSession(A);
+  const chunk = addChunk(A, BIG);
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  const runner: LlmRunner = async (call) => {
+    if (call.role === 'curate') throw new Error('curator crashed');
+    return ok();
+  };
+  const s = scheduler(runner);
+
+  expect(await s.tick()).toBe('skipped');
+  expect(await s.tick()).toBe('digested');
+  expect(digested(chunk)).toBe(1);
+  advance(BACKOFF_START_MS);
+  expect(await s.tick()).toBe('skipped');
+  advance(2 * BACKOFF_START_MS);
+  expect(await s.tick()).toBe('skipped');
+  expect(uncurated()).toBe(0);
+  expect(s.status().last_error).toMatch(/curator crashed.*放弃/);
 });
 
 // ---- sync and concurrency ----------------------------------------------------------------------------------------
@@ -472,6 +520,57 @@ test('requestSync skips the debounce and the curate delay', async () => {
   expect(await s.tick()).toBe('idle');
   addChunk(A, BIG);
   expect(await s.tick()).toBe('idle');
+});
+
+test('a sync ends even while a working session keeps adding chunks', async () => {
+  addSession(A, { live_status: 'working' });
+  const before = addChunk(A, BIG);
+  const { runner } = fakeRunner((call) => (call.role === 'digest' ? ok(JSON.parse(digestJson(false))) : ok(null)));
+  const s = scheduler(runner);
+  s.requestSync();
+  const since = addChunk(A, BIG); // lands in the same window as the chunk from before the sync
+
+  expect(await s.tick()).toBe('digested');
+  expect([digested(before), digested(since)]).toEqual([1, 1]);
+  // The digest written during the sync is newer than the sync, so the curate delay applies to it.
+  expect(await s.tick()).toBe('idle');
+
+  // New work from the still-working session follows the normal rules.
+  const later = addChunk(A, BIG);
+  expect(await s.tick()).toBe('idle');
+  advance(60_000);
+  addChunk(A, BIG);
+  expect(await s.tick()).toBe('idle');
+  expect(digested(later)).toBe(0);
+  expect(uncurated()).toBe(1);
+
+  advance(CURATE_DELAY_MS);
+  expect(await s.tick()).toBe('curated');
+  advance(FALLBACK_MS);
+  expect(await s.tick()).toBe('digested');
+  expect(digested(later)).toBe(1);
+});
+
+test('a small chunk arriving after requestSync is not force-skipped', async () => {
+  addSession(A, { live_status: 'working' });
+  addSession(B, { live_status: 'working' });
+  const oldTiny = addChunk(B, 'old');
+  const { calls, runner } = fakeRunner();
+  const s = scheduler(runner);
+  s.requestSync();
+  const fresh = addChunk(A, 'just arrived');
+  const mixed = addChunk(B, 'new');
+
+  // B's window mixes a chunk from before the sync with a newer one: ready, but too small to force out.
+  expect(await s.tick()).toBe('idle');
+  expect([digested(fresh), digested(oldTiny), digested(mixed)]).toEqual([0, 0, 0]);
+  expect(calls).toHaveLength(0);
+  expect(t.db.prepare('SELECT count(*) AS n FROM digests').get()).toEqual({ n: 0 });
+
+  // A second requestSync takes in what arrived since.
+  s.requestSync();
+  expect([await s.tick(), await s.tick()]).toEqual(['skipped', 'skipped']);
+  expect([digested(fresh), digested(oldTiny), digested(mixed)]).toEqual([1, 1, 1]);
 });
 
 test('tick never runs two model calls at once', async () => {

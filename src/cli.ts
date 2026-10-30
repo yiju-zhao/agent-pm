@@ -132,7 +132,10 @@ async function runServer(args: string[], io: Io): Promise<number> {
   } finally {
     removeListeners();
     // A model call in flight finishes (and writes its result) before the database goes away.
-    await scheduler?.stop();
+    if (scheduler !== null) {
+      if (scheduler.status().running !== null) io.stdout('herdr-pm server: waiting for the running model call to finish…\n');
+      await scheduler.stop();
+    }
     db.close();
   }
 }
