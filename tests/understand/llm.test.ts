@@ -93,6 +93,20 @@ test('mapSdkMessages maps a success result with text, structured output, usage a
   });
 });
 
+test('mapSdkMessages turns a success without structured_output into bad_output only when structured output was expected', () => {
+  const messages = [resultMsg({})];
+  expect(mapSdkMessages(messages)).toMatchObject({ ok: true, structured: undefined });
+  expect(mapSdkMessages(messages, { expectStructured: true })).toEqual({
+    ok: false,
+    kind: 'bad_output',
+    message: 'the model returned no structured output',
+  });
+  expect(mapSdkMessages([resultMsg({ structured_output: { ok: false } })], { expectStructured: true })).toMatchObject({
+    ok: true,
+    structured: { ok: false },
+  });
+});
+
 test('mapSdkMessages treats missing usage numbers as zero', () => {
   const r = mapSdkMessages([resultMsg({ usage: { input_tokens: 4 }, total_cost_usd: undefined })]);
   expect(r).toMatchObject({ ok: true, usage: { input_tokens: 4, output_tokens: 0, cache_read_tokens: 0 }, costUsd: 0 });
@@ -144,6 +158,10 @@ test('mapSdkMessages maps an assistant error field when there is no result messa
   expect(kindFor('authentication_failed')).toBe('auth');
   expect(kindFor('oauth_org_not_allowed')).toBe('auth');
   expect(kindFor('billing_error')).toBe('auth');
+  expect(kindFor('account_on_hold')).toBe('auth');
+  expect(kindFor('verification_required')).toBe('auth');
+  expect(kindFor('cloud_credential_error')).toBe('auth');
+  expect(kindFor('model_not_found')).toBe('other');
   expect(kindFor('server_error')).toBe('other');
 });
 
@@ -198,7 +216,6 @@ test('buildQueryOptions sets the fixed options and leaves out tools, schema and 
     persistSession: false,
   });
   expect(typeof o.cwd).toBe('string');
-  expect(o).not.toHaveProperty('env');
   expect(o).not.toHaveProperty('outputFormat');
   expect(o).not.toHaveProperty('mcpServers');
   expect(o).not.toHaveProperty('allowedTools');
@@ -211,6 +228,31 @@ test('buildQueryOptions passes the oauth token on top of the process env, and th
   const o = buildQueryOptions(sdk as never, { ...call, outputSchema: schema }, { oauthToken: 'tok-123' });
   expect(o.env).toMatchObject({ CLAUDE_CODE_OAUTH_TOKEN: 'tok-123', PATH: process.env.PATH });
   expect(o.outputFormat).toEqual({ type: 'json_schema', schema });
+});
+
+test('buildQueryOptions never hands API credentials to the subprocess, with or without an oauth token', () => {
+  const saved = { key: process.env.ANTHROPIC_API_KEY, auth: process.env.ANTHROPIC_AUTH_TOKEN, other: process.env.HERDR_PM_TEST_KEEP };
+  process.env.ANTHROPIC_API_KEY = 'sk-ant-should-not-leak';
+  process.env.ANTHROPIC_AUTH_TOKEN = 'bearer-should-not-leak';
+  process.env.HERDR_PM_TEST_KEEP = 'kept';
+  try {
+    const { sdk } = fakeSdk();
+    for (const oauthToken of [undefined, 'tok-123']) {
+      const env = buildQueryOptions(sdk as never, call, { oauthToken }).env!;
+      expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
+      expect(env).not.toHaveProperty('ANTHROPIC_AUTH_TOKEN');
+      expect(env.HERDR_PM_TEST_KEEP).toBe('kept');
+      expect(env.PATH).toBe(process.env.PATH);
+      expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe(oauthToken ?? process.env.CLAUDE_CODE_OAUTH_TOKEN);
+    }
+    // The real environment is left alone; only the copy handed to the SDK is stripped.
+    expect(process.env.ANTHROPIC_API_KEY).toBe('sk-ant-should-not-leak');
+  } finally {
+    for (const [name, value] of [['ANTHROPIC_API_KEY', saved.key], ['ANTHROPIC_AUTH_TOKEN', saved.auth], ['HERDR_PM_TEST_KEEP', saved.other]] as const) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
 });
 
 test('buildQueryOptions turns ToolDefs into one in-process MCP server named pm and allows each tool', async () => {

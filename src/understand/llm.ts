@@ -13,6 +13,8 @@ export type LlmCall = {
   outputSchema?: Record<string, unknown>;
   tools?: ToolDef[];
   maxTurns: number;
+  /** Abort the call and report it as `other` after this many ms; the runner's default applies when unset. */
+  timeoutMs?: number;
 };
 
 /** `rate_limit`, `overloaded` and `auth` pause the scheduler; the rest only fail this one call. */

@@ -1,6 +1,9 @@
 import { tmpdir } from 'node:os';
 import type { LlmCall, LlmErrorKind, LlmOutcome, LlmRunner } from './llm.ts';
 
+/** How long one call may run before the runner aborts it, unless `LlmCall.timeoutMs` says otherwise. */
+export const DEFAULT_LLM_TIMEOUT_MS = 600_000;
+
 /** Name of the in-process MCP server that carries a call's tools; the model sees them as `mcp__pm__<name>`. */
 export const TOOL_SERVER_NAME = 'pm';
 
@@ -33,6 +36,9 @@ function kindFromAssistantError(error: unknown): LlmErrorKind | undefined {
     case 'authentication_failed':
     case 'oauth_org_not_allowed':
     case 'billing_error':
+    case 'account_on_hold':
+    case 'verification_required':
+    case 'cloud_credential_error':
       return 'auth';
     default:
       return undefined;
@@ -42,8 +48,9 @@ function kindFromAssistantError(error: unknown): LlmErrorKind | undefined {
 /**
  * Turns the SDK messages of one `query()` run into a result (everything but `durationMs`, which the runner measures).
  * Kept free of SDK imports so it can be unit tested with hand-written messages.
+ * With `expectStructured` (the call carried an output schema) a success without `structured_output` is `bad_output`.
  */
-export function mapSdkMessages(messages: unknown[]): LlmOutcome {
+export function mapSdkMessages(messages: unknown[], opts: { expectStructured?: boolean } = {}): LlmOutcome {
   let result: Record<string, unknown> | undefined;
   let assistantKind: LlmErrorKind | undefined;
   for (const m of messages) {
@@ -57,6 +64,9 @@ export function mapSdkMessages(messages: unknown[]): LlmOutcome {
   }
 
   if (result.subtype === 'success' && result.is_error !== true) {
+    if (opts.expectStructured && result.structured_output === undefined) {
+      return { ok: false, kind: 'bad_output', message: 'the model returned no structured output' };
+    }
     const u = isRecord(result.usage) ? result.usage : {};
     return {
       ok: true,
@@ -101,8 +111,13 @@ export function buildQueryOptions(
     persistSession: false,
     cwd: tmpdir(),
   };
-  // `env` replaces the subprocess environment, so it has to carry everything else too.
-  if (opts.oauthToken) options.env = { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: opts.oauthToken };
+  // `env` replaces the subprocess environment, so it has to carry everything else too. API credentials are
+  // stripped so an inherited key can never make the call bill the API instead of the subscription.
+  const env: Record<string, string | undefined> = { ...process.env };
+  if (opts.oauthToken) env.CLAUDE_CODE_OAUTH_TOKEN = opts.oauthToken;
+  delete env.ANTHROPIC_API_KEY;
+  delete env.ANTHROPIC_AUTH_TOKEN;
+  options.env = env;
   if (call.outputSchema) options.outputFormat = { type: 'json_schema', schema: call.outputSchema };
   if (call.tools && call.tools.length > 0) {
     const sdkTools = call.tools.map((def) =>
@@ -130,25 +145,55 @@ function errMessage(err: unknown): string {
  * Runs calls through the Claude Agent SDK, billed to the Claude subscription. Without `oauthToken` the SDK uses
  * the local Claude Code login. The SDK is imported inside the function: the single-file collector binary is built
  * with it as an external, so nothing at module top level may load it.
+ *
+ * A call that runs longer than `call.timeoutMs` (default `DEFAULT_LLM_TIMEOUT_MS`) is aborted and comes back as
+ * `other`, so a hung subprocess cannot block the scheduler's one-call-at-a-time slot forever.
  */
 export function agentSdkRunner(opts: { oauthToken?: string }): LlmRunner {
   return async (call) => {
     const started = Date.now();
+    const timeoutMs = call.timeoutMs ?? DEFAULT_LLM_TIMEOUT_MS;
+    const controller = new AbortController();
     const collected: unknown[] = [];
     let thrown: unknown;
-    try {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const drain = async (): Promise<void> => {
       const sdk = await import('@anthropic-ai/claude-agent-sdk');
-      const q = sdk.query({ prompt: call.prompt, options: buildQueryOptions(sdk, call, opts) });
-      for await (const message of q) {
+      const options = buildQueryOptions(sdk, call, opts);
+      options.abortController = controller;
+      for await (const message of sdk.query({ prompt: call.prompt, options })) {
         // Only these two kinds matter for the outcome; skip the rest instead of holding the whole transcript.
         if (message.type === 'result' || (message.type === 'assistant' && message.error !== undefined)) collected.push(message);
       }
+    };
+    // The abort tells the SDK to kill its subprocess; racing against the timer as well means a stream that does
+    // not react to the abort still cannot keep this call hanging.
+    const timeout = new Promise<'timeout'>((resolve) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        resolve('timeout');
+      }, timeoutMs);
+    });
+    const draining = drain();
+    draining.catch(() => {}); // a run that loses the race may still fail later; that must not become unhandled
+
+    let timedOut = false;
+    try {
+      timedOut = (await Promise.race([draining, timeout])) === 'timeout';
     } catch (err) {
       thrown = err;
+    } finally {
+      clearTimeout(timer);
     }
-    const mapped = mapSdkMessages(collected);
+
     const durationMs = Date.now() - started;
-    if (thrown !== undefined && !collected.some((m) => isRecord(m) && m.type === 'result')) {
+    const hasResult = collected.some((m) => isRecord(m) && m.type === 'result');
+    if (timedOut && !hasResult) {
+      return { ok: false, kind: 'other', message: `the model call timed out after ${timeoutMs}ms`, durationMs };
+    }
+    const mapped = mapSdkMessages(collected, { expectStructured: call.outputSchema !== undefined });
+    if (thrown !== undefined && !hasResult) {
       // The call died before a result arrived; keep an error kind the assistant message already gave us.
       return { ok: false, kind: mapped.ok ? 'other' : mapped.kind, message: errMessage(thrown), durationMs };
     }
