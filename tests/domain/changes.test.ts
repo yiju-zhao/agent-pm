@@ -216,6 +216,16 @@ test('appendEvent keys every change and records revert and veto flags', () => {
   });
 });
 
+test('appendEvent with reverts marks the reverted event', () => {
+  const cs = seedProject();
+  const original = appendEvent(db, { ...baseEvent, op: 'create_project', changes: cs.changes });
+  const undo = new ChangeSet(db);
+  undo.update('projects', 'p_1', { title: 'B' });
+  const revert = appendEvent(db, { ...baseEvent, op: 'revert_event', changes: undo.changes, reverts: original });
+  const row = db.prepare('SELECT reverted_by FROM events WHERE id = ?').get(original) as Record<string, unknown>;
+  expect(row.reverted_by).toBe(revert);
+});
+
 test('appendEvent collapses an insert followed by updates into one net insert', () => {
   const cs = seedProject();
   cs.update('projects', 'p_1', { title: 'B' });

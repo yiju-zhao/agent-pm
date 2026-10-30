@@ -7,6 +7,7 @@ import { LINK_HANDLERS } from './links-ops.ts';
 import { EVIDENCE_RE, OP_SCHEMAS } from './ops.ts';
 import type { OpInput, OpName } from './ops.ts';
 import { PROJECT_HANDLERS } from './projects-ops.ts';
+import { REVERT_HANDLERS } from './revert.ts';
 import { createQuestion, USER_ONLY_OPS, withdrawStale } from './questions.ts';
 import type { QuestionDraft } from './questions.ts';
 import { isAi, OpRejected } from './types.ts';
@@ -31,13 +32,20 @@ export type OpContext = {
   /** Proposals that could not be stored (`question_limit`, `recently_rejected`); the handler carries on. */
   proposalErrors: OpRejected[];
   isVeto: boolean;
+  /** The event this operation undoes; the appended event records it and the undone event is marked `reverted_by`. */
+  reverts: number | null;
   /** Asks the user to confirm something the actor may not do directly. */
   propose(draft: Omit<QuestionDraft, 'created_by' | 'evidence'>): void;
 };
 
 export type Handler = (ctx: OpContext, args: any) => { id?: string } | void;
 
-export const HANDLERS: Partial<Record<OpName, Handler>> = { ...PROJECT_HANDLERS, ...ITEM_HANDLERS, ...LINK_HANDLERS };
+export const HANDLERS: Partial<Record<OpName, Handler>> = {
+  ...PROJECT_HANDLERS,
+  ...ITEM_HANDLERS,
+  ...LINK_HANDLERS,
+  ...REVERT_HANDLERS,
+};
 
 const Occurred = z.iso.datetime();
 
@@ -93,6 +101,7 @@ export function runOp(db: DatabaseSync, deps: DomainDeps, input: OpInput): OpRes
     warnings: [],
     proposalErrors: [],
     isVeto: false,
+    reverts: null,
     propose(draft) {
       try {
         const { id } = createQuestion(db, deps, { ...draft, created_by: actor, evidence });
@@ -119,6 +128,7 @@ export function runOp(db: DatabaseSync, deps: DomainDeps, input: OpInput): OpRes
       reason,
       evidence,
       question_id: ctx.questionId,
+      reverts: ctx.reverts ?? undefined,
       is_veto: ctx.isVeto,
     });
     withdrawStale(db, deps, changes);

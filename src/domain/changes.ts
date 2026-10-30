@@ -41,6 +41,19 @@ function checkedColumns(values: Values): [string, SqlValue][] {
   return entries;
 }
 
+/** How events name a row: `${table}:${id}`. */
+export function entityKey(table: DomainTable, id: string): string {
+  return `${table}:${id}`;
+}
+
+/** The inverse of `entityKey`. Splits on the first colon only, since session keys contain colons. */
+export function parseEntityKey(key: string): { table: DomainTable; id: string } {
+  const at = key.indexOf(':');
+  const table = key.slice(0, at);
+  if (at <= 0 || !Object.hasOwn(PRIMARY_KEY, table)) throw new Error(`not an entity key: ${key}`);
+  return { table: table as DomainTable, id: key.slice(at + 1) };
+}
+
 /** A row as read from SQLite, keyed by column. */
 export type Row = Record<string, unknown>;
 
@@ -139,7 +152,7 @@ export type EventInput = {
 export function netChanges(changes: Change[]): Change[] {
   const byRow = new Map<string, Change>();
   for (const c of changes) {
-    const key = `${c.table}:${c.id}`;
+    const key = entityKey(c.table, c.id);
     const net = byRow.get(key);
     if (!net) {
       byRow.set(key, { table: c.table, id: c.id, before: c.before && { ...c.before }, after: { ...c.after } });
@@ -170,15 +183,16 @@ export function netChanges(changes: Change[]): Change[] {
 
 /**
  * Appends one event row; `before` / `after` are JSON objects keyed by `${table}:${id}`, holding the `netChanges` of
- * `e.changes`, and `entity` is the first of them. Returns the event id.
+ * `e.changes`, and `entity` is the first of them. With `reverts`, also sets that event's `reverted_by` to the new
+ * event. Returns the event id.
  */
 export function appendEvent(db: DatabaseSync, e: EventInput): number {
   const changes = netChanges(e.changes);
   const before: Record<string, Record<string, unknown> | null> = {};
   const after: Record<string, Record<string, unknown>> = {};
   for (const c of changes) {
-    before[`${c.table}:${c.id}`] = c.before;
-    after[`${c.table}:${c.id}`] = c.after;
+    before[entityKey(c.table, c.id)] = c.before;
+    after[entityKey(c.table, c.id)] = c.after;
   }
   const first = changes[0];
   const result = db
@@ -192,7 +206,7 @@ export function appendEvent(db: DatabaseSync, e: EventInput): number {
       e.recorded_at,
       e.actor,
       e.op,
-      first ? `${first.table}:${first.id}` : null,
+      first ? entityKey(first.table, first.id) : null,
       e.project_id,
       JSON.stringify(e.args ?? null),
       JSON.stringify(before),
@@ -203,7 +217,9 @@ export function appendEvent(db: DatabaseSync, e: EventInput): number {
       e.reverts ?? null,
       e.is_veto ? 1 : 0,
     );
-  return Number(result.lastInsertRowid);
+  const id = Number(result.lastInsertRowid);
+  if (e.reverts !== undefined) db.prepare('UPDATE events SET reverted_by = ? WHERE id = ?').run(id, e.reverts);
+  return id;
 }
 
 /** Fields a user's edit locks against AI changes, per table. */
