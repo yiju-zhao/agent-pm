@@ -168,7 +168,8 @@ test('no warning without a last_error', async () => {
 test('a failing /status shows the error text instead of a status', async () => {
   fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
   renderApp();
-  expect(await screen.findByText('连不上服务器')).toBeTruthy();
+  // The home page below the header fails the same way and says so too: look at the header only.
+  await waitFor(() => expect(document.querySelector('.understanding')?.textContent).toBe('连不上服务器'));
 });
 
 test('the status is read again when the status topic arrives', async () => {

@@ -528,3 +528,158 @@ main {
   display: flex;
   gap: 8px;
 }
+
+/* ---- home page --------------------------------------------------------------------------------------------- */
+
+.head-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  margin-bottom: 6px;
+}
+
+.head-row .h {
+  margin: 0;
+}
+
+/* The list / kanban switch: two buttons that read as one control. */
+.seg {
+  display: inline-flex;
+}
+
+.seg button {
+  border-radius: 0;
+  font-size: 12px;
+}
+
+.seg button:first-child {
+  border-radius: 5px 0 0 5px;
+}
+
+.seg button:last-child {
+  border-radius: 0 5px 5px 0;
+  margin-left: -1px;
+}
+
+.seg button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  position: relative;
+}
+
+.error-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  background: var(--p0-bg);
+  border-radius: 6px;
+  color: var(--blocked);
+}
+
+.fold {
+  margin-bottom: 8px;
+}
+
+.fold-btn {
+  display: block;
+  margin-bottom: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #555;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+/* A project card. The first line wraps on a phone; the summary stays on one line and is cut off with an ellipsis. */
+.proj-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 6px;
+}
+
+.proj-head .tag {
+  margin-right: 0;
+}
+
+.proj.dormant {
+  opacity: 0.6;
+}
+
+.summary {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* An agent is waiting for the user: a red dot beside the title. */
+.alert-dot {
+  display: inline-block;
+  align-self: center;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--waiting);
+}
+
+.pnone {
+  background: #f3f3f3;
+  color: var(--dim);
+}
+
+.side-section + .side-section {
+  margin-top: 14px;
+}
+
+.side-section > .q:first-of-type {
+  margin-top: 0;
+}
+
+.attrib + .attrib {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+/* Kanban: the container scrolls sideways, the page does not. */
+.kanban {
+  display: flex;
+  gap: 8px;
+  max-width: 100%;
+  overflow-x: auto;
+  padding-bottom: 6px;
+}
+
+.kcol {
+  flex: 1 0 170px;
+  min-width: 170px;
+  padding: 6px;
+  background: #f0f0f0;
+  border-radius: 8px;
+}
+
+.kcard {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 6px;
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.kcard .tag {
+  margin-right: 0;
+}
+
+.kcard.dormant {
+  opacity: 0.6;
+}

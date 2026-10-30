@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import type { SchedulerStatus } from '../../src/understand/status.ts';
 import { AUTH_EVENT, apiSend, errorText, setToken } from './api.ts';
 import { useToast } from './components/toast.tsx';
+import { HomePage } from './pages/home.tsx';
 import { parseHash } from './route.ts';
 import type { Route } from './route.ts';
 import type { StreamState } from './stream.ts';
@@ -133,11 +134,7 @@ function subscribeHash(onChange: () => void): () => void {
   return () => window.removeEventListener('hashchange', onChange);
 }
 
-// The three pages are placeholders until their own tasks replace them.
-function HomePlaceholder() {
-  return <main data-page="home">首页</main>;
-}
-
+// The project and session pages are placeholders until their own tasks replace them.
 function ProjectPlaceholder({ id }: { id: string }) {
   return (
     <main data-page="project" data-project-id={id}>
@@ -153,7 +150,7 @@ function SessionsPlaceholder() {
 function Page({ route }: { route: Route }) {
   switch (route.page) {
     case 'home':
-      return <HomePlaceholder />;
+      return <HomePage />;
     case 'project':
       return <ProjectPlaceholder id={route.id} />;
     case 'sessions':
