@@ -79,19 +79,32 @@ export function applySnapshot(db: DatabaseSync, push: SnapshotPush, now: Date): 
          last_heartbeat = excluded.last_heartbeat, collector_version = excluded.collector_version`,
     ).run(machine, nowIso, push.collector_version);
 
-    const exists = db.prepare('SELECT 1 FROM sessions WHERE key = ?');
-    const newKeys = new Set([...reported.keys()].filter((key) => exists.get(key) === undefined));
+    // "New" = not in the DB before this snapshot, or a revived pending key (Ruling R7: herdr reuses
+    // pending:<machine>:<terminal> for every id-less session on a terminal, so a pending row that is
+    // no longer live, or was merged, now stands for a different session).
+    const existing = db.prepare('SELECT lifecycle, merged_into FROM sessions WHERE key = ?');
+    const newKeys = new Set<string>();
+    const revived = new Set<string>();
+    for (const key of reported.keys()) {
+      const prev = existing.get(key) as { lifecycle: string; merged_into: string | null } | undefined;
+      if (prev === undefined) {
+        newKeys.add(key);
+      } else if (parseSessionKey(key).kind === 'pending' && (prev.lifecycle !== 'live' || prev.merged_into !== null)) {
+        newKeys.add(key);
+        revived.add(key);
+      }
+    }
 
-    // Pending sessions still live before this snapshot are the only merge candidates.
-    const livePending = new Set(
+    // Pending sessions still live before this snapshot are the only merge candidates (key → agent_kind).
+    const livePending = new Map(
       (
         db
           .prepare(
-            `SELECT key FROM sessions
+            `SELECT key, agent_kind FROM sessions
              WHERE machine = ? AND lifecycle = 'live' AND merged_into IS NULL AND key LIKE 'pending:%'`,
           )
-          .all(machine) as Array<{ key: string }>
-      ).map((r) => r.key),
+          .all(machine) as Array<{ key: string; agent_kind: string }>
+      ).map((r) => [r.key, r.agent_kind]),
     );
 
     // 2. Upsert reported sessions as live.
@@ -102,6 +115,8 @@ export function applySnapshot(db: DatabaseSync, push: SnapshotPush, now: Date): 
         s.cwd, s.title, s.live_status, s.fidelity, s.transcript_path, nowIso, nowIso,
       );
     }
+    const restart = db.prepare('UPDATE sessions SET first_seen = ?, predecessor_key = NULL WHERE key = ?');
+    for (const key of revived) restart.run(nowIso, key); // the upsert already cleared merged_into
 
     // 3. Live sessions of this machine that were not reported have ended.
     const ended = (
@@ -115,7 +130,8 @@ export function applySnapshot(db: DatabaseSync, push: SnapshotPush, now: Date): 
     const endSession = db.prepare(`UPDATE sessions SET lifecycle = 'ended' WHERE key = ?`);
     for (const r of ended) endSession.run(r.key);
 
-    // 5. A native session on the terminal of a live pending session is that session, now identified.
+    // 5. A native session of the same agent kind on the terminal of a live pending session is that
+    //    session, now identified.
     const merged = new Set<string>();
     const moveChunks = db.prepare('UPDATE OR IGNORE chunks SET session_key = ? WHERE session_key = ?');
     const dropChunks = db.prepare('DELETE FROM chunks WHERE session_key = ?');
@@ -125,7 +141,7 @@ export function applySnapshot(db: DatabaseSync, push: SnapshotPush, now: Date): 
     for (const s of reported.values()) {
       if (parseSessionKey(s.key).kind !== 'native') continue;
       const pending = pendingKey(machine, s.terminal_id);
-      if (!livePending.has(pending) || reported.has(pending)) continue;
+      if (livePending.get(pending) !== s.agent_kind || reported.has(pending)) continue;
       moveChunks.run(s.key, pending);
       dropChunks.run(pending); // leftovers collided with chunks the native key already has
       markMerged.run(s.key, pending);

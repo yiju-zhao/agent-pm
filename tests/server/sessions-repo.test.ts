@@ -82,6 +82,7 @@ const A = 'claude:aaaaaaaa-1111-4111-8111-111111111111';
 const B = 'claude:bbbbbbbb-2222-4222-8222-222222222222';
 const C = 'codex:cccccccc-3333-4333-8333-333333333333';
 const X = 'claude:dddddddd-4444-4444-8444-444444444444';
+const Y = 'codex:eeeeeeee-5555-4555-8555-555555555555';
 
 test('snapshot upserts live sessions and heartbeat', () => {
   applySnapshot(db, push('laptop', [session(A, 'term_1'), session(B, 'term_2')]), t0);
@@ -174,14 +175,14 @@ test('pending session merges into native key and moves chunks', () => {
     chunk(P, 1761732005000, 1761732005000, { kind: 'screen' }),
   ] }, t0);
 
-  applySnapshot(db, push('laptop', [session(X, 'term_1')]), t1);
+  applySnapshot(db, push('laptop', [session(Y, 'term_1')]), t1);
 
   // Ruling R3: a merged pending session is the same session, not a predecessor.
-  expect(row(X)).toMatchObject({ lifecycle: 'live', predecessor_key: null });
-  expect(row(P)).toMatchObject({ lifecycle: 'ended', merged_into: X });
+  expect(row(Y)).toMatchObject({ lifecycle: 'live', predecessor_key: null });
+  expect(row(P)).toMatchObject({ lifecycle: 'ended', merged_into: Y });
   expect(chunkKeys().map((c) => [c.session_key, c.offset_start])).toEqual([
-    [X, 1761732000000],
-    [X, 1761732005000],
+    [Y, 1761732000000],
+    [Y, 1761732005000],
   ]);
 });
 
@@ -191,21 +192,21 @@ test('pending merge keeps the native chunk when offsets collide', () => {
   insertChunks(db, { machine: 'laptop', chunks: [
     chunk(P, 1000, 1000, { kind: 'screen', text: 'pending dup' }),
     chunk(P, 2000, 2000, { kind: 'screen', text: 'pending only' }),
-    chunk(X, 1000, 1500, { text: 'native' }),
+    chunk(Y, 1000, 1500, { text: 'native' }),
   ] }, t0);
 
-  applySnapshot(db, push('laptop', [session(X, 'term_1')]), t1);
+  applySnapshot(db, push('laptop', [session(Y, 'term_1')]), t1);
 
   expect(chunkKeys()).toEqual([
-    { session_key: X, offset_start: 1000, text: 'native' },
-    { session_key: X, offset_start: 2000, text: 'pending only' },
+    { session_key: Y, offset_start: 1000, text: 'native' },
+    { session_key: Y, offset_start: 2000, text: 'pending only' },
   ]);
 });
 
 test('pending sessions of other machines are not merged', () => {
   const P = 'pending:desktop:term_1';
   applySnapshot(db, push('desktop', [session(P, 'term_1')]), t0);
-  applySnapshot(db, push('laptop', [session(X, 'term_1')]), t1);
+  applySnapshot(db, push('laptop', [session(Y, 'term_1')]), t1);
   expect(row(P)).toMatchObject({ lifecycle: 'live', merged_into: null });
 });
 
@@ -213,9 +214,74 @@ test('a pending session that ended earlier is not merged', () => {
   const P = 'pending:laptop:term_1';
   applySnapshot(db, push('laptop', [session(P, 'term_1')]), t0);
   applySnapshot(db, push('laptop', []), t1);
-  applySnapshot(db, push('laptop', [session(X, 'term_1')]), t2);
+  applySnapshot(db, push('laptop', [session(Y, 'term_1')]), t2);
   expect(row(P)).toMatchObject({ lifecycle: 'ended', merged_into: null });
-  expect(row(X)).toMatchObject({ predecessor_key: null });
+  expect(row(Y)).toMatchObject({ predecessor_key: null });
+});
+
+test('a pending session of another agent kind is not merged but becomes the predecessor', () => {
+  const P = 'pending:laptop:term_1'; // agent_kind codex
+  applySnapshot(db, push('laptop', [session(P, 'term_1')]), t0);
+  insertChunks(db, { machine: 'laptop', chunks: [chunk(P, 1761732000000, 1761732000000, { kind: 'screen' })] }, t0);
+
+  applySnapshot(db, push('laptop', [session(X, 'term_1')]), t1); // claude in the same pane
+
+  expect(row(P)).toMatchObject({ lifecycle: 'ended', merged_into: null });
+  expect(row(X)).toMatchObject({ lifecycle: 'live', predecessor_key: P });
+  expect(chunkKeys().map((c) => c.session_key)).toEqual([P]);
+});
+
+test('no merge while the snapshot still reports the pending key', () => {
+  const P = 'pending:laptop:term_1';
+  applySnapshot(db, push('laptop', [session(P, 'term_1')]), t0);
+  insertChunks(db, { machine: 'laptop', chunks: [chunk(P, 1761732000000, 1761732000000, { kind: 'screen' })] }, t0);
+
+  applySnapshot(db, push('laptop', [session(P, 'term_1'), session(Y, 'term_1')]), t1);
+
+  expect(row(P)).toMatchObject({ lifecycle: 'live', merged_into: null });
+  expect(chunkKeys().map((c) => c.session_key)).toEqual([P]);
+});
+
+test('a revived pending key starts fresh and succeeds the session it was merged into (R7)', () => {
+  const P = 'pending:laptop:term_1';
+  applySnapshot(db, push('laptop', [session(P, 'term_1')]), t0);
+  applySnapshot(db, push('laptop', [session(Y, 'term_1')]), t1);
+  expect(row(P)).toMatchObject({ merged_into: Y });
+
+  applySnapshot(db, push('laptop', [session(P, 'term_1')]), t2);
+
+  expect(row(Y)).toMatchObject({ lifecycle: 'ended' });
+  expect(row(P)).toMatchObject({
+    lifecycle: 'live',
+    merged_into: null,
+    predecessor_key: Y,
+    first_seen: t2.toISOString(),
+    last_seen: t2.toISOString(),
+  });
+});
+
+test('a pending key that ended without merging also starts fresh when revived (R7)', () => {
+  const P = 'pending:laptop:term_1';
+  applySnapshot(db, push('laptop', [session(P, 'term_1')]), t0);
+  applySnapshot(db, push('laptop', [session(X, 'term_1')]), t1); // P ended, X succeeds it
+  applySnapshot(db, push('laptop', [session(P, 'term_1')]), t2); // X ended, P revived
+  expect(row(P)).toMatchObject({ lifecycle: 'live', first_seen: t2.toISOString(), predecessor_key: X });
+});
+
+test('a revived pending key can be merged again later', () => {
+  const P = 'pending:laptop:term_1';
+  const Z = 'codex:ffffffff-6666-4666-8666-666666666666';
+  applySnapshot(db, push('laptop', [session(P, 'term_1')]), t0);
+  applySnapshot(db, push('laptop', [session(Y, 'term_1')]), t1);
+  applySnapshot(db, push('laptop', [session(P, 'term_1')]), t2);
+  const t3 = new Date(t2.getTime() + 10000);
+  insertChunks(db, { machine: 'laptop', chunks: [chunk(P, t2.getTime(), t2.getTime(), { kind: 'screen' })] }, t2);
+
+  applySnapshot(db, push('laptop', [session(Z, 'term_1')]), t3);
+
+  expect(row(P)).toMatchObject({ lifecycle: 'ended', merged_into: Z });
+  expect(row(Z)).toMatchObject({ lifecycle: 'live', predecessor_key: null });
+  expect(chunkKeys().map((c) => [c.session_key, c.offset_start])).toEqual([[Z, t2.getTime()]]);
 });
 
 test('the same key twice in one snapshot: last occurrence wins', () => {
@@ -275,10 +341,10 @@ test('maxOffset ignores screen chunks (e.g. moved in by a pending merge)', () =>
   const P = 'pending:laptop:term_1';
   applySnapshot(db, push('laptop', [session(P, 'term_1')]), t0);
   insertChunks(db, { machine: 'laptop', chunks: [chunk(P, 1761732000000, 1761732000000, { kind: 'screen' })] }, t0);
-  applySnapshot(db, push('laptop', [session(X, 'term_1')]), t1);
-  expect(maxOffset(db, X)).toBeNull();
-  insertChunks(db, { machine: 'laptop', chunks: [chunk(X, 0, 400)] }, t1);
-  expect(maxOffset(db, X)).toBe(400);
+  applySnapshot(db, push('laptop', [session(Y, 'term_1')]), t1);
+  expect(maxOffset(db, Y)).toBeNull();
+  insertChunks(db, { machine: 'laptop', chunks: [chunk(Y, 0, 400)] }, t1);
+  expect(maxOffset(db, Y)).toBe(400);
 });
 
 test('listSessions filters, orders live first then by last_seen desc, and counts chunks', () => {
