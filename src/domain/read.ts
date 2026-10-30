@@ -543,6 +543,30 @@ export function getProject(db: DatabaseSync, now: Date, id: string): ProjectDeta
   };
 }
 
+// ---- sessions and their projects ---------------------------------------------------------------------------------
+
+/**
+ * The projects each session is linked to, by session key, each group by project title. Deleted links and links to
+ * deleted projects are left out; a session with none has no entry.
+ */
+export function sessionLinks(db: DatabaseSync): Map<string, Array<{ id: string; title: string }>> {
+  const rows = db
+    .prepare(
+      `SELECT c.session_key AS session_key, p.id AS id, p.title AS title
+       FROM contributions c JOIN projects p ON p.id = c.project_id
+       WHERE c.deleted_at IS NULL AND p.deleted_at IS NULL
+       ORDER BY p.title, p.rowid`,
+    )
+    .all();
+  const links = new Map<string, Array<{ id: string; title: string }>>();
+  for (const r of asRows<{ session_key: string; id: string; title: string }>(rows)) {
+    const group = links.get(r.session_key);
+    if (group) group.push({ id: r.id, title: r.title });
+    else links.set(r.session_key, [{ id: r.id, title: r.title }]);
+  }
+  return links;
+}
+
 // ---- search and vetoed projects ----------------------------------------------------------------------------------
 
 export type SearchHit = {

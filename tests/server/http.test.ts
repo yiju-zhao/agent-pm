@@ -339,3 +339,63 @@ test('POST /sync needs the user token and returns 202', async () => {
   expect(await disabled.json()).toEqual({ error: 'understanding_disabled' });
   expect((await sync(null, app)).status).toBe(401);
 });
+
+// ---- evidence and session links ----------------------------------------------------------------------------------
+
+const USER_TOKEN = config.userToken;
+
+async function userCall(method: string, path: string, body?: unknown): Promise<Response> {
+  const headers: Record<string, string> = { authorization: `Bearer ${USER_TOKEN}` };
+  if (body !== undefined) headers['content-type'] = 'application/json';
+  return app.request(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+}
+
+test('GET /evidence/:ref needs the user token', async () => {
+  await post('/ingest/snapshot', snapshot(GX10, [session(CLAUDE_KEY)]));
+  await post('/ingest/chunks', { machine: GX10, chunks: [chunk(CLAUDE_KEY, 0, 10, { text: 'hello evidence' })] });
+  const id = (db.prepare('SELECT id FROM chunks').get() as { id: number }).id;
+
+  const anonymous = await get(`/evidence/chunk:${id}`, null);
+  expect(anonymous.status).toBe(401);
+  expect(anonymous.headers.get('www-authenticate')).toBe('Bearer');
+  expect((await get(`/evidence/chunk:${id}`, GX10_TOKEN)).status).toBe(401);
+
+  const ok = await get(`/evidence/chunk:${id}`, USER_TOKEN);
+  expect(ok.status).toBe(200);
+  expect(await ok.json()).toMatchObject({
+    ref: `chunk:${id}`,
+    kind: 'chunk',
+    id,
+    session_key: CLAUDE_KEY,
+    digest: null,
+    session: { key: CLAUDE_KEY, short_id: '5d27595b' },
+    chunks: [{ id, text: 'hello evidence', truncated: false }],
+  });
+});
+
+test('GET /evidence/:ref answers 400 for a malformed ref and 404 for an unknown one', async () => {
+  const bad = await get('/evidence/chunk:abc', USER_TOKEN);
+  expect(bad.status).toBe(400);
+  expect(await bad.json()).toEqual({ error: 'invalid' });
+  expect((await get('/evidence/nonsense', USER_TOKEN)).status).toBe(400);
+  expect((await get('/evidence/chunk%3A0', USER_TOKEN)).status).toBe(400);
+
+  const missing = await get('/evidence/chunk:999', USER_TOKEN);
+  expect(missing.status).toBe(404);
+  expect(await missing.json()).toEqual({ error: 'not_found' });
+  expect((await get('/evidence/digest:999', USER_TOKEN)).status).toBe(404);
+});
+
+test('GET /sessions items carry linked_projects', async () => {
+  const other = 'codex:019a0000-aaaa-bbbb-cccc-111122223333';
+  await post('/ingest/snapshot', snapshot(GX10, [session(CLAUDE_KEY), session(other)]));
+  const created = await userCall('POST', '/projects', { title: 'Linked project' });
+  expect(created.status).toBe(201);
+  const { id } = (await created.json()) as { id: string };
+  const linked = await userCall('POST', `/sessions/${encodeURIComponent(CLAUDE_KEY)}/links`, { project_id: id });
+  expect(linked.status).toBe(200);
+
+  const byKey = new Map((await sessionsBody()).map((s) => [s.key, s]));
+  expect(byKey.get(CLAUDE_KEY)).toMatchObject({ linked_projects: [{ id, title: 'Linked project' }], short_id: '5d27595b' });
+  expect(byKey.get(other)).toMatchObject({ linked_projects: [] });
+});

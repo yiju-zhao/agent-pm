@@ -7,6 +7,7 @@ import {
   listQuestions,
   listVetoedProjects,
   searchProjects,
+  sessionLinks,
 } from '../../src/domain/read.ts';
 import type { ProjectCard, ProjectDetail } from '../../src/domain/read.ts';
 import { askUser } from '../../src/domain/questions.ts';
@@ -919,4 +920,31 @@ test('listVetoedProjects lists the most recently vetoed first', () => {
   expect(t.user('revert_event', { event_id: first.event_id }).status).toBe('applied');
 
   expect(listVetoedProjects(t.db).map((p) => p.title)).toEqual(['first', 'second']);
+});
+
+test('sessionLinks skips deleted contributions and deleted projects', () => {
+  addSession('claude:s1');
+  addSession('claude:s2');
+  addSession('claude:s3');
+  const zeta = t.user('create_project', { title: 'Zeta' }).id;
+  const alpha = t.user('create_project', { title: 'Alpha' }).id;
+  const gone = t.user('create_project', { title: 'Gone project' }).id;
+  const unlinked = t.user('create_project', { title: 'Unlinked' }).id;
+
+  link('claude:s1', zeta);
+  link('claude:s1', alpha);
+  link('claude:s2', unlinked);
+  const kept = link('claude:s3', gone);
+  expect(t.user('unlink_session', { session: 'claude:s2', project: unlinked }).status).toBe('applied');
+  // A deleted project keeps its contribution rows.
+  t.db.prepare('UPDATE projects SET deleted_at = ? WHERE id = ?').run(NOW, gone);
+  expect(row(t.db, 'contributions', kept).deleted_at).toBeNull();
+
+  const links = sessionLinks(t.db);
+  expect(links.get('claude:s1')).toEqual([
+    { id: alpha, title: 'Alpha' },
+    { id: zeta, title: 'Zeta' },
+  ]);
+  expect(links.has('claude:s2')).toBe(false);
+  expect(links.has('claude:s3')).toBe(false); // linked only to the deleted project
 });

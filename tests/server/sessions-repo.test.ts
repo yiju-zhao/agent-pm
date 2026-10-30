@@ -7,6 +7,7 @@ import { MIGRATIONS, openDb } from '../../src/server/db.ts';
 import {
   applySnapshot,
   findByShortId,
+  getSession,
   insertChunks,
   listSessions,
   maxOffset,
@@ -637,6 +638,17 @@ test('findByShortId resolves 8-char prefix', () => {
   // Pending sessions resolve by terminal id.
   expect(findByShortId(db, 'term_65e', t0).map((v) => v.key)).toEqual([P]);
   expect(findByShortId(db, 'zzzzzzzz', t0)).toEqual([]);
+});
+
+test('getSession follows a merged key, and is null for a key that is not a session', () => {
+  const P = 'pending:laptop:term_1';
+  applySnapshot(db, push('laptop', [session(P, 'term_1')]), t0);
+  expect(getSession(db, P, t0)).toMatchObject({ key: P, short_id: 'term_1', effective_status: 'working' });
+
+  applySnapshot(db, push('laptop', [session(Y, 'term_1')]), t1);
+  expect(getSession(db, P, t2)?.key).toBe(Y);
+  expect(getSession(db, Y, t2)).toMatchObject({ key: Y, chunk_count: 0 });
+  expect(getSession(db, 'claude:unknown-0000', t2)).toBeNull();
 });
 
 test('migrations are idempotent when opening the same file twice', async () => {

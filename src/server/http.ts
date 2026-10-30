@@ -2,6 +2,8 @@ import type { DatabaseSync } from 'node:sqlite';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import type { ZodType } from 'zod';
+import { getEvidence, parseEvidenceRef } from '../domain/evidence.ts';
+import { sessionLinks } from '../domain/read.ts';
 import { defaultDeps } from '../domain/types.ts';
 import type { DomainDeps } from '../domain/types.ts';
 import { mountMcp } from '../mcp/server.ts';
@@ -14,11 +16,13 @@ import { bearerToken, tokenMatches } from './bearer.ts';
 import type { ServerConfig } from './config.ts';
 import { mountDomainRoutes, userAuth } from './domain-routes.ts';
 import { applySnapshot, findByShortId, insertChunks, listSessions, maxOffset } from './sessions-repo.ts';
+import type { SessionView } from './sessions-repo.ts';
 
 /**
  * The central API. `/ingest/*` is for collectors (bearer token bound to one machine); the project
  * API (`./domain-routes.ts`) takes the user token on writes; `/mcp` (`../mcp/server.ts`) takes the MCP token; every
- * other GET, `/sessions*` included, is unauthenticated for now (Tailscale only). Every timestamp the server stores comes from `clock`,
+ * other GET, `/sessions*` included, is unauthenticated for now (Tailscale only), except `/evidence/:ref`, which returns raw
+ * conversation text and takes the user token. Every timestamp the server stores comes from `clock`,
  * never from a request body: offline detection relies on server-stamped heartbeats. `newId`
  * generates the ids of new projects, milestones and so on (random unless a test pins it).
  * `opts.scheduler` is the running understanding scheduler, or absent when the layer is switched off.
@@ -71,13 +75,26 @@ export function createApp(
     return c.json(body);
   });
 
-  app.get('/sessions', (c) =>
-    c.json(
-      listSessions(db, { machine: c.req.query('machine') || undefined, lifecycle: c.req.query('lifecycle') || undefined }, clock()),
-    ),
-  );
+  app.get('/sessions', (c) => {
+    const sessions = listSessions(
+      db,
+      { machine: c.req.query('machine') || undefined, lifecycle: c.req.query('lifecycle') || undefined },
+      clock(),
+    );
+    const links = sessionLinks(db);
+    const items: SessionListItem[] = sessions.map((s) => ({ ...s, linked_projects: links.get(s.key) ?? [] }));
+    return c.json(items);
+  });
 
   app.get('/sessions/by-short-id/:sid', (c) => c.json(findByShortId(db, c.req.param('sid'), clock())));
+
+  // The conversation text behind a decision. It is raw, so unlike the other reads it needs the user token.
+  app.get('/evidence/:ref', userAuth(config), (c) => {
+    const ref = c.req.param('ref');
+    if (parseEvidenceRef(ref) === null) return c.json({ error: 'invalid' }, 400);
+    const evidence = getEvidence(db, clock(), ref);
+    return evidence === null ? c.json({ error: 'not_found' }, 404) : c.json(evidence);
+  });
 
   app.get('/status', (c) => c.json({ understanding: scheduler?.status() ?? disabledStatus() }));
 
@@ -92,6 +109,9 @@ export function createApp(
 
   return app;
 }
+
+/** One entry of `GET /sessions`: the session and the live projects it is linked to. */
+export type SessionListItem = SessionView & { linked_projects: Array<{ id: string; title: string }> };
 
 export type AppOptions = { scheduler?: Scheduler | null };
 

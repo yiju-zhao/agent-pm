@@ -269,6 +269,12 @@ export function listSessions(
   );
 }
 
+/** One session as a view, found by the key it is known by now (`mergeTarget`); `null` when there is no such session. */
+export function getSession(db: DatabaseSync, key: string, now: Date): SessionView | null {
+  const target = mergeTarget(db, key);
+  return loadViews(db, now).find((v) => v.key === target) ?? null;
+}
+
 /** Sessions whose short id equals `shortId` or whose native id (terminal id if pending) starts with it. */
 export function findByShortId(db: DatabaseSync, shortId: string, now: Date): SessionView[] {
   if (shortId === '') return [];

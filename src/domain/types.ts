@@ -1,21 +1,8 @@
 import { randomBytes } from 'node:crypto';
 
-export const STAGES = ['idea', 'explore', 'build', 'verify', 'done', 'parked', 'abandoned', 'merged'] as const;
-export type Stage = (typeof STAGES)[number];
-
-export const PRIORITIES = ['P0', 'P1', 'P2', 'P3'] as const;
-export type Priority = (typeof PRIORITIES)[number];
-
-export const STAGE_LABEL: Record<Stage, string> = {
-  idea: 'idea',
-  explore: '探索',
-  build: '构建',
-  verify: '验证',
-  done: '完成',
-  parked: '搁置',
-  abandoned: '放弃',
-  merged: '合并',
-};
+// The vocabulary lives in `src/shared/vocab.ts` (no imports) so the web page can use it at runtime.
+export { PRIORITIES, STAGE_LABEL, STAGES } from '../shared/vocab.ts';
+export type { Priority, Stage } from '../shared/vocab.ts';
 
 /** `'user'`, or `ai:<name>` such as `ai:curator`. */
 export type Actor = 'user' | `ai:${string}`;
