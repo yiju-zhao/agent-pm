@@ -135,6 +135,11 @@ export function applySnapshot(db: DatabaseSync, push: SnapshotPush, now: Date): 
     const merged = new Set<string>();
     const moveChunks = db.prepare('UPDATE OR IGNORE chunks SET session_key = ? WHERE session_key = ?');
     const dropChunks = db.prepare('DELETE FROM chunks WHERE session_key = ?');
+    // Project links and questions follow the session to its native key. This is a key rename, not a change to project
+    // state, so it is written here directly and logs no event.
+    const moveLinks = db.prepare('UPDATE OR IGNORE contributions SET session_key = ? WHERE session_key = ?');
+    const dropLinks = db.prepare('DELETE FROM contributions WHERE session_key = ?');
+    const moveQuestions = db.prepare('UPDATE questions SET session_key = ? WHERE session_key = ?');
     const markMerged = db.prepare(
       `UPDATE sessions SET merged_into = ?, lifecycle = 'ended' WHERE key = ?`,
     );
@@ -149,6 +154,9 @@ export function applySnapshot(db: DatabaseSync, push: SnapshotPush, now: Date): 
       if (livePending.get(pending) !== s.agent_kind || reported.has(pending)) continue;
       moveChunks.run(s.key, pending);
       dropChunks.run(pending); // leftovers collided with chunks the native key already has
+      moveLinks.run(s.key, pending);
+      dropLinks.run(pending); // leftovers link a project the native key is already linked to; the native row wins
+      moveQuestions.run(s.key, pending);
       markMerged.run(s.key, pending);
       inheritPredecessor.run(pending, s.key);
       livePending.delete(pending);

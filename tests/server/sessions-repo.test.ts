@@ -231,6 +231,104 @@ test('pending merge keeps the native chunk when offsets collide', () => {
   ]);
 });
 
+function addContribution(
+  id: string,
+  session_key: string,
+  project_id: string,
+  extra: { deleted_at?: string; vetoed?: number } = {},
+): void {
+  db.prepare(
+    `INSERT INTO contributions (id, session_key, project_id, summary, actor, created_at, deleted_at, vetoed)
+     VALUES (?, ?, ?, ?, 'user', ?, ?, ?)`,
+  ).run(id, session_key, project_id, `summary ${id}`, t0.toISOString(), extra.deleted_at ?? null, extra.vetoed ?? 0);
+}
+
+function addQuestion(id: string, session_key: string | null, status = 'pending'): void {
+  db.prepare(
+    `INSERT INTO questions (id, kind, prompt, options, project_id, session_key, status, evidence, guards, dedupe_key, created_by, created_at)
+     VALUES (?, 'confirm', 'q', '[]', 'p_1', ?, ?, '[]', '[]', ?, 'ai:curator', ?)`,
+  ).run(id, session_key, status, `k:${id}`, t0.toISOString());
+}
+
+function linkRows(): Array<{ id: string; session_key: string; project_id: string }> {
+  return db.prepare('SELECT id, session_key, project_id FROM contributions ORDER BY id').all() as Array<{
+    id: string;
+    session_key: string;
+    project_id: string;
+  }>;
+}
+
+function questionKeys(): Array<{ id: string; session_key: string | null }> {
+  return db.prepare('SELECT id, session_key FROM questions ORDER BY id').all() as Array<{ id: string; session_key: string | null }>;
+}
+
+test('pending merge moves contributions and questions to the native key', () => {
+  const P = 'pending:laptop:term_1';
+  applySnapshot(db, push('laptop', [session(P, 'term_1')]), t0);
+  addContribution('c_1', P, 'p_1');
+  addContribution('c_2', P, 'p_2', { deleted_at: t0.toISOString(), vetoed: 1 });
+  addContribution('c_3', 'claude:other', 'p_1'); // another session, untouched
+  addQuestion('q_1', P);
+  addQuestion('q_2', P, 'answered');
+  addQuestion('q_3', 'claude:other');
+  addQuestion('q_4', null);
+
+  applySnapshot(db, push('laptop', [session(Y, 'term_1')]), t1);
+
+  expect(linkRows()).toEqual([
+    { id: 'c_1', session_key: Y, project_id: 'p_1' },
+    { id: 'c_2', session_key: Y, project_id: 'p_2' },
+    { id: 'c_3', session_key: 'claude:other', project_id: 'p_1' },
+  ]);
+  // The tombstone moved with its veto intact.
+  expect(db.prepare('SELECT deleted_at, vetoed FROM contributions WHERE id = ?').get('c_2')).toMatchObject({ vetoed: 1 });
+  expect(questionKeys()).toEqual([
+    { id: 'q_1', session_key: Y },
+    { id: 'q_2', session_key: Y },
+    { id: 'q_3', session_key: 'claude:other' },
+    { id: 'q_4', session_key: null },
+  ]);
+});
+
+test('pending merge keeps the native contribution when both keys link the same project', () => {
+  const P = 'pending:laptop:term_1';
+  applySnapshot(db, push('laptop', [session(P, 'term_1')]), t0);
+  addContribution('c_pending', P, 'p_1');
+  addContribution('c_pending_only', P, 'p_2');
+  addContribution('c_native', Y, 'p_1', { deleted_at: t0.toISOString(), vetoed: 1 });
+
+  applySnapshot(db, push('laptop', [session(Y, 'term_1')]), t1);
+
+  expect(linkRows()).toEqual([
+    { id: 'c_native', session_key: Y, project_id: 'p_1' },
+    { id: 'c_pending_only', session_key: Y, project_id: 'p_2' },
+  ]);
+  expect(db.prepare('SELECT vetoed FROM contributions WHERE id = ?').get('c_native')).toEqual({ vetoed: 1 });
+});
+
+test('nothing is left behind under the pending key after a merge, and a snapshot without a merge moves nothing', () => {
+  const P = 'pending:laptop:term_1';
+  applySnapshot(db, push('laptop', [session(P, 'term_1')]), t0);
+  addContribution('c_1', P, 'p_1');
+  addQuestion('q_1', P);
+
+  applySnapshot(db, push('laptop', [session(P, 'term_1')]), t1); // still pending: no merge
+  expect(linkRows()).toEqual([{ id: 'c_1', session_key: P, project_id: 'p_1' }]);
+  expect(questionKeys()).toEqual([{ id: 'q_1', session_key: P }]);
+
+  applySnapshot(db, push('laptop', [session(Y, 'term_1')]), t2);
+  expect(db.prepare('SELECT count(*) AS n FROM contributions WHERE session_key = ?').get(P)).toEqual({ n: 0 });
+  expect(db.prepare('SELECT count(*) AS n FROM questions WHERE session_key = ?').get(P)).toEqual({ n: 0 });
+});
+
+test('a pending session of another agent kind keeps its contributions', () => {
+  const P = 'pending:laptop:term_1';
+  applySnapshot(db, push('laptop', [session(P, 'term_1')]), t0); // pending is a codex session
+  addContribution('c_1', P, 'p_1');
+  applySnapshot(db, push('laptop', [session(X, 'term_1')]), t1); // X is claude: no merge
+  expect(linkRows()).toEqual([{ id: 'c_1', session_key: P, project_id: 'p_1' }]);
+});
+
 test('pending sessions of other machines are not merged', () => {
   const P = 'pending:desktop:term_1';
   applySnapshot(db, push('desktop', [session(P, 'term_1')]), t0);

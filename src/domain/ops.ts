@@ -25,6 +25,8 @@ export const OP_SCHEMAS = {
       done_criteria: text().optional(),
       priority: Priority.nullable().optional(),
       stage: Stage.optional(),
+      /** A session to link to the new project in the same event. */
+      from_session: Id.optional(),
     })
     .strict(),
   update_project: z

@@ -2,6 +2,7 @@ import { addLocks, LOCKABLE, readLocks, readRow } from './changes.ts';
 import type { Row } from './changes.ts';
 import type { Handler, OpContext } from './execute.ts';
 import { applyAiFieldEdits, definedFields } from './field-edits.ts';
+import { linkSession } from './links-ops.ts';
 import type { OpArgs, OpName } from './ops.ts';
 import { confirmOptions } from './questions.ts';
 import { aiMayTransition, checkTransition } from './stage.ts';
@@ -43,6 +44,7 @@ function createProject(ctx: OpContext, args: OpArgs<'create_project'>): { id: st
     created_at: ctx.deps.now().toISOString(),
   });
   ctx.projectId = id;
+  if (args.from_session !== undefined) linkSession(ctx, { session: args.from_session, project: id });
   return { id };
 }
 

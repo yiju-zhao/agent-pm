@@ -106,8 +106,8 @@ function upsertMilestone(ctx: OpContext, args: OpArgs<'upsert_milestone'>): { id
 
 // ---- todos -------------------------------------------------------------------------------------------------------
 
-/** A todo may only hang under a live milestone of its own project. */
-function checkMilestone(ctx: OpContext, projectId: string, milestoneId: string): void {
+/** A todo or a session link may only hang under a live milestone of its own project. */
+export function checkMilestone(ctx: OpContext, projectId: string, milestoneId: string): void {
   const milestone = readRow(ctx.db, 'milestones', milestoneId);
   if (!milestone || milestone.project_id !== projectId || milestone.deleted_at !== null) {
     throw new OpRejected('invalid', `milestone ${milestoneId} is not a live milestone of project ${projectId}`);

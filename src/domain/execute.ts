@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { transaction } from '../server/db.ts';
 import { appendEvent, ChangeSet, netChanges } from './changes.ts';
 import { ITEM_HANDLERS } from './items-ops.ts';
+import { LINK_HANDLERS } from './links-ops.ts';
 import { EVIDENCE_RE, OP_SCHEMAS } from './ops.ts';
 import type { OpInput, OpName } from './ops.ts';
 import { PROJECT_HANDLERS } from './projects-ops.ts';
@@ -36,7 +37,7 @@ export type OpContext = {
 
 export type Handler = (ctx: OpContext, args: any) => { id?: string } | void;
 
-export const HANDLERS: Partial<Record<OpName, Handler>> = { ...PROJECT_HANDLERS, ...ITEM_HANDLERS };
+export const HANDLERS: Partial<Record<OpName, Handler>> = { ...PROJECT_HANDLERS, ...ITEM_HANDLERS, ...LINK_HANDLERS };
 
 const Occurred = z.iso.datetime();
 
