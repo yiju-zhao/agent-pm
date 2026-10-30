@@ -13,6 +13,9 @@
 # `herdr-pm collect` would die at startup with "No such built-in module: node:sqlite". With splitting the
 # server code is a separate chunk that only the `server` command loads (run the server with node, not this binary).
 #
+# The Claude Agent SDK (used only by the server's understanding layer, behind dynamic imports) is marked --external:
+# it bundles a native Claude Code binary and must not end up in the collector. The collector never imports it.
+#
 # bun leaves a broken code signature on macOS binaries and Apple silicon kills them on launch (exit 137),
 # so the darwin build is re-signed ad hoc afterwards (needs `codesign`, i.e. build it on a Mac).
 set -euo pipefail
@@ -41,7 +44,7 @@ for target in "${targets[@]}"; do
       ;;
   esac
   echo "building dist/herdr-pm-$target"
-  bun build src/cli.ts --compile --splitting --target="$target" --outfile "dist/herdr-pm-$target"
+  bun build src/cli.ts --compile --splitting --external @anthropic-ai/claude-agent-sdk --target="$target" --outfile "dist/herdr-pm-$target"
   if [ "$target" = bun-darwin-arm64 ]; then
     if ! command -v codesign >/dev/null 2>&1; then
       echo "build-collector: codesign not found; dist/herdr-pm-$target will be killed by macOS until it is signed on a Mac" >&2
