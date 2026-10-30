@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import { entityKey, parseEntityKey } from '../../src/domain/changes.ts';
 import { HANDLERS } from '../../src/domain/execute.ts';
+import { getProject } from '../../src/domain/read.ts';
 import { lastEvent, NOW, row, setup } from './helpers.ts';
 import type { Row, Setup } from './helpers.ts';
 
@@ -242,13 +243,121 @@ test('reverting an event whose row no longer exists is a conflict', () => {
   });
 });
 
-test('reverting twice, or reverting a revert, is rejected', () => {
+test('reverting twice, or an unknown event, is rejected', () => {
   const p = t.ai('create_project', { title: 'x', summary: '原来的' }).id;
   const e = t.ai('update_project', { project: p, fields: { summary: 'A' } }).event_id;
   const revert = t.user('revert_event', { event_id: e }).event_id;
   expect(t.user('revert_event', { event_id: e })).toMatchObject({ status: 'rejected', code: 'already_reverted' });
-  expect(t.user('revert_event', { event_id: revert })).toMatchObject({ status: 'rejected', code: 'not_revertible' });
+  t.user('revert_event', { event_id: revert });
+  expect(t.user('revert_event', { event_id: revert })).toMatchObject({ status: 'rejected', code: 'already_reverted' });
   expect(t.user('revert_event', { event_id: 999 })).toMatchObject({ status: 'rejected', code: 'not_found' });
+});
+
+// ---- reverting a revert ------------------------------------------------------------------------------------------
+
+test('reverting a veto writes the ai value back, keeps the lock and is not a veto', () => {
+  const p = t.ai('create_project', { title: 'x', summary: '原来的' }).id;
+  const e = t.ai('update_project', { project: p, fields: { summary: 'AI 写的' } }).event_id;
+  const revert = t.user('revert_event', { event_id: e }).event_id as number;
+  const r = t.user('revert_event', { event_id: revert });
+  expect(r).toMatchObject({ status: 'applied' });
+  expect(project(p)).toMatchObject({ summary: 'AI 写的', locks: '["summary"]' });
+  expect(event(r.event_id as number)).toMatchObject({ op: 'revert_event', actor: 'user', reverts: revert, is_veto: 0 });
+  expect(event(revert).reverted_by).toBe(r.event_id);
+
+  // A revert of a revert of a revert follows the same rule.
+  const third = t.user('revert_event', { event_id: r.event_id });
+  expect(third).toMatchObject({ status: 'applied' });
+  expect(project(p)).toMatchObject({ summary: '原来的', locks: '["summary"]' });
+  expect(lastEvent(t.db)).toMatchObject({ reverts: r.event_id, is_veto: 0 });
+});
+
+test('reverting a revert after a later change to the same column is a conflict', () => {
+  const p = t.ai('create_project', { title: 'x', summary: '原来的' }).id;
+  const e = t.ai('update_project', { project: p, fields: { summary: 'A' } }).event_id;
+  const revert = t.user('revert_event', { event_id: e }).event_id as number;
+  t.user('update_project', { project: p, fields: { summary: 'B' } });
+  expect(t.user('revert_event', { event_id: revert })).toMatchObject({
+    code: 'conflict',
+    message: expect.stringContaining(`projects:${p}.summary`),
+  });
+  expect(project(p).summary).toBe('B');
+});
+
+// ---- undoing a creation the user built on --------------------------------------------------------------------------
+
+test('undoing an ai create_project after the user only edited its fields is allowed, and can itself be undone', () => {
+  const p = t.ai('create_project', { title: 'x', from_session: S });
+  t.user('update_project', { project: p.id, fields: { summary: '我写的', priority: 'P0' } });
+  t.setNow(LATER);
+  const undo = t.user('revert_event', { event_id: p.event_id });
+  expect(undo).toMatchObject({ status: 'applied' });
+  expect(project(p.id)).toMatchObject({ deleted_at: LATER, vetoed: 1 });
+  expect(getProject(t.db, new Date(LATER), p.id)).toBeNull();
+
+  const redo = t.user('revert_event', { event_id: undo.event_id });
+  expect(redo).toMatchObject({ status: 'applied' });
+  expect(project(p.id)).toMatchObject({ deleted_at: null, vetoed: 0, summary: '我写的', priority: 'P0' });
+  expect(contribution('c_1')).toMatchObject({ deleted_at: null, vetoed: 0 });
+  expect(lastEvent(t.db)).toMatchObject({ reverts: undo.event_id, is_veto: 0 });
+  expect(getProject(t.db, new Date(LATER), p.id)).toMatchObject({ id: p.id, summary: '我写的', priority: 'P0' });
+});
+
+test('undoing an ai create_project the user added a todo to is a conflict naming the todo', () => {
+  const p = t.ai('create_project', { title: 'x' });
+  const td = t.user('upsert_todo', { project: p.id, title: '我的 todo' }).id;
+  const before = eventCount();
+  expect(t.user('revert_event', { event_id: p.event_id })).toMatchObject({
+    status: 'rejected',
+    code: 'conflict',
+    message: expect.stringContaining(`todos:${td}`),
+  });
+  expect(project(p.id).deleted_at).toBeNull();
+  expect(eventCount()).toBe(before);
+});
+
+test.each([
+  ['milestones', (p: string) => t.user('upsert_milestone', { project: p, title: 'M' }).id],
+  ['decisions', (p: string) => t.user('record_decision', { project: p, text: '定了' }).id],
+  ['blockers', (p: string) => t.user('set_blocker', { project: p, text: '卡住', kind: 'external' }).id],
+  ['contributions', (p: string) => t.user('link_session', { session: S, project: p }).id],
+])('undoing an ai create_project with a live user-made %s row is a conflict', (table, make) => {
+  const p = t.ai('create_project', { title: 'x' });
+  const id = make(p.id);
+  expect(t.user('revert_event', { event_id: p.event_id })).toMatchObject({
+    code: 'conflict',
+    message: expect.stringContaining(`${table}:${id}`),
+  });
+});
+
+test('ai-made dependents and deleted user items do not block undoing a create_project', () => {
+  const p = t.ai('create_project', { title: 'x' });
+  t.ai('link_session', { session: S, project: p.id });
+  const aiTodo = t.ai('upsert_todo', { project: p.id, title: 'AI 的' }).id;
+  const mine = t.user('upsert_todo', { project: p.id, title: '我的' }).id;
+  t.user('delete_todo', { project: p.id, id: mine });
+  expect(t.user('revert_event', { event_id: p.event_id })).toMatchObject({ status: 'applied' });
+  expect(todo(aiTodo).deleted_at).toBeNull();
+});
+
+test('undoing a user create_project from a session is not blocked by its own link', () => {
+  const p = t.user('create_project', { title: 'x', from_session: S });
+  expect(contribution('c_1').actor).toBe('user');
+  expect(t.user('revert_event', { event_id: p.event_id })).toMatchObject({ status: 'applied' });
+  expect(contribution('c_1').deleted_at).not.toBeNull();
+});
+
+test('undoing an ai milestone the user attached a todo to is a conflict; an ai todo does not block', () => {
+  const p = t.user('create_project', { title: 'x' }).id;
+  const m = t.ai('upsert_milestone', { project: p, title: 'M' });
+  t.ai('upsert_todo', { project: p, title: 'AI 的', milestone_id: m.id });
+  const td = t.user('upsert_todo', { project: p, title: '我的', milestone_id: m.id }).id;
+  expect(t.user('revert_event', { event_id: m.event_id })).toMatchObject({
+    code: 'conflict',
+    message: expect.stringContaining(`todos:${td}`),
+  });
+  t.user('upsert_todo', { project: p, id: td, milestone_id: null });
+  expect(t.user('revert_event', { event_id: m.event_id })).toMatchObject({ status: 'applied' });
 });
 
 test('an event that only changed locks has nothing to revert', () => {
