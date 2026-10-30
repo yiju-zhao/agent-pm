@@ -21,11 +21,25 @@
 
 ## 已确认的环境事实
 
-- gx10-090e 和 gx10-c757：`uname -m` 都是 `aarch64`（Linux arm64，已验证），有 node 22（gx10-090e 是 v22.23.3），**没有 bun**。因此采集器在笔记本上用 bun 交叉编译成 `bun-linux-arm64` 二进制再拷过去，不在 gx10 上装任何运行时。
+- gx10-090e 和 gx10-c757：`uname -m` 都是 `aarch64`（Linux arm64，已验证），都**没有 bun**。只有 gx10-090e 的非交互 PATH 里有 node（v22.23.3）；gx10-c757 的非交互 PATH 里 node 和 bun 都没有。因此采集器在笔记本上用 bun 交叉编译成 `bun-linux-arm64` 二进制再拷过去，不在 gx10 上装任何运行时。
 - 笔记本、mac-mini：macOS arm64，使用 `bun-darwin-arm64` 二进制。
-- 从笔记本直接 ssh mac-mini 曾经超时（只有 herdr 能连上），所以"拷贝二进制"一步用任何能通的方式即可，例如 Tailscale 上的 scp。gx10-c757 的 ssh 用户是 `bz`（`bz@100.87.40.81`），下面命令里的 `gx10-090e` / `gx10-c757` 主机名按你的 ssh 配置（别名）替换，没有别名就写 `用户@Tailscale-IP`。
+- 从笔记本直接 ssh mac-mini 曾经超时过一次（当时 herdr 的 `--machine mac-mini` 能连上），之后没有再测过；"拷贝二进制"一步用任何能通的方式即可，例如 Tailscale 上的 scp。gx10-c757 的 ssh 用户是 `bz`（`bz@100.87.40.81`），下面命令里的 `gx10-090e` / `gx10-c757` 主机名按你的 ssh 配置（别名）替换，没有别名就写 `用户@Tailscale-IP`。
 
 ## 安装
+
+### 前提：每台机器本地装好 herdr 的 claude / codex integration
+
+采集器靠 herdr 快照里的 `agent_session.value` 拿到 agent 的原生 session ID，而这个值**只由 herdr integration 的 hook 上报**。哪台机器没装，那台机器上的 session 全是 `pending:` 临时键、只有屏幕快照（`fidelity: screen`）；codex 还能靠进程启动时间去匹配对话文件，claude 没有任何补救办法。目前只确认笔记本和 gx10-090e 装了；mac-mini 和 gx10-c757 先检查，没装就装上。
+
+在**每台机器本地**执行（`integration` 是本地管理命令，`herdr --machine <label> integration ...` 不会转发到远程机器，所以要 ssh 上去或在那台机器的终端里跑）：
+
+```bash
+herdr integration install claude
+herdr integration install codex
+herdr integration status        # claude 和 codex 都应显示已安装
+```
+
+hook 在 agent 启动时加载，所以装之前就在跑的 agent 要重启一次才会上报 ID。
 
 ### 0. 在笔记本上准备
 
@@ -85,6 +99,8 @@ openssl rand -hex 32   # 每台机器跑一次，记下来
 
    日志在 `~/Library/Logs/herdr-pm/server.log` 和 `server.err.log`。`KeepAlive` 保证崩溃后自动拉起，`RunAtLoad` 保证登录后自动启动。停止：`launchctl bootout "gui/$(id -u)/ai.herdr-pm.server"`；改了配置后重启：`launchctl kickstart -k "gui/$(id -u)/ai.herdr-pm.server"`。
 
+   `gui/<uid>` 域里的 LaunchAgent 只在该用户**已登录**时运行：mac-mini 重启后如果停在登录界面，中心服务和采集器都不会起来。所以在 mac-mini 上打开自动登录（系统设置 → 用户与群组 → 自动登录；开了 FileVault 时 macOS 不允许自动登录，要么关掉 FileVault，要么每次重启后手动登录一次）。另一种做法是把中心服务改成 `/Library/LaunchDaemons` 下带 `UserName` 键的 LaunchDaemon（系统域，开机即运行，不需要登录）；但采集器读的是本机 herdr，herdr 本身跑在用户会话里，所以采集器仍然需要用户登录。
+
 ### 2. 每台机器上的采集器
 
 每台机器都要做：放二进制、写配置、常驻。
@@ -105,9 +121,11 @@ openssl rand -hex 32   # 每台机器跑一次，记下来
 ```
 
 - `server` 是中心的地址，用 mac-mini 的 Tailscale IP（设计文档里记的是 `100.111.225.68`）或 MagicDNS 名；mac-mini 自己上的采集器也可以写 `http://localhost:7718`。
-- `machine` 和 `token` 必须和中心 `collectors` 里这台机器的条目一致，否则中心返回 401 / 403。
+- `machine` 和 `token` 必须和中心 `collectors` 里这台机器的条目一致，否则中心返回 401 / 403。机器 label 会成为 `pending:<机器>:<terminal>` 键的一部分，只能用字母、数字、`.`、`_`、`-`（不能有 `:` 或空白），两边的配置在启动时都会检查。
 - 只有 `server`、`machine`、`token` 是必填的，其余都有默认值（上面写出来的就是默认值）。`~` 会展开成运行采集器的用户的家目录。
 - `stateFile` 是采集器的本地游标。丢了也没事：采集器会先向中心查每个 session 的最大 offset 再续读，不会产生重复 chunk。
+- 中心的数据库从备份恢复（复制回旧的 `.db`）后，重启各机器的采集器即可：每个采集器进程对每个 session 的第一次推送都从"本地游标和中心最大 offset 中较小的那个"续读，备份之后丢掉的那段会重新补上，已有的不会重复。
+- chunk 的 `backfill` 标记是相对**采集器进程启动时间**算的：`ts_end` 早于本次启动的 chunk 都标 `backfill: true`，所以采集器重启后补推的积压内容也会被标成 backfill。
 
 **macOS（笔记本、mac-mini）**
 
@@ -134,6 +152,15 @@ launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/ai.herdr-pm.collector.
 
 launchd 起的进程 PATH 很短，plist 里已经把 `~/.local/bin`（herdr 装在这里）和 `/opt/homebrew/bin` 加进了 `PATH`；如果 herdr 在别处，把 `herdrBin` 写成绝对路径。日志在 `~/Library/Logs/herdr-pm/collector.log`、`collector.err.log`。
 
+部署后确认采集器在 launchd 的环境里能跑 `herdr api snapshot`，而且只看到**本机**的 pane。先用和 plist 一样的最小环境手动跑一次（`env -i` 清掉交互 shell 的环境变量；`herdrBin` 写了绝对路径就用那个路径）：
+
+```bash
+env -i HOME="$HOME" USER="$USER" PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+  herdr api snapshot | jq '[.result.snapshot.panes[] | {pane_id, agent, cwd}]'
+```
+
+列出的应该正好是这台机器上 herdr 里的 pane。再看 launchd 起的采集器本身：`~/Library/Logs/herdr-pm/collector.err.log` 里不应出现 `herdr api snapshot failed`，`herdr-pm sessions --server <中心> --machine <本机 label>` 列出的就是本机的 agent，没有别的机器的。
+
 **Linux（gx10-090e、gx10-c757）**
 
 ```bash
@@ -156,6 +183,16 @@ systemctl --user enable --now herdr-pm-collector
 loginctl enable-linger "$USER"        # 没有登录会话时也保持运行
 journalctl --user -u herdr-pm-collector -f
 ```
+
+同样要确认 systemd 用户服务的环境里能跑 `herdr api snapshot`、只看到本机的 pane。`systemd-run --user` 在和采集器相同的用户服务管理器里起一个临时单元，`PATH` 和 `deploy/systemd/herdr-pm-collector.service` 里的一致：
+
+```bash
+systemd-run --user --wait --pipe -p Environment=PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin" \
+  herdr api snapshot | head -c 2000
+journalctl --user -u herdr-pm-collector -n 20     # 不应出现 "herdr api snapshot failed"
+```
+
+快照里应该只有这台机器的 pane；`herdr-pm sessions --server <中心> --machine <本机 label>` 也应列出本机的 agent。
 
 ### 升级
 
@@ -189,6 +226,7 @@ Claude session 的 `fidelity` 应为 `full`（有对话文件，`chunk_count` �
 
 ## 部署验收（计划 1 完成的标志）
 
+- [ ] 四台机器上本地执行 `herdr integration status`，claude 和 codex integration 都已安装。
 - [ ] mac-mini 上用 launchd 跑中心服务；笔记本、mac-mini、gx10-090e、gx10-c757 各跑一个采集器。
 - [ ] `herdr-pm sessions --server http://<mac-mini 的 Tailscale IP>:7718` 列出四台机器上的全部活跃 session。
 - [ ] 让笔记本休眠超过 3 分钟：它的 session 显示 `offline`；唤醒后恢复 `live` 状态（`working` / `idle` 等），chunk 继续增长，没有重复。
