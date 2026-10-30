@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
+import type { Server } from 'node:http';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
 import { loadCollectorConfig } from './collector/config.ts';
@@ -82,6 +84,9 @@ async function runServer(args: string[], io: Io): Promise<number> {
   const { loadServerConfig, understandingSettings } = await import('./server/config.ts');
   const { openDb } = await import('./server/db.ts');
   const { createApp } = await import('./server/http.ts');
+  const { ChangeFeed } = await import('./server/change-feed.ts');
+  const { attachStream } = await import('./server/stream.ts');
+  const { disabledStatus } = await import('./understand/status.ts');
   const { serve } = await import('@hono/node-server');
 
   const config = loadServerConfig(configPath);
@@ -109,7 +114,10 @@ async function runServer(args: string[], io: Io): Promise<number> {
         );
       }
     }
-    const app = createApp(db, config, undefined, undefined, { scheduler });
+    // `npm run build:web` writes the web UI here (relative to this file, so it works from any working directory).
+    const webDir = fileURLToPath(new URL('../dist/web', import.meta.url));
+    const app = createApp(db, config, undefined, undefined, { scheduler, webDir });
+    const feed = new ChangeFeed(db, { status: () => scheduler?.status() ?? disabledStatus() });
     await new Promise<void>((resolve, reject) => {
       // No hostname: listen on every interface, so collectors and the CLI can reach it over Tailscale.
       const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
@@ -118,7 +126,13 @@ async function runServer(args: string[], io: Io): Promise<number> {
         scheduler?.start();
       });
       server.once('error', reject);
-      const stop = () => server.close((err) => (err ? reject(err) : resolve()));
+      const stream = attachStream(server as Server, feed);
+      // Open WebSockets would keep server.close waiting, so they go first.
+      const stop = () => {
+        stream.close();
+        feed.stop();
+        server.close((err) => (err ? reject(err) : resolve()));
+      };
       process.once('SIGINT', stop);
       process.once('SIGTERM', stop);
       io.signal?.addEventListener('abort', stop, { once: true });

@@ -249,6 +249,29 @@ test('server serves the api on the configured port until it is aborted', async (
   await expect(fetch(`http://127.0.0.1:${port}/sessions`)).rejects.toThrow();
 });
 
+test('server pushes hello on /stream and stops even while a WebSocket is open', async () => {
+  const port = await freePort();
+  const abort = new AbortController();
+  const done = main(['server', '--config', writeServerConfig(port, { understanding: { enabled: false } })], {
+    fetch,
+    stdout: () => {},
+    stderr: () => {},
+    signal: abort.signal,
+  });
+  let closed: Promise<void> | undefined;
+  try {
+    await fetchJsonWhenUp(`http://127.0.0.1:${port}/status`);
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/stream`);
+    closed = new Promise((resolve) => ws.addEventListener('close', () => resolve()));
+    const first = await new Promise<string>((resolve) => ws.addEventListener('message', (e) => resolve(String(e.data)), { once: true }));
+    expect(JSON.parse(first)).toEqual({ type: 'hello' });
+  } finally {
+    abort.abort();
+  }
+  expect(await done).toBe(0);
+  await closed;
+});
+
 test('server starts the scheduler by default and says when no oauth token is configured', async () => {
   vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', '');
   const { code, stdout, stderr, status } = await serverStatus({});

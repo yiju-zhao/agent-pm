@@ -17,6 +17,7 @@ import type { ServerConfig } from './config.ts';
 import { mountDomainRoutes, userAuth } from './domain-routes.ts';
 import { applySnapshot, findByShortId, insertChunks, listSessions, maxOffset } from './sessions-repo.ts';
 import type { SessionView } from './sessions-repo.ts';
+import { mountWeb } from './web.ts';
 
 /**
  * The central API. `/ingest/*` is for collectors (bearer token bound to one machine); the project
@@ -25,7 +26,8 @@ import type { SessionView } from './sessions-repo.ts';
  * conversation text and takes the user token. Every timestamp the server stores comes from `clock`,
  * never from a request body: offline detection relies on server-stamped heartbeats. `newId`
  * generates the ids of new projects, milestones and so on (random unless a test pins it).
- * `opts.scheduler` is the running understanding scheduler, or absent when the layer is switched off.
+ * `opts.scheduler` is the running understanding scheduler, or absent when the layer is switched off. `opts.webDir` is the
+ * built web UI served at `/` (`./web.ts`); absent or null, `/` says how to build it.
  */
 export function createApp(
   db: DatabaseSync,
@@ -106,6 +108,7 @@ export function createApp(
 
   mountDomainRoutes(app, db, config, deps);
   mountMcp(app, db, config, deps);
+  mountWeb(app, opts.webDir ?? null);
 
   return app;
 }
@@ -113,7 +116,7 @@ export function createApp(
 /** One entry of `GET /sessions`: the session and the live projects it is linked to. */
 export type SessionListItem = SessionView & { linked_projects: Array<{ id: string; title: string }> };
 
-export type AppOptions = { scheduler?: Scheduler | null };
+export type AppOptions = { scheduler?: Scheduler | null; webDir?: string | null };
 
 /**
  * Authenticates an ingest request, then reads and validates its JSON body. Order: bearer token
