@@ -11,5 +11,6 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src", "tests", "vitest.config.ts"]
+  "include": ["src", "tests", "vitest.config.ts", "vite.config.ts"],
+  "exclude": ["tests/web"]
 }

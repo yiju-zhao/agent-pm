@@ -1,0 +1,390 @@
+/* Palette and shapes follow docs/superpowers/mockups/02-home-project-centric.html. */
+:root {
+  --bg: #fafafa;
+  --card: #fff;
+  --line: #e3e3e3;
+  --ink: #1f2328;
+  --dim: #777;
+  --accent: #4c8bf5;
+  --accent-soft: #dbe7fd;
+  --blocked: #b42318;
+  --running: #2da44e;
+  --waiting: #e5534b;
+  --idle: #bbb;
+  --connecting: #d4a017;
+  --ask-bg: #fffaf0;
+  --ask-line: #f0d58a;
+  --p0-bg: #fde2e1;
+  --p0-ink: #a11;
+  --p1-bg: #fff1d6;
+  --p1-ink: #8a5a00;
+  --p2-bg: #e7eef7;
+  --p2-ink: #34557a;
+  --p3-bg: #eee;
+  --p3-ink: #555;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 13px/1.45 -apple-system, "PingFang SC", sans-serif;
+  overflow-wrap: anywhere;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  padding: 1px 8px;
+  background: var(--card);
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+input,
+select,
+textarea {
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 3px 6px;
+  background: var(--card);
+}
+
+h1,
+h2 {
+  margin: 0;
+}
+
+/* ---- header ------------------------------------------------------------------------------------------------ */
+
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  padding: 8px 14px;
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+}
+
+.topbar h1 {
+  font-size: 15px;
+}
+
+.topbar nav {
+  display: flex;
+  gap: 12px;
+}
+
+.topbar nav a[aria-current="page"] {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.topbar-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-left: auto;
+}
+
+.understanding {
+  color: var(--dim);
+}
+
+.warn {
+  margin-left: 4px;
+  color: var(--p1-ink);
+  cursor: help;
+}
+
+.conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.conn .dot {
+  background: var(--waiting);
+}
+
+.conn-open .dot {
+  background: var(--running);
+}
+
+.conn-connecting .dot {
+  background: var(--connecting);
+}
+
+/* ---- page layout: main column + right column; the right column drops below on narrow screens --------------- */
+
+main {
+  padding: 14px;
+}
+
+.cols {
+  display: flex;
+  gap: 12px;
+}
+
+.cols > .main {
+  flex: 1;
+  min-width: 0;
+}
+
+.cols > .side {
+  width: 30%;
+  min-width: 0;
+}
+
+@media (max-width: 899.98px) {
+  .cols {
+    flex-direction: column;
+  }
+
+  .cols > .side {
+    width: auto;
+  }
+}
+
+/* ---- shared building blocks (from the mockup) -------------------------------------------------------------- */
+
+.tag {
+  display: inline-block;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: #eef;
+  color: #335;
+  margin-right: 4px;
+}
+
+.p0 {
+  background: var(--p0-bg);
+  color: var(--p0-ink);
+}
+
+.p1 {
+  background: var(--p1-bg);
+  color: var(--p1-ink);
+}
+
+.p2 {
+  background: var(--p2-bg);
+  color: var(--p2-ink);
+}
+
+.p3 {
+  background: var(--p3-bg);
+  color: var(--p3-ink);
+}
+
+.dim {
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.blk {
+  color: var(--blocked);
+  font-size: 12px;
+}
+
+.h {
+  font-weight: 600;
+  font-size: 12px;
+  color: #555;
+  letter-spacing: 0.04em;
+  margin: 2px 0 6px;
+}
+
+.btn {
+  display: inline-block;
+  font-size: 12px;
+  margin: 3px 4px 0 0;
+}
+
+.sess {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  border: 1px solid #ddd;
+  background: var(--card);
+  border-radius: 12px;
+  padding: 1px 8px;
+  margin: 2px 4px 0 0;
+  max-width: 100%;
+}
+
+.dot {
+  display: inline-block;
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.dot.w {
+  background: var(--running);
+}
+
+.dot.b {
+  background: var(--waiting);
+}
+
+.dot.i {
+  background: var(--idle);
+}
+
+.proj {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.proj.sel {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.ms {
+  display: flex;
+  gap: 3px;
+  margin: 5px 0;
+}
+
+.ms span {
+  flex: 1;
+  height: 5px;
+  border-radius: 2px;
+  background: #e6e6e6;
+}
+
+.ms span.d {
+  background: var(--accent);
+}
+
+.ms span.n {
+  background: #9fc0fa;
+}
+
+.todo {
+  font-size: 12px;
+  margin: 2px 0;
+}
+
+.q {
+  background: var(--ask-bg);
+  border: 1px solid var(--ask-line);
+  border-radius: 6px;
+  padding: 7px 9px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.tray {
+  background: var(--card);
+  border: 1px dashed var(--idle);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+/* ---- token dialog ------------------------------------------------------------------------------------------ */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.modal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(420px, 100%);
+  padding: 16px;
+  background: var(--card);
+  border-radius: 8px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+}
+
+.modal h2 {
+  font-size: 15px;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* ---- toasts ------------------------------------------------------------------------------------------------ */
+
+.toasts {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.toast {
+  max-width: min(480px, 100%);
+  padding: 8px 12px;
+  background: #24292f;
+  color: #fff;
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  /* The text can be selected and copied, so the toast itself takes pointer events. */
+  pointer-events: auto;
+  user-select: text;
+  -webkit-user-select: text;
+}
