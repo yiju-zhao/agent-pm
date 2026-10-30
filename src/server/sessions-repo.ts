@@ -290,7 +290,8 @@ function loadViews(db: DatabaseSync, now: Date): SessionView[] {
   }));
 }
 
-function effectiveStatus(row: SessionRow, heartbeat: string | null, now: Date): SessionView['effective_status'] {
+/** What a session shows as: its lifecycle once it is not live, `offline` when its machine went silent, else its live status. */
+export function effectiveStatus(row: SessionRow, heartbeat: string | null, now: Date): SessionView['effective_status'] {
   if (row.lifecycle !== 'live') return row.lifecycle;
   if (heartbeat === null || now.getTime() - Date.parse(heartbeat) > OFFLINE_AFTER_MS) return 'offline';
   return row.live_status;

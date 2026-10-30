@@ -14,6 +14,16 @@ export const ServerConfig = z
     dbPath: z.string().min(1),
     userToken: z.string().min(16, 'must be at least 16 characters').regex(/^\S+$/, 'must not contain whitespace'),
     collectors: z.record(MachineLabel, z.string().min(1)),
+    /** The digester, curator and scheduler; every field is optional (see `understandingSettings` for the defaults). */
+    understanding: z
+      .object({
+        enabled: z.boolean().optional(),
+        digestModel: z.string().min(1).optional(),
+        curateModel: z.string().min(1).optional(),
+        /** A file holding a `claude setup-token` token, used as CLAUDE_CODE_OAUTH_TOKEN. */
+        oauthTokenFile: z.string().min(1).optional(),
+      })
+      .optional(),
   })
   .superRefine((config, ctx) => {
     const clash = Object.entries(config.collectors).find(([, token]) => token === config.userToken);
@@ -27,7 +37,26 @@ export const ServerConfig = z
   });
 export type ServerConfig = z.infer<typeof ServerConfig>;
 
-/** Reads and validates the server config; a relative `dbPath` is resolved against the config file's directory. */
+export const DEFAULT_DIGEST_MODEL = 'claude-haiku-5-5';
+export const DEFAULT_CURATE_MODEL = 'claude-sonnet-5-5';
+
+export type UnderstandingSettings = { enabled: boolean; digestModel: string; curateModel: string; oauthTokenFile?: string };
+
+/** The `understanding` block with its defaults filled in: enabled, Haiku digests, Sonnet curation. */
+export function understandingSettings(config: ServerConfig): UnderstandingSettings {
+  const u = config.understanding ?? {};
+  return {
+    enabled: u.enabled ?? true,
+    digestModel: u.digestModel ?? DEFAULT_DIGEST_MODEL,
+    curateModel: u.curateModel ?? DEFAULT_CURATE_MODEL,
+    oauthTokenFile: u.oauthTokenFile,
+  };
+}
+
+/**
+ * Reads and validates the server config. A relative `dbPath` or `understanding.oauthTokenFile` is resolved against the
+ * config file's directory.
+ */
 export function loadServerConfig(path: string): ServerConfig {
   let raw: string;
   try {
@@ -56,5 +85,9 @@ export function loadServerConfig(path: string): ServerConfig {
   const config = parsed.data;
   // ':memory:' is SQLite's in-memory database, not a file name.
   const dbPath = config.dbPath === ':memory:' ? config.dbPath : resolve(dirname(path), config.dbPath);
+  const tokenFile = config.understanding?.oauthTokenFile;
+  if (config.understanding !== undefined && tokenFile !== undefined) {
+    return { ...config, dbPath, understanding: { ...config.understanding, oauthTokenFile: resolve(dirname(path), tokenFile) } };
+  }
   return { ...config, dbPath };
 }

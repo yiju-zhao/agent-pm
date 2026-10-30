@@ -1,9 +1,11 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { openDb } from '../../src/server/db.ts';
 import { createApp } from '../../src/server/http.ts';
 import type { ServerConfig } from '../../src/server/config.ts';
 import { OFFLINE_AFTER_MS } from '../../src/server/sessions-repo.ts';
+import type { LlmRunner } from '../../src/understand/llm.ts';
+import { Scheduler } from '../../src/understand/scheduler.ts';
 import type { ChunkPush, SnapshotPush, SnapshotSession } from '../../src/shared/protocol.ts';
 
 const GX10 = 'gx10-090e';
@@ -274,4 +276,65 @@ test('sessions endpoints need no token, unknown routes are 404', async () => {
   expect((await get('/sessions/by-short-id/abcd', null)).status).toBe(200);
   expect((await get('/nope', null)).status).toBe(404);
   expect((await get('/ingest/snapshot', GX10_TOKEN)).status).toBe(404); // POST-only
+});
+
+// ---- understanding -----------------------------------------------------------------------------------------------
+
+function withScheduler(): { app: ReturnType<typeof createApp>; scheduler: Scheduler } {
+  const runner: LlmRunner = async () => ({ ok: false, kind: 'other', message: 'not in tests', durationMs: 0 });
+  const scheduler = new Scheduler(db, { now: () => now, newId: (p) => `${p}_1` }, runner, { digest: 'd', curate: 'c' });
+  return { app: createApp(db, config, () => now, undefined, { scheduler }), scheduler };
+}
+
+test('GET /status is open and reports the scheduler state', async () => {
+  const off = await get('/status', null);
+  expect(off.status).toBe(200);
+  expect(await off.json()).toEqual({
+    understanding: {
+      enabled: false,
+      paused_until: null,
+      pause_reason: null,
+      last_error: null,
+      running: null,
+      waiting_sessions: 0,
+      uncurated_digests: 0,
+      backfill: { sessions_total: 0, sessions_done: 0 },
+      last_digest_at: null,
+      last_curate_at: null,
+    },
+  });
+
+  await post('/ingest/chunks', { machine: GX10, chunks: [chunk(CLAUDE_KEY, 0, 10), chunk(CLAUDE_KEY, 10, 20, { backfill: true })] });
+  const { app: on } = withScheduler();
+  const res = await on.request('/status');
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as { understanding: Record<string, unknown> };
+  expect(body.understanding).toMatchObject({
+    enabled: true,
+    paused_until: null,
+    waiting_sessions: 1,
+    uncurated_digests: 0,
+    backfill: { sessions_total: 1, sessions_done: 0 },
+  });
+});
+
+test('POST /sync needs the user token and returns 202', async () => {
+  const { app: on, scheduler } = withScheduler();
+  const requestSync = vi.spyOn(scheduler, 'requestSync');
+  const sync = (token: string | null, target = on) =>
+    target.request('/sync', { method: 'POST', headers: token === null ? {} : { authorization: `Bearer ${token}` } });
+
+  expect((await sync(null)).status).toBe(401);
+  expect((await sync(GX10_TOKEN)).status).toBe(401);
+  expect(requestSync).not.toHaveBeenCalled();
+
+  const accepted = await sync(config.userToken);
+  expect(accepted.status).toBe(202);
+  expect(await accepted.json()).toEqual({ accepted: true });
+  expect(requestSync).toHaveBeenCalledTimes(1);
+
+  const disabled = await sync(config.userToken, app);
+  expect(disabled.status).toBe(409);
+  expect(await disabled.json()).toEqual({ error: 'understanding_disabled' });
+  expect((await sync(null, app)).status).toBe(401);
 });

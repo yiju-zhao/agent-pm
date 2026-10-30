@@ -8,8 +8,10 @@ import type { DomainDeps } from '../domain/types.ts';
 import { ChunkPush, SnapshotPush } from '../shared/protocol.ts';
 import type { OffsetResponse } from '../shared/protocol.ts';
 import { parseSessionKey } from '../shared/session-key.ts';
+import { disabledStatus } from '../understand/scheduler.ts';
+import type { Scheduler } from '../understand/scheduler.ts';
 import type { ServerConfig } from './config.ts';
-import { mountDomainRoutes } from './domain-routes.ts';
+import { mountDomainRoutes, userAuth } from './domain-routes.ts';
 import { applySnapshot, findByShortId, insertChunks, listSessions, maxOffset } from './sessions-repo.ts';
 
 /**
@@ -18,13 +20,16 @@ import { applySnapshot, findByShortId, insertChunks, listSessions, maxOffset } f
  * unauthenticated for now (Tailscale only). Every timestamp the server stores comes from `clock`,
  * never from a request body: offline detection relies on server-stamped heartbeats. `newId`
  * generates the ids of new projects, milestones and so on (random unless a test pins it).
+ * `opts.scheduler` is the running understanding scheduler, or absent when the layer is switched off.
  */
 export function createApp(
   db: DatabaseSync,
   config: ServerConfig,
   clock: () => Date = () => new Date(),
   newId?: DomainDeps['newId'],
+  opts: AppOptions = {},
 ): Hono {
+  const scheduler = opts.scheduler ?? null;
   const app = new Hono();
   const deps: DomainDeps = { now: clock, newId: newId ?? defaultDeps().newId };
 
@@ -73,10 +78,20 @@ export function createApp(
 
   app.get('/sessions/by-short-id/:sid', (c) => c.json(findByShortId(db, c.req.param('sid'), clock())));
 
+  app.get('/status', (c) => c.json({ understanding: scheduler?.status() ?? disabledStatus() }));
+
+  app.post('/sync', userAuth(config), (c) => {
+    if (scheduler === null) return c.json({ error: 'understanding_disabled' }, 409);
+    scheduler.requestSync();
+    return c.json({ accepted: true }, 202);
+  });
+
   mountDomainRoutes(app, db, config, deps);
 
   return app;
 }
+
+export type AppOptions = { scheduler?: Scheduler | null };
 
 /**
  * Authenticates an ingest request, then reads and validates its JSON body. Order: bearer token

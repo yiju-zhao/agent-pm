@@ -93,18 +93,10 @@ async function readBody<S extends z.ZodType>(c: Context, schema: S): Promise<z.o
 
 // ---- routes ------------------------------------------------------------------------------------------------------
 
-type Params = Record<string, string>;
-type WriteMethod = 'POST' | 'PATCH' | 'PUT' | 'DELETE';
-
-/**
- * The project API. Reads (`GET`) are open like `/sessions`; every write needs `Authorization: Bearer <userToken>`, runs as
- * the user through `execute()`, and answers with the operation's result. The collectors' tokens are not accepted here, and
- * the user token is not accepted on `/ingest/*` (the config forbids the two overlapping).
- */
-export function mountDomainRoutes(app: Hono, db: DatabaseSync, config: ServerConfig, deps: DomainDeps): void {
+/** Middleware that answers 401 unless the request carries `Authorization: Bearer <userToken>`. */
+export function userAuth(config: ServerConfig): MiddlewareHandler {
   const expected = Buffer.from(config.userToken);
-
-  const requireUser: MiddlewareHandler = async (c, next) => {
+  return async (c, next) => {
     const match = /^Bearer +(\S+)$/i.exec(c.req.header('Authorization') ?? '');
     const presented = Buffer.from(match?.[1] ?? '');
     // timingSafeEqual needs equal lengths, so a token of a different length simply cannot match.
@@ -114,6 +106,18 @@ export function mountDomainRoutes(app: Hono, db: DatabaseSync, config: ServerCon
     }
     await next();
   };
+}
+
+type Params = Record<string, string>;
+type WriteMethod = 'POST' | 'PATCH' | 'PUT' | 'DELETE';
+
+/**
+ * The project API. Reads (`GET`) are open like `/sessions`; every write needs `Authorization: Bearer <userToken>`, runs as
+ * the user through `execute()`, and answers with the operation's result. The collectors' tokens are not accepted here, and
+ * the user token is not accepted on `/ingest/*` (the config forbids the two overlapping).
+ */
+export function mountDomainRoutes(app: Hono, db: DatabaseSync, config: ServerConfig, deps: DomainDeps): void {
+  const requireUser = userAuth(config);
 
   const limitBody = bodyLimit({
     maxSize: MAX_BODY_BYTES,

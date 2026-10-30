@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { main } from '../src/cli.ts';
 import { loadCollectorConfig } from '../src/collector/config.ts';
 import { loadServerConfig } from '../src/server/config.ts';
@@ -21,6 +21,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -174,11 +175,49 @@ async function freePort(): Promise<number> {
   return port;
 }
 
-function writeServerConfig(port: number): string {
+function writeServerConfig(port: number, extra: Record<string, unknown> = {}): string {
   const path = join(dir, 'server.json');
-  writeFileSync(path, JSON.stringify({ port, dbPath: 'pm.db', userToken: 'user-token-0123456789', collectors: { laptop: 'tok-laptop' } }));
+  writeFileSync(
+    path,
+    JSON.stringify({ port, dbPath: 'pm.db', userToken: 'user-token-0123456789', collectors: { laptop: 'tok-laptop' }, ...extra }),
+  );
   return path;
 }
+
+/** Polls `url` until the server answers with JSON. */
+async function fetchJsonWhenUp(url: string): Promise<unknown> {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    try {
+      return await (await fetch(url)).json();
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+  throw new Error(`${url} never answered`);
+}
+
+/** Starts `server` with `extra` config, reads `/status` once it is up, then aborts it. */
+async function serverStatus(extra: Record<string, unknown>): Promise<{ code: number; stdout: string; stderr: string; status: unknown }> {
+  const port = await freePort();
+  const abort = new AbortController();
+  const out: string[] = [];
+  const err: string[] = [];
+  const done = main(['server', '--config', writeServerConfig(port, extra)], {
+    fetch,
+    stdout: (s) => out.push(s),
+    stderr: (s) => err.push(s),
+    signal: abort.signal,
+  });
+  let status: unknown;
+  try {
+    status = await fetchJsonWhenUp(`http://127.0.0.1:${port}/status`);
+  } finally {
+    abort.abort();
+  }
+  return { code: await done, stdout: out.join(''), stderr: err.join(''), status };
+}
+
+const NO_TOKEN_HINT = /no understanding\.oauthTokenFile and no CLAUDE_CODE_OAUTH_TOKEN/;
 
 test('server serves the api on the configured port until it is aborted', async () => {
   const port = await freePort();
@@ -210,6 +249,54 @@ test('server serves the api on the configured port until it is aborted', async (
   await expect(fetch(`http://127.0.0.1:${port}/sessions`)).rejects.toThrow();
 });
 
+test('server starts the scheduler by default and says when no oauth token is configured', async () => {
+  vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', '');
+  const { code, stdout, stderr, status } = await serverStatus({});
+  expect(code).toBe(0);
+  expect(stderr).toBe('');
+  expect(status).toMatchObject({ understanding: { enabled: true, paused_until: null } });
+  expect(stdout).toMatch(NO_TOKEN_HINT);
+});
+
+test('server reads understanding.oauthTokenFile and stays quiet about the token', async () => {
+  vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', '');
+  writeFileSync(join(dir, 'token'), '  sk-ant-oat-test-token\n');
+  const { code, stdout, status } = await serverStatus({ understanding: { oauthTokenFile: 'token' } });
+  expect(code).toBe(0);
+  expect(status).toMatchObject({ understanding: { enabled: true } });
+  expect(stdout).not.toMatch(NO_TOKEN_HINT);
+  expect(stdout).not.toContain('sk-ant-oat-test-token');
+});
+
+test('server with understanding disabled runs no scheduler', async () => {
+  vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', '');
+  const { code, stdout, status } = await serverStatus({ understanding: { enabled: false } });
+  expect(code).toBe(0);
+  expect(status).toMatchObject({ understanding: { enabled: false } });
+  expect(stdout).not.toMatch(NO_TOKEN_HINT);
+});
+
+test('server exits 1 with a clear message when the oauth token file cannot be read', async () => {
+  const port = await freePort();
+  const missing = join(dir, 'missing-token');
+  const empty = join(dir, 'empty-token');
+  writeFileSync(empty, '  \n');
+  for (const [file, reason] of [
+    [missing, /ENOENT/],
+    [empty, /empty/],
+  ] as const) {
+    const err: string[] = [];
+    const code = await main(['server', '--config', writeServerConfig(port, { understanding: { oauthTokenFile: file } })], {
+      fetch,
+      stdout: () => {},
+      stderr: (s) => err.push(s),
+    });
+    expect(code, file).toBe(1);
+    expect(err.join(''), file).toContain(`understanding.oauthTokenFile ${file}`);
+    expect(err.join(''), file).toMatch(reason);
+  }
+});
+
 test('server exits 1 when the port is already taken', async () => {
   const blocker = createServer();
   await new Promise<void>((resolve) => blocker.listen(0, resolve));
@@ -231,8 +318,15 @@ test('server exits 1 when the port is already taken', async () => {
 test('cli.ts imports server modules only dynamically, so the collect path never loads node:sqlite or hono', () => {
   const source = readFileSync(new URL('../src/cli.ts', import.meta.url), 'utf8');
   const staticImports = [...source.matchAll(/^import\s+(?!type\b)[^;]*?from\s+'([^']+)'/gms)].map((m) => m[1]!);
-  expect(staticImports.filter((spec) => /server|sqlite|hono/.test(spec))).toEqual([]);
-  for (const spec of ['./server/config.ts', './server/db.ts', './server/http.ts', '@hono/node-server']) {
+  expect(staticImports.filter((spec) => /server|sqlite|hono|understand|claude-agent-sdk/.test(spec))).toEqual([]);
+  for (const spec of [
+    './server/config.ts',
+    './server/db.ts',
+    './server/http.ts',
+    '@hono/node-server',
+    './understand/scheduler.ts',
+    './understand/agent-sdk.ts',
+  ]) {
     expect(source).toContain(`await import('${spec}')`);
   }
 });

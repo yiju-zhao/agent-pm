@@ -167,6 +167,8 @@ const WRITE_ROUTES: Array<[method: string, pattern: string, body?: unknown]> = [
   ['POST', '/events/:id/revert'],
   ['POST', '/questions/:id/answer', { option_index: 0 }],
   ['POST', '/questions/:id/dismiss'],
+  // Not a project write, but it starts model calls, so it takes the user token too (see http.test.ts).
+  ['POST', '/sync'],
 ];
 
 test('every write route refuses a missing, wrong, collector and malformed token without touching the database', async () => {

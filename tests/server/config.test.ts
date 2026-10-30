@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'vitest';
-import { loadServerConfig } from '../../src/server/config.ts';
+import { loadServerConfig, understandingSettings } from '../../src/server/config.ts';
 
 let dir: string;
 
@@ -127,4 +127,37 @@ test('the error for a userToken that equals a collector token does not print the
 test('rejects a file that is not JSON', async () => {
   const path = await configFile('{not json');
   expect(() => loadServerConfig(path)).toThrow(/not valid JSON/);
+});
+
+test('understanding settings are optional and oauthTokenFile resolves relative to the config file', async () => {
+  const base = { port: 8787, dbPath: 'x', userToken: USER_TOKEN, collectors: {} };
+  const plain = loadServerConfig(await configFile(base));
+  expect(plain.understanding).toBeUndefined();
+  expect(understandingSettings(plain)).toEqual({
+    enabled: true,
+    digestModel: 'claude-haiku-5-5',
+    curateModel: 'claude-sonnet-5-5',
+    oauthTokenFile: undefined,
+  });
+
+  const custom = loadServerConfig(
+    await configFile({
+      ...base,
+      understanding: { enabled: false, digestModel: 'm-digest', curateModel: 'm-curate', oauthTokenFile: 'secrets/token' },
+    }),
+  );
+  expect(custom.understanding).toEqual({
+    enabled: false,
+    digestModel: 'm-digest',
+    curateModel: 'm-curate',
+    oauthTokenFile: join(dir, 'secrets', 'token'),
+  });
+  expect(understandingSettings(custom)).toEqual(custom.understanding);
+
+  const absolute = loadServerConfig(await configFile({ ...base, understanding: { oauthTokenFile: '/etc/herdr-pm/token' } }));
+  expect(absolute.understanding).toEqual({ oauthTokenFile: '/etc/herdr-pm/token' });
+
+  const bad = await configFile({ ...base, understanding: { enabled: 'yes', digestModel: '' } });
+  expect(() => loadServerConfig(bad)).toThrow(/understanding\.enabled/);
+  expect(() => loadServerConfig(bad)).toThrow(/understanding\.digestModel/);
 });

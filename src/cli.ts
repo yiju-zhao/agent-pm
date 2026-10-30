@@ -1,8 +1,10 @@
 #!/usr/bin/env node
+import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
 import { loadCollectorConfig } from './collector/config.ts';
 import { runCollector } from './collector/loop.ts';
+import type { Scheduler } from './understand/scheduler.ts';
 
 // Server modules (node:sqlite, hono) are loaded only inside the `server` command, with a dynamic
 // import: the single-file collector binary is built with bun, which has no node:sqlite, so the
@@ -77,20 +79,43 @@ async function runServer(args: string[], io: Io): Promise<number> {
   if (process.versions.bun) {
     throw new Error('the server needs node:sqlite, which bun lacks: run it with node (node src/cli.ts server --config <path>)');
   }
-  const { loadServerConfig } = await import('./server/config.ts');
+  const { loadServerConfig, understandingSettings } = await import('./server/config.ts');
   const { openDb } = await import('./server/db.ts');
   const { createApp } = await import('./server/http.ts');
   const { serve } = await import('@hono/node-server');
 
   const config = loadServerConfig(configPath);
+  const understanding = understandingSettings(config);
+  // Read once, before anything is opened: a token file that is configured but unusable stops the server.
+  const oauthToken =
+    understanding.enabled && understanding.oauthTokenFile !== undefined ? readTokenFile(understanding.oauthTokenFile) : undefined;
+
   const db = openDb(config.dbPath);
+  let scheduler: Scheduler | null = null;
   let removeListeners = () => {};
   try {
+    if (understanding.enabled) {
+      // The scheduler and the Agent SDK runner are server-only, like the modules above.
+      const { Scheduler } = await import('./understand/scheduler.ts');
+      const { agentSdkRunner } = await import('./understand/agent-sdk.ts');
+      const { defaultDeps } = await import('./domain/types.ts');
+      scheduler = new Scheduler(db, defaultDeps(), agentSdkRunner({ oauthToken }), {
+        digest: understanding.digestModel,
+        curate: understanding.curateModel,
+      });
+      if (oauthToken === undefined && !process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+        io.stdout(
+          'herdr-pm server: no understanding.oauthTokenFile and no CLAUDE_CODE_OAUTH_TOKEN; model calls use this machine\'s Claude Code login\n',
+        );
+      }
+    }
+    const app = createApp(db, config, undefined, undefined, { scheduler });
     await new Promise<void>((resolve, reject) => {
       // No hostname: listen on every interface, so collectors and the CLI can reach it over Tailscale.
-      const server = serve({ fetch: createApp(db, config).fetch, port: config.port }, (info) => {
+      const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
         const collectors = Object.keys(config.collectors).length;
         io.stdout(`herdr-pm server: listening on :${info.port} (all interfaces), db ${config.dbPath}, ${collectors} collector(s)\n`);
+        scheduler?.start();
       });
       server.once('error', reject);
       const stop = () => server.close((err) => (err ? reject(err) : resolve()));
@@ -106,8 +131,22 @@ async function runServer(args: string[], io: Io): Promise<number> {
     return 0;
   } finally {
     removeListeners();
+    // A model call in flight finishes (and writes its result) before the database goes away.
+    await scheduler?.stop();
     db.close();
   }
+}
+
+/** The trimmed content of the oauth token file; unreadable or empty is a startup error. */
+function readTokenFile(path: string): string {
+  let token: string;
+  try {
+    token = readFileSync(path, 'utf8').trim();
+  } catch (err) {
+    throw new Error(`cannot read understanding.oauthTokenFile ${path}: ${(err as Error).message}`, { cause: err });
+  }
+  if (token === '') throw new Error(`understanding.oauthTokenFile ${path} is empty`);
+  return token;
 }
 
 async function runCollect(args: string[], io: Io): Promise<number> {

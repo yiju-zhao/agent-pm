@@ -7,5 +7,11 @@
     "mac-mini": "REPLACE-WITH-RANDOM-TOKEN-mac-mini",
     "gx10-090e": "REPLACE-WITH-RANDOM-TOKEN-gx10-090e",
     "gx10-c757": "REPLACE-WITH-RANDOM-TOKEN-gx10-c757"
+  },
+  "understanding": {
+    "enabled": true,
+    "digestModel": "claude-haiku-5-5",
+    "curateModel": "claude-sonnet-5-5",
+    "oauthTokenFile": "./claude-oauth-token"
   }
 }
