@@ -1,9 +1,9 @@
 import { addLocks, LOCKABLE, readLocks, readRow } from './changes.ts';
 import type { Row } from './changes.ts';
 import type { Handler, OpContext } from './execute.ts';
+import { applyAiFieldEdits, definedFields } from './field-edits.ts';
 import type { OpArgs, OpName } from './ops.ts';
 import { confirmOptions } from './questions.ts';
-import type { Guard } from './questions.ts';
 import { aiMayTransition, checkTransition } from './stage.ts';
 import { OpRejected, STAGE_LABEL } from './types.ts';
 import type { Stage } from './types.ts';
@@ -22,20 +22,13 @@ export function loadProject(ctx: OpContext, id: string): Row {
   return row;
 }
 
-/** The keys of `values` that are set, sorted. */
-function setKeys(values: Record<string, unknown>): string[] {
-  return Object.keys(values)
-    .filter((k) => values[k] !== undefined)
-    .sort();
-}
-
 function createProject(ctx: OpContext, args: OpArgs<'create_project'>): { id: string } {
   const stage = args.stage ?? 'idea';
   if (ctx.ai && stage !== 'idea') throw new OpRejected('not_allowed', 'an AI may only create projects in idea');
   if (stage === 'merged') throw new OpRejected('invalid', 'a project cannot be created merged; create it, then merge it');
 
   const id = ctx.deps.newId('p');
-  const given = setKeys(args).filter((k) => LOCKABLE.projects.includes(k));
+  const given = Object.keys(definedFields(args)).filter((k) => LOCKABLE.projects.includes(k));
   ctx.changes.insert('projects', {
     id,
     title: args.title,
@@ -55,11 +48,10 @@ function createProject(ctx: OpContext, args: OpArgs<'create_project'>): { id: st
 
 function updateProject(ctx: OpContext, args: OpArgs<'update_project'>): void {
   const row = loadProject(ctx, args.project);
-  const fields: Record<string, string | null> = {};
-  for (const key of setKeys(args.fields)) fields[key] = args.fields[key as keyof typeof args.fields] ?? null;
-  const keys = Object.keys(fields);
+  const fields = definedFields(args.fields);
 
   if (!ctx.ai) {
+    const keys = Object.keys(fields);
     ctx.changes.update('projects', args.project, {
       ...fields,
       locks: addLocks(row, keys),
@@ -68,25 +60,9 @@ function updateProject(ctx: OpContext, args: OpArgs<'update_project'>): void {
     return;
   }
 
-  const locked = new Set(readLocks(row));
-  const direct: Record<string, string | null> = {};
-  const proposed: Record<string, string | null> = {};
-  for (const key of keys) {
-    if (!locked.has(key)) direct[key] = fields[key];
-    else if (row[key] !== fields[key]) proposed[key] = fields[key];
-  }
-  ctx.changes.update('projects', args.project, direct);
-
-  const proposedKeys = Object.keys(proposed);
-  if (proposedKeys.length === 0) return;
-  ctx.propose({
-    kind: 'confirm',
-    prompt: `AI 想修改你锁定的字段（${proposedKeys.join('、')}）：${ctx.reason}`,
-    options: confirmOptions('update_project', { project: args.project, fields: proposed }),
-    project_id: args.project,
-    session_key: null,
-    guards: proposedKeys.map((col): Guard => ({ table: 'projects', id: args.project, col, equals: row[col] })),
-    dedupe_key: `update:projects:${args.project}:${proposedKeys.join(',')}`,
+  applyAiFieldEdits(ctx, 'projects', row, fields, {
+    op: 'update_project',
+    args: (proposed) => ({ project: args.project, fields: proposed }),
   });
 }
 
