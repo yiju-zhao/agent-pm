@@ -1,6 +1,7 @@
 {
   "port": 7718,
   "dbPath": "./herdr-pm.db",
+  "userToken": "REPLACE-WITH-RANDOM-USER-TOKEN-AT-LEAST-16",
   "collectors": {
     "laptop": "REPLACE-WITH-RANDOM-TOKEN-laptop",
     "mac-mini": "REPLACE-WITH-RANDOM-TOKEN-mac-mini",

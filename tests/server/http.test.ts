@@ -14,6 +14,7 @@ const CLAUDE_KEY = 'claude:5d27595b-908e-4fe5-9283-890acdbd075f';
 const config: ServerConfig = {
   port: 8787,
   dbPath: ':memory:',
+  userToken: 'user-secret-token-0123456789',
   collectors: { [GX10]: GX10_TOKEN, laptop: LAPTOP_TOKEN },
 };
 

@@ -3,12 +3,28 @@ import { dirname, resolve } from 'node:path';
 import { z } from 'zod';
 import { MachineLabel } from '../shared/protocol.ts';
 
-/** `collectors` maps a machine label to the bearer token that machine's collector pushes with. */
-export const ServerConfig = z.object({
-  port: z.number().int().min(1).max(65535),
-  dbPath: z.string().min(1),
-  collectors: z.record(MachineLabel, z.string().min(1)),
-});
+/**
+ * `collectors` maps a machine label to the bearer token that machine's collector pushes with. `userToken` is the bearer
+ * token the user's own tools present on the write routes; it must not be one a collector holds, or that collector's
+ * token (which lives on a coding agent's machine) would also let it act as the user.
+ */
+export const ServerConfig = z
+  .object({
+    port: z.number().int().min(1).max(65535),
+    dbPath: z.string().min(1),
+    userToken: z.string().min(16, 'must be at least 16 characters').regex(/^\S+$/, 'must not contain whitespace'),
+    collectors: z.record(MachineLabel, z.string().min(1)),
+  })
+  .superRefine((config, ctx) => {
+    const clash = Object.entries(config.collectors).find(([, token]) => token === config.userToken);
+    if (clash) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['userToken'],
+        message: `must differ from every collector token (it equals the token of collector ${JSON.stringify(clash[0])})`,
+      });
+    }
+  });
 export type ServerConfig = z.infer<typeof ServerConfig>;
 
 /** Reads and validates the server config; a relative `dbPath` is resolved against the config file's directory. */

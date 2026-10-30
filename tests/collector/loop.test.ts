@@ -38,7 +38,7 @@ let app: ReturnType<typeof createApp>;
 function freshServer(): void {
   if (db?.isOpen) db.close();
   db = openDb(':memory:');
-  app = createApp(db, { port: 1, dbPath: ':memory:', collectors: { [MACHINE]: TOKEN } }, () => now);
+  app = createApp(db, { port: 1, dbPath: ':memory:', userToken: 'user-token-0123456789', collectors: { [MACHINE]: TOKEN } }, () => now);
 }
 
 beforeEach(async () => {

@@ -176,7 +176,7 @@ async function freePort(): Promise<number> {
 
 function writeServerConfig(port: number): string {
   const path = join(dir, 'server.json');
-  writeFileSync(path, JSON.stringify({ port, dbPath: 'pm.db', collectors: { laptop: 'tok-laptop' } }));
+  writeFileSync(path, JSON.stringify({ port, dbPath: 'pm.db', userToken: 'user-token-0123456789', collectors: { laptop: 'tok-laptop' } }));
   return path;
 }
 

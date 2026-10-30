@@ -1,6 +1,6 @@
 # herdr-pm
 
-在多台机器上同时跑十几个 coding agent（Claude Code、Codex）时，herdr 能告诉你"哪个 agent 在跑、哪个在等我"。herdr-pm 补上 project 层面的视图。它的第一步（本仓库目前实现的部分，计划 1：采集地基）是把所有机器上的 agent session 和对话汇总到一个中心：
+在多台机器上同时跑十几个 coding agent（Claude Code、Codex）时，herdr 能告诉你"哪个 agent 在跑、哪个在等我"。herdr-pm 补上 project 层面的视图。它的第一步（计划 1：采集地基；项目领域操作和 HTTP API 是计划 2，见「项目 API」）是把所有机器上的 agent session 和对话汇总到一个中心：
 
 - 每台机器上跑一个**采集器**，只读本机的 herdr 快照和 Claude / Codex 的对话文件，每 10 秒把变化推送到中心。
 - 一台机器（mac-mini）上跑一个**中心服务**，用 SQLite 存所有机器的 session 和对话 chunk，对外提供 HTTP API。
@@ -17,7 +17,7 @@
 
 另有一个查询命令：`herdr-pm sessions [--server <url>] [--machine <m>]`，列出中心已知的 session。
 
-中心监听 `config.port` 的所有网卡，目的是让其他机器通过 Tailscale 访问。`/sessions*` 目前**没有鉴权**，只靠网络隔离，所以不要把这个端口暴露到公网；`/ingest/*` 要求每台机器自己的 bearer token。
+中心监听 `config.port` 的所有网卡，目的是让其他机器通过 Tailscale 访问。所有 `GET`（`/sessions*`、`/projects*`、`/questions`）目前**没有鉴权**，只靠网络隔离，所以不要把这个端口暴露到公网；`/ingest/*` 要求每台机器自己的 bearer token；项目 API 的写操作要求 `userToken`（见下文「项目 API」）。
 
 ## 已确认的环境事实
 
@@ -66,6 +66,7 @@ openssl rand -hex 32   # 每台机器跑一次，记下来
    {
      "port": 7718,
      "dbPath": "./herdr-pm.db",
+     "userToken": "<用户 token>",
      "collectors": {
        "laptop": "<laptop 的 token>",
        "mac-mini": "<mac-mini 的 token>",
@@ -77,6 +78,7 @@ openssl rand -hex 32   # 每台机器跑一次，记下来
 
    - `collectors` 的 key 是机器 label，必须和该机器采集器配置里的 `machine` 完全一致，值是它的 token。
    - `dbPath` 是相对路径时，相对**配置文件所在目录**解析；不支持 `~`，要放别处就写绝对路径。
+   - `userToken` 是项目 API 写操作用的 token（见下文），至少 16 个字符、不含空白、不能和任何采集器的 token 相同，否则中心启动时报错并指出原因。旧配置文件没有这一项，升级后要补上。
 3. 先前台跑一下确认能启动：`node src/cli.ts server --config ~/.config/herdr-pm/server.json`，看到 `listening on :7718` 后 Ctrl-C。第一次可能弹出"是否允许 node 接受传入连接"，选允许。
 4. 用 launchd 常驻。plist 里的占位符要换成这台机器上的绝对路径（launchd 不展开 `~`）：
 
@@ -223,6 +225,61 @@ curl -s "http://100.111.225.68:7718/sessions?machine=laptop" | jq '.[] | {short_
 ```
 
 Claude session 的 `fidelity` 应为 `full`（有对话文件，`chunk_count` 随对话增长）；拿不到对话文件的 session 是 `screen`（只有屏幕快照）。
+
+## 项目 API（计划 2）
+
+计划 2 在中心加了项目的领域层：项目、阶段、里程碑、todo、决策、阻塞、session 关联、问题，以及对任何改动的撤销。对项目状态的修改只有一个入口 `execute()`，HTTP 只是把请求翻译成操作，每个操作写一条 event（谁、什么时候、改了什么）。
+
+**鉴权**：所有 `GET` 开放（和 `/sessions` 一样，靠 Tailscale 隔离）；其余请求必须带 `Authorization: Bearer <userToken>`，没有或不对返回 401。采集器的 token 在这里无效，`userToken` 在 `/ingest/*` 也无效（配置里两者不能相同）。写入口不是给 coding agent 用的：同一个 Tailscale 里的 agent 一旦拿到 `userToken`，就能以"用户"身份绕过 AI 的信任边界（AI 的写入口是计划 3 的 MCP，那里的每个写操作都必须带理由和证据）。
+
+生成 token 并写进中心配置的 `userToken`，改完重启中心：
+
+```bash
+openssl rand -hex 24      # 48 个字符，直接用作 userToken
+```
+
+| 请求 | 请求体 | 作用 |
+|---|---|---|
+| `GET /projects?stage=&priority=` | | 首页卡片；`stage`、`priority` 写了就必须是合法值，否则 400 |
+| `GET /projects/:id` | | 项目详情（里程碑、todo、决策、阻塞、关联、事件、`tombstones`） |
+| `POST /projects` | `{title, summary?, why?, done_criteria?, priority?, stage?}` | 新建项目，201 |
+| `PATCH /projects/:id` | `{title?, summary?, why?, done_criteria?, priority?}` | 改字段，改过的字段自动加锁 |
+| `POST /projects/:id/stage` | `{stage, merge_into?}` | 切换阶段（合并时带 `merge_into`） |
+| `DELETE /projects/:id/locks/:field` | | 解锁字段 |
+| `POST /projects/:id/milestones`、`PATCH …/milestones/:mid`、`DELETE …/milestones/:mid`、`DELETE …/milestones/:mid/locks/:field` | `{title, status?, position?}` | 里程碑；`status` 取 `todo`/`doing`/`done` |
+| `POST /projects/:id/todos`、`PATCH …/todos/:tid`、`DELETE …/todos/:tid`、`DELETE …/todos/:tid/locks/:field` | `{title, status?, priority?, milestone_id?}` | todo |
+| `POST /projects/:id/decisions`、`DELETE …/decisions/:did` | `{text, decided_at?}` | 决策 |
+| `POST /projects/:id/blockers`、`PATCH …/blockers/:bid`、`DELETE …/blockers/:bid` | `{text, kind?}`；PATCH 另可带 `status: "cleared"` | 阻塞；`kind` 取 `user`/`external`/`technical` |
+| `POST /sessions/:key/links`、`DELETE /sessions/:key/links/:project_id` | `{project_id, milestone_id?}` | 关联 / 取消关联 session |
+| `PUT /sessions/:key/ignored` | `{ignored: true｜false}` | 不再追踪 / 恢复追踪 session |
+| `POST /events/:id/revert` | | 撤销一个事件 |
+| `GET /questions?status=&project_id=` | | 问题列表（`status`：`pending`/`answered`/`withdrawn`/`expired`） |
+| `POST /questions/:id/answer`、`POST /questions/:id/dismiss` | `{option_index}` 或 `{text}` | 回答 / 忽略问题 |
+
+- session 键里有冒号，放进路径前要 `encodeURIComponent`（`claude:5d27595b-…` → `claude%3A5d27595b-…`）。
+- 请求体最大 64 KB，超过返回 413。请求体不是合法 JSON、有多余字段（包括 `reason`、`evidence`）、类型不对，或者违反业务规则（标题为空、枚举值不对……），返回 400。
+- 成功返回操作结果 `{"status":"applied","event_id":…,"id":…,"question_ids":[],"warnings":[]}`（建东西的 `POST` 是 201，其余 200）。`event_id` 用于撤销；没有产生改动时为 `null`。失败返回 `{"error":"<code>","message":"…"}`：`invalid` 400、`not_found` 404（含"这个 todo 不属于该项目"）、其余业务冲突 409（例如 `conflict`：撤销时那个字段已被后来的改动改过，`message` 里写着是哪一列；`not_pending`：问题已经回答过）。未预料的异常返回 500 `{"error":"internal"}`，细节只写在中心的 stderr。
+- `PATCH …/blockers/:bid` 同时带 `text`/`kind` 和 `status: "cleared"` 时，先改再关闭，是两个操作、两条事件。
+
+```bash
+S=http://100.111.225.68:7718
+T=<userToken>
+H=(-H "Authorization: Bearer $T" -H 'content-type: application/json')
+
+# 建项目（用户建的项目不进"新点子"收件箱）
+curl -s -XPOST $S/projects "${H[@]}" -d '{"title":"冒烟项目","priority":"P1"}'
+# {"status":"applied","event_id":1,"id":"p_8f3a…","question_ids":[],"warnings":[]}
+
+# 改字段（改过的字段被锁定，AI 之后只能"提议"改它）
+curl -s -XPATCH $S/projects/p_8f3a… "${H[@]}" -d '{"summary":"先跑通采集，再做项目视图"}'
+
+# 回答 AI 提的问题（0 是第一个选项，通常是"确认"）
+curl -s "$S/questions?status=pending"
+curl -s -XPOST $S/questions/q_1c9e…/answer "${H[@]}" -d '{"option_index":0}'
+
+# 撤销一个事件（上面 PATCH 返回的 event_id）
+curl -s -XPOST $S/events/2/revert -H "Authorization: Bearer $T"
+```
 
 ## 部署验收（计划 1 完成的标志）
 

@@ -3,19 +3,36 @@ import type { DatabaseSync } from 'node:sqlite';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import type { ZodType } from 'zod';
+import { defaultDeps } from '../domain/types.ts';
+import type { DomainDeps } from '../domain/types.ts';
 import { ChunkPush, SnapshotPush } from '../shared/protocol.ts';
 import type { OffsetResponse } from '../shared/protocol.ts';
 import { parseSessionKey } from '../shared/session-key.ts';
 import type { ServerConfig } from './config.ts';
+import { mountDomainRoutes } from './domain-routes.ts';
 import { applySnapshot, findByShortId, insertChunks, listSessions, maxOffset } from './sessions-repo.ts';
 
 /**
- * The central API. `/ingest/*` is for collectors (bearer token bound to one machine);
- * `/sessions*` is unauthenticated for now (Tailscale only). Every timestamp the server stores comes
- * from `clock`, never from a request body: offline detection relies on server-stamped heartbeats.
+ * The central API. `/ingest/*` is for collectors (bearer token bound to one machine); the project
+ * API (`./domain-routes.ts`) takes the user token on writes; every GET, `/sessions*` included, is
+ * unauthenticated for now (Tailscale only). Every timestamp the server stores comes from `clock`,
+ * never from a request body: offline detection relies on server-stamped heartbeats. `newId`
+ * generates the ids of new projects, milestones and so on (random unless a test pins it).
  */
-export function createApp(db: DatabaseSync, config: ServerConfig, clock: () => Date = () => new Date()): Hono {
+export function createApp(
+  db: DatabaseSync,
+  config: ServerConfig,
+  clock: () => Date = () => new Date(),
+  newId?: DomainDeps['newId'],
+): Hono {
   const app = new Hono();
+  const deps: DomainDeps = { now: clock, newId: newId ?? defaultDeps().newId };
+
+  // Anything not handled below is a bug: say so on stderr, tell the client only that it happened.
+  app.onError((err, c) => {
+    console.error(`herdr-pm server: unhandled error in ${c.req.method} ${c.req.path}:`, err);
+    return c.json({ error: 'internal' }, 500);
+  });
 
   app.post('/ingest/snapshot', async (c) => {
     const push = await readPush(c, config, SnapshotPush, (p) => [
@@ -55,6 +72,8 @@ export function createApp(db: DatabaseSync, config: ServerConfig, clock: () => D
   );
 
   app.get('/sessions/by-short-id/:sid', (c) => c.json(findByShortId(db, c.req.param('sid'), clock())));
+
+  mountDomainRoutes(app, db, config, deps);
 
   return app;
 }
