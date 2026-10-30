@@ -1,23 +1,24 @@
-import { timingSafeEqual } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import type { ZodType } from 'zod';
 import { defaultDeps } from '../domain/types.ts';
 import type { DomainDeps } from '../domain/types.ts';
+import { mountMcp } from '../mcp/server.ts';
 import { ChunkPush, SnapshotPush } from '../shared/protocol.ts';
 import type { OffsetResponse } from '../shared/protocol.ts';
 import { parseSessionKey } from '../shared/session-key.ts';
 import type { Scheduler } from '../understand/scheduler.ts';
 import { disabledStatus } from '../understand/status.ts';
+import { bearerToken, tokenMatches } from './bearer.ts';
 import type { ServerConfig } from './config.ts';
 import { mountDomainRoutes, userAuth } from './domain-routes.ts';
 import { applySnapshot, findByShortId, insertChunks, listSessions, maxOffset } from './sessions-repo.ts';
 
 /**
  * The central API. `/ingest/*` is for collectors (bearer token bound to one machine); the project
- * API (`./domain-routes.ts`) takes the user token on writes; every GET, `/sessions*` included, is
- * unauthenticated for now (Tailscale only). Every timestamp the server stores comes from `clock`,
+ * API (`./domain-routes.ts`) takes the user token on writes; `/mcp` (`../mcp/server.ts`) takes the MCP token; every
+ * other GET, `/sessions*` included, is unauthenticated for now (Tailscale only). Every timestamp the server stores comes from `clock`,
  * never from a request body: offline detection relies on server-stamped heartbeats. `newId`
  * generates the ids of new projects, milestones and so on (random unless a test pins it).
  * `opts.scheduler` is the running understanding scheduler, or absent when the layer is switched off.
@@ -87,6 +88,7 @@ export function createApp(
   });
 
   mountDomainRoutes(app, db, config, deps);
+  mountMcp(app, db, config, deps);
 
   return app;
 }
@@ -133,16 +135,11 @@ function authenticate(c: Context, config: ServerConfig): string[] | Response {
     c.header('WWW-Authenticate', 'Bearer');
     return c.json({ error: 'missing or invalid bearer token' }, 401);
   };
-  const match = /^Bearer +(\S+)$/i.exec(c.req.header('Authorization') ?? '');
-  if (!match) return unauthorized();
-  const presented = Buffer.from(match[1]);
-  // Compare against every configured token (no early exit) in constant time; timingSafeEqual
-  // needs equal lengths, so a token of a different length simply cannot match.
+  const presented = bearerToken(c.req.header('Authorization'));
+  if (presented === null) return unauthorized();
+  // Compare against every configured token (no early exit), each in constant time.
   const labels = Object.entries(config.collectors)
-    .filter(([, token]) => {
-      const expected = Buffer.from(token);
-      return expected.length === presented.length && timingSafeEqual(expected, presented);
-    })
+    .filter(([, token]) => tokenMatches(presented, token))
     .map(([label]) => label);
   return labels.length > 0 ? labels : unauthorized();
 }

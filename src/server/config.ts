@@ -6,13 +6,17 @@ import { MachineLabel } from '../shared/protocol.ts';
 /**
  * `collectors` maps a machine label to the bearer token that machine's collector pushes with. `userToken` is the bearer
  * token the user's own tools present on the write routes; it must not be one a collector holds, or that collector's
- * token (which lives on a coding agent's machine) would also let it act as the user.
+ * token (which lives on a coding agent's machine) would also let it act as the user. `mcpToken` is the bearer token
+ * coding agents present on `/mcp`; it lives on every agent machine too, so it must differ from both of the others.
  */
+const Token = z.string().min(16, 'must be at least 16 characters').regex(/^\S+$/, 'must not contain whitespace');
+
 export const ServerConfig = z
   .object({
     port: z.number().int().min(1).max(65535),
     dbPath: z.string().min(1),
-    userToken: z.string().min(16, 'must be at least 16 characters').regex(/^\S+$/, 'must not contain whitespace'),
+    userToken: Token,
+    mcpToken: Token,
     collectors: z.record(MachineLabel, z.string().min(1)),
     /** The digester, curator and scheduler; every field is optional (see `understandingSettings` for the defaults). */
     understanding: z
@@ -26,13 +30,19 @@ export const ServerConfig = z
       .optional(),
   })
   .superRefine((config, ctx) => {
-    const clash = Object.entries(config.collectors).find(([, token]) => token === config.userToken);
-    if (clash) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['userToken'],
-        message: `must differ from every collector token (it equals the token of collector ${JSON.stringify(clash[0])})`,
-      });
+    // The messages name the clashing setting, never the token itself.
+    for (const field of ['userToken', 'mcpToken'] as const) {
+      const clash = Object.entries(config.collectors).find(([, token]) => token === config[field]);
+      if (clash) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [field],
+          message: `must differ from every collector token (it equals the token of collector ${JSON.stringify(clash[0])})`,
+        });
+      }
+    }
+    if (config.mcpToken === config.userToken) {
+      ctx.addIssue({ code: 'custom', path: ['mcpToken'], message: 'must differ from userToken' });
     }
   });
 export type ServerConfig = z.infer<typeof ServerConfig>;

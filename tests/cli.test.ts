@@ -179,7 +179,7 @@ function writeServerConfig(port: number, extra: Record<string, unknown> = {}): s
   const path = join(dir, 'server.json');
   writeFileSync(
     path,
-    JSON.stringify({ port, dbPath: 'pm.db', userToken: 'user-token-0123456789', collectors: { laptop: 'tok-laptop' }, ...extra }),
+    JSON.stringify({ port, dbPath: 'pm.db', userToken: 'user-token-0123456789', mcpToken: 'mcp-token-0123456789', collectors: { laptop: 'tok-laptop' }, ...extra }),
   );
   return path;
 }

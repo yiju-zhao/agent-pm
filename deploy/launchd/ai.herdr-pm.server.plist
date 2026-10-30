@@ -7,6 +7,9 @@
     __CONFIG_PATH__  absolute path of the server config (copy of config/server.example.json)
     __HOME__         absolute home directory (launchd does not expand "~")
   The log directory must exist: mkdir -p ~/Library/Logs/herdr-pm
+  No secrets here: the bearer tokens live in the server config, and the Claude token for the understanding layer
+  lives in its own chmod 600 file named by understanding.oauthTokenFile (see README.md). Do not add an
+  EnvironmentVariables block with CLAUDE_CODE_OAUTH_TOKEN.
 -->
 <plist version="1.0">
 <dict>

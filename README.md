@@ -67,6 +67,7 @@ openssl rand -hex 32   # 每台机器跑一次，记下来
      "port": 7718,
      "dbPath": "./herdr-pm.db",
      "userToken": "<用户 token>",
+     "mcpToken": "<MCP token>",
      "collectors": {
        "laptop": "<laptop 的 token>",
        "mac-mini": "<mac-mini 的 token>",
@@ -79,6 +80,8 @@ openssl rand -hex 32   # 每台机器跑一次，记下来
    - `collectors` 的 key 是机器 label，必须和该机器采集器配置里的 `machine` 完全一致，值是它的 token。
    - `dbPath` 是相对路径时，相对**配置文件所在目录**解析；不支持 `~`，要放别处就写绝对路径。
    - `userToken` 是项目 API 写操作用的 token（见下文），至少 16 个字符、不含空白、不能和任何采集器的 token 相同，否则中心启动时报错并指出原因。旧配置文件没有这一项，升级后要补上。
+   - `mcpToken` 是各台机器上的 coding agent 连 `/mcp` 用的 token（见「理解层与 MCP」），规则和 `userToken` 一样，另外不能等于 `userToken`。计划 3 之前的配置文件没有这一项，升级后要补上（`openssl rand -hex 24`）。
+   - `understanding` 是理解层（摘要、整理）的设置，整块可省略，见「理解层与 MCP」。示例配置里的 `oauthTokenFile` 指向配置目录下的 `claude-oauth-token`，这个文件不存在时中心启动报错；不想用 token 文件就删掉这一行。
 3. 先前台跑一下确认能启动：`node src/cli.ts server --config ~/.config/herdr-pm/server.json`，看到 `listening on :7718` 后 Ctrl-C。第一次可能弹出"是否允许 node 接受传入连接"，选允许。
 4. 用 launchd 常驻。plist 里的占位符要换成这台机器上的绝对路径（launchd 不展开 `~`）：
 
@@ -279,6 +282,101 @@ curl -s -XPOST $S/questions/q_1c9e…/answer "${H[@]}" -d '{"option_index":0}'
 
 # 撤销一个事件（上面 PATCH 返回的 event_id）
 curl -s -XPOST $S/events/2/revert -H "Authorization: Bearer $T"
+```
+
+## 理解层与 MCP（计划 3）
+
+计划 3 让中心自己读对话：**摘要员**把每个 session 新增的对话片段（chunk）压成结构化摘要，**整理员**再根据摘要建项目、更新里程碑和 todo、提问题。整理员以 `ai:curator` 身份走和网页一样的操作层（`execute()` / `askUser()`），每个写操作都带理由（reason）和证据（evidence，引用的摘要和 chunk），事件日志里能看到；标完成、合并这类操作会变成待你确认的问题。外部 agent 通过 `/mcp` 只能读项目和上报进展，不能直接写。
+
+### 模型和费用
+
+- 摘要用 `claude-haiku-5-5`，整理用 `claude-sonnet-5-5`，可以在 `understanding.digestModel` / `understanding.curateModel` 里换。
+- 调用走 Claude Agent SDK，用的是 **Claude 订阅**的额度，不是 API key（环境里的 `ANTHROPIC_API_KEY` 会被忽略），没有设额度上限。同一时刻最多一个模型调用；实时 session 先处理，历史导入（采集器第一次看到的旧对话）只在空闲时做。
+- 遇到限流或额度用完，调度器暂停并指数退避，`GET /status` 里能看到暂停原因和恢复时间；没处理完的 chunk 和摘要保持"未处理"，恢复后接着做。
+- 每次模型调用（成功或失败）在 `llm_runs` 表里写一行：角色（`digest` / `curate`）、模型、token 数、耗时、是否成功、错误类型。按天汇总用量：
+
+  ```bash
+  sqlite3 ~/.config/herdr-pm/herdr-pm.db "
+    SELECT substr(ts, 1, 10) AS day, role, model, count(*) AS calls, sum(ok = 0) AS failed,
+           sum(input_tokens) AS input, sum(output_tokens) AS output, sum(cache_read_tokens) AS cache_read
+    FROM llm_runs GROUP BY day, role, model ORDER BY day DESC, role;"
+  ```
+
+  `ts` 是 UTC 时间。`cost_usd` 是 SDK 报的按 API 价格折算的金额，走订阅时只作参考。
+
+### 鉴权：用哪个 Claude 账号
+
+在 mac-mini 上生成一个长期 token，写进只有自己可读的文件，配置 `understanding.oauthTokenFile` 指向它（相对路径相对配置文件所在目录）：
+
+```bash
+claude setup-token                      # 按提示登录，最后打印一个 token
+install -m 600 /dev/null ~/.config/herdr-pm/claude-oauth-token
+pbpaste > ~/.config/herdr-pm/claude-oauth-token   # 先复制 token；或者用编辑器粘进去
+ls -l ~/.config/herdr-pm/claude-oauth-token         # 应为 -rw-------
+```
+
+```json
+"understanding": { "oauthTokenFile": "claude-oauth-token" }
+```
+
+token 只放在这个文件里，**不要写进 launchd plist 或配置 JSON**。没有 `oauthTokenFile` 时，中心用这台机器上 Claude Code 自己的登录（环境变量 `CLAUDE_CODE_OAUTH_TOKEN` 也行），启动时会打印一行提示。整个理解层可以用 `"understanding": { "enabled": false }` 关掉，关掉后 `/status` 显示 `enabled: false`，`/sync` 返回 409。
+
+### 看进度：`GET /status`、手动刷新：`POST /sync`
+
+```bash
+curl -s http://<mac-mini>:7718/status
+```
+
+`understanding` 字段：
+
+| 字段 | 含义 |
+|---|---|
+| `enabled` | 理解层是否开启 |
+| `running` | 正在跑的调用：`digest`、`curate` 或 `null`（空闲） |
+| `paused_until`、`pause_reason` | 限流 / 额度用完时暂停到什么时候、为什么；没暂停时是 `null` |
+| `last_error` | 最近一次失败的说明 |
+| `waiting_sessions` | 有未摘要 chunk 的 session 数 |
+| `uncurated_digests` | 还没整理的摘要数 |
+| `backfill.sessions_done` / `backfill.sessions_total` | 历史导入进度（按 session 算） |
+| `last_digest_at`、`last_curate_at` | 最近一次摘要 / 整理完成的时间 |
+
+调度器平时自己跑：session 停下来（不再是 `working`）2 分钟后摘要它的新内容，一直在跑的 session 最晚 30 分钟摘要一次；摘要攒够 8 条或最早一条等满 5 分钟就整理一次。想马上处理已收到的内容：
+
+```bash
+curl -s -XPOST http://<mac-mini>:7718/sync -H "Authorization: Bearer <userToken>"   # 202 {"accepted":true}
+```
+
+`/sync` 只立即跑摘要和整理，不会让采集器马上采集（中心没有到采集器的命令通道），所以最新的几秒对话要等采集器下一轮推上来。
+
+### 各台机器上的 agent 接入 MCP
+
+中心在 `http://<mac-mini>:7718/mcp` 提供 MCP（Streamable HTTP，无状态）。工具：`pm_list_projects`、`pm_get_project`、`pm_get_brief`、`pm_timeline`、`pm_search`、`pm_list_sessions`（只读）和 `pm_report`（上报进展：内容存成一段对话片段，下一轮整理时由整理员处理，不会直接改项目）。没有写工具。
+
+每个请求必须带 `Authorization: Bearer <mcpToken>`，否则 401；`userToken` 和采集器的 token 在这里无效，`mcpToken` 在别处也无效。`mcpToken` 会放在每台跑 agent 的机器上，泄露后的影响只是能读项目和上报。
+
+**Claude Code**（每台机器跑一次；默认只对当前目录的项目生效，加 `--scope user` 对这台机器上的所有项目生效）：
+
+```bash
+claude mcp add --transport http herdr-pm http://<mac-mini>:7718/mcp --header "Authorization: Bearer <mcpToken>"
+claude mcp list        # herdr-pm 应显示 connected
+```
+
+**Codex**（`~/.codex/config.toml`，按 Codex 的 MCP 文档；Codex 从环境变量读 bearer token，`codex mcp add` 没有传 token 的参数）：
+
+```toml
+[mcp_servers.herdr-pm]
+url = "http://<mac-mini>:7718/mcp"
+bearer_token_env_var = "HERDR_PM_MCP_TOKEN"
+```
+
+再在启动 Codex 的 shell 里 `export HERDR_PM_MCP_TOKEN=<mcpToken>`（例如写进 `~/.zshrc` / `~/.bashrc`）。
+
+手工检查端点（不用任何 agent）：
+
+```bash
+curl -s http://<mac-mini>:7718/mcp -H "Authorization: Bearer <mcpToken>" \
+  -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
 ## 部署验收（计划 1 完成的标志）

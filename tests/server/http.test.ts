@@ -17,6 +17,7 @@ const config: ServerConfig = {
   port: 8787,
   dbPath: ':memory:',
   userToken: 'user-secret-token-0123456789',
+  mcpToken: 'mcp-secret-token-0123456789',
   collectors: { [GX10]: GX10_TOKEN, laptop: LAPTOP_TOKEN },
 };
 

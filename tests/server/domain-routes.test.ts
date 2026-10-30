@@ -17,6 +17,7 @@ const config: ServerConfig = {
   port: 1,
   dbPath: ':memory:',
   userToken: USER_TOKEN,
+  mcpToken: 'mcp-token-0123456789abcdef',
   collectors: { [COLLECTOR]: COLLECTOR_TOKEN },
 };
 

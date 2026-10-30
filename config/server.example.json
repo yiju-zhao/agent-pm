@@ -2,6 +2,7 @@
   "port": 7718,
   "dbPath": "./herdr-pm.db",
   "userToken": "REPLACE-WITH-RANDOM-USER-TOKEN-AT-LEAST-16",
+  "mcpToken": "REPLACE-WITH-RANDOM-MCP-TOKEN-AT-LEAST-16",
   "collectors": {
     "laptop": "REPLACE-WITH-RANDOM-TOKEN-laptop",
     "mac-mini": "REPLACE-WITH-RANDOM-TOKEN-mac-mini",
@@ -11,6 +12,7 @@
   "understanding": {
     "enabled": true,
     "digestModel": "claude-haiku-5-5",
-    "curateModel": "claude-sonnet-5-5"
+    "curateModel": "claude-sonnet-5-5",
+    "oauthTokenFile": "claude-oauth-token"
   }
 }

@@ -15,6 +15,7 @@ afterEach(async () => {
 });
 
 const USER_TOKEN = 'user-token-0123456789';
+const MCP_TOKEN = 'mcp-token-0123456789';
 
 async function configFile(content: unknown): Promise<string> {
   const path = join(dir, 'server.json');
@@ -27,28 +28,30 @@ test('loads a valid config', async () => {
     port: 8787,
     dbPath: '/var/lib/herdr-pm/pm.db',
     userToken: USER_TOKEN,
+    mcpToken: MCP_TOKEN,
     collectors: { 'gx10-090e': 'tok-1', laptop: 'tok-2' },
   });
   expect(loadServerConfig(path)).toEqual({
     port: 8787,
     dbPath: '/var/lib/herdr-pm/pm.db',
     userToken: USER_TOKEN,
+    mcpToken: MCP_TOKEN,
     collectors: { 'gx10-090e': 'tok-1', laptop: 'tok-2' },
   });
 });
 
 test('resolves a relative dbPath against the config file directory, not the cwd', async () => {
-  const path = await configFile({ port: 8787, dbPath: 'data/pm.db', userToken: USER_TOKEN, collectors: {} });
+  const path = await configFile({ port: 8787, dbPath: 'data/pm.db', userToken: USER_TOKEN, mcpToken: MCP_TOKEN, collectors: {} });
   expect(loadServerConfig(path).dbPath).toBe(join(dir, 'data', 'pm.db'));
 });
 
 test('keeps the in-memory database name as is', async () => {
-  const path = await configFile({ port: 8787, dbPath: ':memory:', userToken: USER_TOKEN, collectors: {} });
+  const path = await configFile({ port: 8787, dbPath: ':memory:', userToken: USER_TOKEN, mcpToken: MCP_TOKEN, collectors: {} });
   expect(loadServerConfig(path).dbPath).toBe(':memory:');
 });
 
 test('throws a clear error naming the file and the invalid fields', async () => {
-  const path = await configFile({ port: 'http', dbPath: 5, userToken: USER_TOKEN, collectors: { laptop: '' } });
+  const path = await configFile({ port: 'http', dbPath: 5, userToken: USER_TOKEN, mcpToken: MCP_TOKEN, collectors: { laptop: '' } });
   expect(() => loadServerConfig(path)).toThrow(path);
   expect(() => loadServerConfig(path)).toThrow(/port/);
   expect(() => loadServerConfig(path)).toThrow(/dbPath/);
@@ -57,7 +60,7 @@ test('throws a clear error naming the file and the invalid fields', async () => 
 
 test('rejects collector machine labels that cannot be part of a session key', async () => {
   for (const label of ['mac mini', 'gx10:090e', ' laptop', 'a/b', '']) {
-    const path = await configFile({ port: 8787, dbPath: 'x', userToken: USER_TOKEN, collectors: { laptop: 't', [label]: 't2' } });
+    const path = await configFile({ port: 8787, dbPath: 'x', userToken: USER_TOKEN, mcpToken: MCP_TOKEN, collectors: { laptop: 't', [label]: 't2' } });
     expect(() => loadServerConfig(path), JSON.stringify(label)).toThrow(/collectors/);
     expect(() => loadServerConfig(path), JSON.stringify(label)).toThrow(/letters, digits/);
   }
@@ -68,7 +71,7 @@ test('rejects a missing file', () => {
 });
 
 test('rejects missing fields, out-of-range ports and non-object configs', async () => {
-  const ok = { port: 8787, dbPath: 'x', userToken: USER_TOKEN, collectors: {} };
+  const ok = { port: 8787, dbPath: 'x', userToken: USER_TOKEN, mcpToken: MCP_TOKEN, collectors: {} };
   const bad: unknown[] = [
     {},
     { ...ok, port: undefined },
@@ -89,7 +92,7 @@ test('rejects missing fields, out-of-range ports and non-object configs', async 
 });
 
 test('userToken must be ≥16 chars, without whitespace, and differ from every collector token', async () => {
-  const base = { port: 8787, dbPath: 'x', collectors: { laptop: 'collector-token-laptop', 'mac-mini': 'collector-token-mini' } };
+  const base = { port: 8787, dbPath: 'x', mcpToken: MCP_TOKEN, collectors: { laptop: 'collector-token-laptop', 'mac-mini': 'collector-token-mini' } };
 
   // 16 characters is the minimum.
   expect(loadServerConfig(await configFile({ ...base, userToken: 'x'.repeat(16) })).userToken).toBe('x'.repeat(16));
@@ -112,8 +115,46 @@ test('userToken must be ≥16 chars, without whitespace, and differ from every c
   }
 });
 
+test('mcpToken must be ≥16 chars, no whitespace, and differ from userToken and collector tokens', async () => {
+  const base = {
+    port: 8787,
+    dbPath: 'x',
+    userToken: USER_TOKEN,
+    collectors: { laptop: 'collector-token-laptop', 'mac-mini': 'collector-token-mini' },
+  };
+
+  // 16 characters is the minimum.
+  expect(loadServerConfig(await configFile({ ...base, mcpToken: 'm'.repeat(16) })).mcpToken).toBe('m'.repeat(16));
+
+  const bad: Array<[unknown, RegExp]> = [
+    [undefined, /mcpToken/],
+    [12345678901234567890, /mcpToken/],
+    ['', /mcpToken.*16/],
+    ['m'.repeat(15), /mcpToken.*16/],
+    ['mcp token with spaces', /mcpToken.*whitespace/],
+    ['m'.repeat(20) + '\n', /mcpToken.*whitespace/],
+    ['m'.repeat(10) + '\t' + 'm'.repeat(10), /mcpToken.*whitespace/],
+    ['collector-token-mini', /mcpToken.*differ.*"mac-mini"/],
+    [USER_TOKEN, /mcpToken.*differ.*userToken/],
+  ];
+  for (const [mcpToken, reason] of bad) {
+    const path = await configFile({ ...base, mcpToken });
+    expect(() => loadServerConfig(path), JSON.stringify(mcpToken)).toThrow(path);
+    expect(() => loadServerConfig(path), JSON.stringify(mcpToken)).toThrow(reason);
+  }
+
+  // The error never prints the token it is complaining about.
+  let message = '';
+  try {
+    loadServerConfig(await configFile({ ...base, mcpToken: USER_TOKEN }));
+  } catch (err) {
+    message = (err as Error).message;
+  }
+  expect(message).not.toContain(USER_TOKEN);
+});
+
 test('the error for a userToken that equals a collector token does not print the token', async () => {
-  const path = await configFile({ port: 8787, dbPath: 'x', userToken: 'shared-secret-0123456', collectors: { laptop: 'shared-secret-0123456' } });
+  const path = await configFile({ port: 8787, dbPath: 'x', userToken: 'shared-secret-0123456', mcpToken: MCP_TOKEN, collectors: { laptop: 'shared-secret-0123456' } });
   let message = '';
   try {
     loadServerConfig(path);
@@ -130,7 +171,7 @@ test('rejects a file that is not JSON', async () => {
 });
 
 test('understanding settings are optional and oauthTokenFile resolves relative to the config file', async () => {
-  const base = { port: 8787, dbPath: 'x', userToken: USER_TOKEN, collectors: {} };
+  const base = { port: 8787, dbPath: 'x', userToken: USER_TOKEN, mcpToken: MCP_TOKEN, collectors: {} };
   const plain = loadServerConfig(await configFile(base));
   expect(plain.understanding).toBeUndefined();
   expect(understandingSettings(plain)).toEqual({

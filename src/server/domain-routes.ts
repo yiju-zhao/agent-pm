@@ -1,4 +1,3 @@
-import { timingSafeEqual } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Context, Hono, MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -11,6 +10,7 @@ import { getProject, listProjects, listQuestions } from '../domain/read.ts';
 import type { QuestionView } from '../domain/read.ts';
 import { PRIORITIES, STAGES } from '../domain/types.ts';
 import type { DomainDeps, OpResult, RejectCode } from '../domain/types.ts';
+import { requireToken } from './bearer.ts';
 import type { ServerConfig } from './config.ts';
 
 /** Request bodies of the write routes are small JSON documents. */
@@ -95,17 +95,7 @@ async function readBody<S extends z.ZodType>(c: Context, schema: S): Promise<z.o
 
 /** Middleware that answers 401 unless the request carries `Authorization: Bearer <userToken>`. */
 export function userAuth(config: ServerConfig): MiddlewareHandler {
-  const expected = Buffer.from(config.userToken);
-  return async (c, next) => {
-    const match = /^Bearer +(\S+)$/i.exec(c.req.header('Authorization') ?? '');
-    const presented = Buffer.from(match?.[1] ?? '');
-    // timingSafeEqual needs equal lengths, so a token of a different length simply cannot match.
-    if (!match || presented.length !== expected.length || !timingSafeEqual(presented, expected)) {
-      c.header('WWW-Authenticate', 'Bearer');
-      return c.json({ error: 'unauthorized', message: 'missing or invalid user token' }, 401);
-    }
-    await next();
-  };
+  return requireToken(config.userToken, 'missing or invalid user token');
 }
 
 type Params = Record<string, string>;
