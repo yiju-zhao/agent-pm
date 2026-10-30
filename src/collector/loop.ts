@@ -176,15 +176,23 @@ async function pushTranscript(s: SnapshotSession, t: Tick): Promise<number> {
     const readStart = r.reset ? 0 : offset;
     const chunks = buildChunks(normalize(r.lines), readStart, r.newOffset, { maxChunkChars: MAX_CHUNK_CHARS });
     if (chunks.length > 0) {
-      await deps.client.pushChunks({
-        machine: t.cfg.machine,
-        chunks: chunks.map((c) => ({
-          session_key: s.key,
-          kind: 'transcript',
-          ...c,
-          backfill: Date.parse(c.ts_end) < startedAt,
-        })),
-      });
+      try {
+        await deps.client.pushChunks({
+          machine: t.cfg.machine,
+          chunks: chunks.map((c) => ({
+            session_key: s.key,
+            kind: 'transcript',
+            ...c,
+            backfill: Date.parse(c.ts_end) < startedAt,
+          })),
+        });
+      } catch (err) {
+        // The server may have stored the window anyway (e.g. a timeout after it committed). The local cursor is
+        // then behind the server, and re-reading from it would regroup lines into chunks that collide with stored
+        // offset_starts; so the next push of this session asks the server for its position again.
+        store.serverChecked.delete(s.key);
+        throw err;
+      }
       pushed += chunks.length;
     }
     offset = r.newOffset;

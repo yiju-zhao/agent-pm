@@ -30,6 +30,8 @@ let db: DatabaseSync;
 let now: Date;
 let pushResults: Array<{ inserted: number; duplicates: number }>;
 let failChunks: boolean;
+/** The server stores the next push, but the client still throws (a timeout after the server committed). */
+let failAfterCommit: boolean;
 let client: PmClient;
 let transcript: string;
 let app: ReturnType<typeof createApp>;
@@ -63,6 +65,7 @@ beforeEach(async () => {
   });
   pushResults = [];
   failChunks = false;
+  failAfterCommit = false;
   client = {
     pushSnapshot: (p) => real.pushSnapshot(p),
     getOffset: (key) => real.getOffset(key),
@@ -70,6 +73,10 @@ beforeEach(async () => {
       if (failChunks) throw new RetryableError('server unavailable');
       const r = await real.pushChunks(p);
       pushResults.push(r);
+      if (failAfterCommit) {
+        failAfterCommit = false;
+        throw new RetryableError('request timed out');
+      }
       return r;
     },
   };
@@ -379,6 +386,37 @@ test('first push per process resumes from server max when server is ahead of loc
   expect(rows[2]!.text).not.toContain('line four');
   expect(rows.slice(0, 2).map((c) => c.text).join('\n')).not.toContain('line five');
   expect(restarted.get(CLAUDE_KEY)!.offset).toBe(end6);
+});
+
+test('a push the server committed but the client saw fail: the next tick resumes from server max, no lines lost', async () => {
+  const lines = ['one', 'two', 'three', 'four', 'five', 'six'].map((w) => claudeUser(NEW_TS, `line ${w}`));
+  await writeLines(transcript, lines.slice(0, 2));
+  const deps = fakeDeps(() => [claudePane()]);
+  const store = await CursorStore.load(cfg.stateFile);
+  await collectOnce(cfg, store, deps);
+  const end2 = await size(transcript);
+
+  await appendLines(transcript, lines.slice(2, 4));
+  failAfterCommit = true;
+  await expect(collectOnce(cfg, store, deps)).rejects.toBeInstanceOf(RetryableError);
+  const end4 = await size(transcript);
+  expect(chunks().map((c) => c.offset_end)).toEqual([end2, end4]);
+  expect(store.get(CLAUDE_KEY)!.offset).toBe(end2);
+
+  // Same process, same store: the local cursor is stale, so it must not be trusted.
+  await appendLines(transcript, lines.slice(4));
+  const end6 = await size(transcript);
+  pushResults = [];
+  await collectOnce(cfg, store, deps);
+
+  expect(pushResults).toEqual([{ inserted: 1, duplicates: 0 }]);
+  const rows = chunks();
+  expect(rows).toHaveLength(3);
+  expect(rows[2]).toMatchObject({ offset_start: end4 * 1000, offset_end: end6 });
+  expect(rows[2]!.text).toContain('line five');
+  expect(rows[2]!.text).toContain('line six');
+  expect(rows[2]!.text).not.toContain('line four');
+  expect(store.get(CLAUDE_KEY)!.offset).toBe(end6);
 });
 
 test('first push per process resumes from server max when server is behind (restored db)', async () => {
