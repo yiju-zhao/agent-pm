@@ -89,6 +89,13 @@ export function shortTime(iso: string): string {
   return `${pad(at.getMonth() + 1)}/${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
 }
 
+/** `MM/DD` in the browser's time zone. Text that is not a time is returned as it is. */
+export function shortDate(iso: string): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return iso;
+  return `${pad(at.getMonth() + 1)}/${pad(at.getDate())}`;
+}
+
 const MAX_ARG_CHARS = 40;
 
 function argText(value: unknown): string {

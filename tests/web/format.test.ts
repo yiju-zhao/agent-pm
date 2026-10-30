@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import type { QuestionOptionView } from '../../src/domain/read.ts';
 import { OP_SCHEMAS } from '../../src/domain/ops.ts';
-import { OP_LABEL, STATUS_LABEL, actorLabel, describeOption, opLabel, relTime, shortTime, statusClass } from '../../web/src/format.ts';
+import { OP_LABEL, STATUS_LABEL, actorLabel, describeOption, opLabel, relTime, shortDate, shortTime, statusClass } from '../../web/src/format.ts';
 
 test('STATUS_LABEL names every status in Chinese', () => {
   expect(STATUS_LABEL).toEqual({
@@ -101,6 +101,12 @@ test('shortTime is MM/DD HH:mm in local time', () => {
   expect(shortTime(new Date(2026, 9, 5, 9, 7).toISOString())).toBe('10/05 09:07');
   expect(shortTime(new Date(2026, 11, 31, 23, 59).toISOString())).toBe('12/31 23:59');
   expect(shortTime('not a date')).toBe('not a date');
+});
+
+test('shortDate is MM/DD in local time', () => {
+  expect(shortDate(new Date(2026, 9, 5, 9, 7).toISOString())).toBe('10/05');
+  expect(shortDate(new Date(2026, 11, 31, 23, 59).toISOString())).toBe('12/31');
+  expect(shortDate('not a date')).toBe('not a date');
 });
 
 const option = (over: Partial<QuestionOptionView>): QuestionOptionView => ({ label: 'x', has_op: true, op: 'transition_stage', args: {}, ...over });

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import type { ProjectCard, QuestionView } from '../../../src/domain/read.ts';
 import type { SessionListItem } from '../../../src/server/http.ts';
 import { errorText } from '../api.ts';
+import { Fold } from '../components/blocks.tsx';
 import { Kanban } from '../components/kanban.tsx';
 import { ProjectCardView } from '../components/project-card.tsx';
 import { QuestionCard } from '../components/question-card.tsx';
@@ -40,20 +41,6 @@ function ViewToggle({ view, onChange }: { view: View; onChange: (view: View) => 
         看板
       </button>
     </div>
-  );
-}
-
-/** A shut-by-default group of cards. What is inside is not rendered until it is opened. */
-function Fold({ label, children }: { label: string; children: ReactNode }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <section className="fold">
-      <button type="button" className="fold-btn" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        <span aria-hidden="true">{open ? '▾ ' : '▸ '}</span>
-        {label}
-      </button>
-      {open ? <div>{children}</div> : null}
-    </section>
   );
 }
 

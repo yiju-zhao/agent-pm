@@ -309,7 +309,7 @@ test('the home page is the default', async () => {
   expect(screen.getByRole('link', { name: 'Session' }).getAttribute('href')).toBe('#/sessions');
 });
 
-test('hash routing renders the project placeholder for #/p/p_1', async () => {
+test('hash routing renders the project page for #/p/p_1', async () => {
   serve(understanding());
   location.hash = '#/p/p_1';
   renderApp();

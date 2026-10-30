@@ -1,4 +1,4 @@
-import type { BlockerRow, ProjectCard, QuestionView, SessionTag, TodoRow } from '../../src/domain/read.ts';
+import type { BlockerRow, DecisionRow, MilestoneRow, ProjectCard, ProjectDetail, QuestionView, SessionTag, TodoRow } from '../../src/domain/read.ts';
 
 // Read-model values for the page tests: a quiet, live, mid-build project unless a test says otherwise.
 
@@ -11,6 +11,33 @@ export function tag(over: Partial<SessionTag> = {}): SessionTag {
     effective_status: 'working',
     title: '接入 cannbench 数据',
     milestone_id: null,
+    ...over,
+  };
+}
+
+export function milestone(over: Partial<MilestoneRow> = {}): MilestoneRow {
+  return {
+    id: 'm_1',
+    project_id: 'p_1',
+    title: '接入 cannbench 数据',
+    status: 'todo',
+    position: 0,
+    locks: [],
+    created_by: 'user',
+    created_at: '2026-10-20T08:00:00.000Z',
+    ...over,
+  };
+}
+
+export function decision(over: Partial<DecisionRow> = {}): DecisionRow {
+  return {
+    id: 'd_1',
+    project_id: 'p_1',
+    text: '评测集先用公开 v2',
+    decided_at: '2026-10-21T12:00:00.000Z',
+    evidence: [],
+    created_by: 'user',
+    created_at: '2026-10-21T12:00:00.000Z',
     ...over,
   };
 }
@@ -90,4 +117,9 @@ export function card(over: Partial<ProjectCard> = {}): ProjectCard {
     pending_questions: [],
     ...over,
   };
+}
+
+/** A project as the detail page reads it: the card plus nothing in any list unless a test fills it. */
+export function detail(over: Partial<ProjectDetail> = {}): ProjectDetail {
+  return { ...card(), milestones: [], todos: [], decisions: [], blockers: [], contributions: [], events: [], tombstones: [], ...over };
 }
