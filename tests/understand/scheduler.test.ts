@@ -12,6 +12,7 @@ import {
   SESSION_COOLDOWN_MS,
   TICK_MS,
 } from '../../src/understand/scheduler.ts';
+import { openDb } from '../../src/server/db.ts';
 import { NOW, setup } from '../domain/helpers.ts';
 import type { Setup } from '../domain/helpers.ts';
 
@@ -496,6 +497,31 @@ test('a curator that keeps throwing is given up on like a failing one, and diges
   expect(s.status().last_error).toMatch(/curator crashed.*放弃/);
 });
 
+test('tick still resolves when recording a failure fails too', async () => {
+  for (let i = 0; i < CURATE_BATCH; i++) addDigest();
+  const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+  let attempts = 0;
+  const runner: LlmRunner = async () => {
+    attempts += 1;
+    // On the third failure the scheduler gives up on the batch with an UPDATE, which then cannot reach the database.
+    if (attempts === 3) t.db.close();
+    throw new Error('curator crashed');
+  };
+  const s = scheduler(runner);
+  try {
+    expect(await s.tick()).toBe('skipped');
+    advance(BACKOFF_START_MS);
+    expect(await s.tick()).toBe('skipped');
+    advance(2 * BACKOFF_START_MS);
+    errors.mockClear();
+    await expect(s.tick()).resolves.toBe('idle');
+    expect(errors).toHaveBeenCalledTimes(2);
+    expect(String(errors.mock.calls[1])).toMatch(/not open/);
+  } finally {
+    if (attempts >= 3) t = { ...t, db: openDb(':memory:') }; // afterEach closes the database
+  }
+});
+
 // ---- sync and concurrency ----------------------------------------------------------------------------------------
 
 test('requestSync skips the debounce and the curate delay', async () => {
@@ -532,23 +558,44 @@ test('a sync ends even while a working session keeps adding chunks', async () =>
 
   expect(await s.tick()).toBe('digested');
   expect([digested(before), digested(since)]).toEqual([1, 1]);
-  // The digest written during the sync is newer than the sync, so the curate delay applies to it.
-  expect(await s.tick()).toBe('idle');
-
-  // New work from the still-working session follows the normal rules.
+  // The session keeps working while the sync's digest is curated.
   const later = addChunk(A, BIG);
+  expect(await s.tick()).toBe('curated');
+
+  // The sync is over: new work from the still-working session follows the normal rules.
   expect(await s.tick()).toBe('idle');
   advance(60_000);
   addChunk(A, BIG);
   expect(await s.tick()).toBe('idle');
   expect(digested(later)).toBe(0);
-  expect(uncurated()).toBe(1);
-
-  advance(CURATE_DELAY_MS);
-  expect(await s.tick()).toBe('curated');
   advance(FALLBACK_MS);
   expect(await s.tick()).toBe('digested');
   expect(digested(later)).toBe(1);
+  // ...and so does curation: the new digest waits for the curate delay.
+  expect(await s.tick()).toBe('idle');
+  expect(uncurated()).toBe(1);
+  advance(CURATE_DELAY_MS);
+  expect(await s.tick()).toBe('curated');
+});
+
+test('a digest written by the sync is curated right away, then the sync ends', async () => {
+  addSession(A, { live_status: 'working' });
+  const pending = addChunk(A, BIG);
+  const { calls, runner } = fakeRunner((call) => (call.role === 'digest' ? ok(JSON.parse(digestJson(false))) : ok(null)));
+  const s = scheduler(runner);
+  expect(await s.tick()).toBe('idle');
+
+  s.requestSync();
+  expect(await s.tick()).toBe('digested');
+  expect(digested(pending)).toBe(1);
+  expect(await s.tick()).toBe('curated');
+  expect(uncurated()).toBe(0);
+  expect(await s.tick()).toBe('idle');
+  expect(calls.map((c) => c.role)).toEqual(['digest', 'curate']);
+
+  // Sync cleared: a new digest waits for the curate delay again.
+  addDigest();
+  expect(await s.tick()).toBe('idle');
 });
 
 test('a small chunk arriving after requestSync is not force-skipped', async () => {

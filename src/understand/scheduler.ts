@@ -56,8 +56,8 @@ type SessionWithHeartbeat = SessionRow & { machine_heartbeat: string | null };
 type Picked = { window: DigestWindow; force: boolean };
 /** What the tick in flight is working on, so an exception can be counted against it. */
 type Work = { kind: 'curate'; ids: number[]; now: number } | { kind: 'digest'; key: string; now: number };
-/** Chunks and digests with ids up to these existed when the sync was requested; only they get the sync treatment. */
-type SyncMarks = { chunk: number; digest: number };
+/** Realtime chunks with ids up to `chunk` existed when the sync was requested; only they get the sync treatment. */
+type SyncMarks = { chunk: number };
 
 /**
  * Decides what the understanding layer does next and does it, one model call at a time: curate a batch of digests,
@@ -109,13 +109,17 @@ export class Scheduler {
         console.error('herdr-pm scheduler: tick failed:', err);
         const message = `exception: ${err instanceof Error ? err.message : String(err)}`;
         const work = this.work;
-        if (work === null) {
-          this.lastError = `调度出错：${message}`;
+        this.lastError = `调度出错：${message}`;
+        if (work === null) return 'idle';
+        try {
+          if (work.kind === 'curate') this.curateFailed(work.now, work.ids, 'other', message);
+          else this.digestFailed(work.now, work.key, 'other', message);
+          return 'skipped';
+        } catch (accountingErr) {
+          // Recording the failure touches the database too; the timer must still never see a rejection.
+          console.error('herdr-pm scheduler: recording the failure failed:', accountingErr);
           return 'idle';
         }
-        if (work.kind === 'curate') this.curateFailed(work.now, work.ids, 'other', message);
-        else this.digestFailed(work.now, work.key, 'other', message);
-        return 'skipped';
       })
       .finally(() => {
         this.running = null;
@@ -127,14 +131,15 @@ export class Scheduler {
   }
 
   /**
-   * "Run a round now": the realtime chunks and the digests that exist at this moment skip the debounce and the curate
-   * delay (and a small window of only such chunks is stored as skipped) until all of them are processed. Chunks that
-   * arrive later follow the normal rules, so a session that keeps working cannot keep the sync going. Calling it again
-   * during a sync takes in what arrived since.
+   * "Run a round now": the realtime chunks that exist at this moment skip the debounce (and a small window of only such
+   * chunks is stored as skipped), and while the sync lasts every uncurated digest, including the ones the sync itself
+   * writes, skips the curate delay. The sync ends once those chunks are processed and nothing is left to curate. Chunks
+   * that arrive later follow the normal rules, so a session that keeps working cannot keep the sync going. Calling it
+   * again during a sync takes in what arrived since.
    */
   requestSync(): void {
-    const max = (table: string) => (this.db.prepare(`SELECT coalesce(max(id), 0) AS n FROM ${table}`).get() as { n: number }).n;
-    this.sync = { chunk: max('chunks'), digest: max('digests') };
+    const max = (this.db.prepare('SELECT coalesce(max(id), 0) AS n FROM chunks').get() as { n: number }).n;
+    this.sync = { chunk: max };
   }
 
   start(): void {
@@ -197,7 +202,7 @@ export class Scheduler {
     if (
       uncurated.n > 0 &&
       !curateWaiting &&
-      (uncurated.n >= CURATE_BATCH || age(now, uncurated.oldest) >= CURATE_DELAY_MS || this.syncCurate())
+      (uncurated.n >= CURATE_BATCH || age(now, uncurated.oldest) >= CURATE_DELAY_MS || this.sync !== null)
     ) {
       return this.curate(now);
     }
@@ -282,15 +287,9 @@ export class Scheduler {
 
   // ---- sync ------------------------------------------------------------------------------------------------------
 
-  /** Whether some digest that existed when the sync was requested is still uncurated. */
-  private syncCurate(): boolean {
-    if (this.sync === null) return false;
-    return this.db.prepare('SELECT 1 FROM digests WHERE curated = 0 AND id <= ? LIMIT 1').get(this.sync.digest) !== undefined;
-  }
-
-  /** Nothing from before the sync is left: no realtime chunk of a session we would digest, no uncurated digest. */
+  /** Nothing is left to curate, and no realtime chunk from before the sync of a session we would digest. */
   private syncDone(marks: SyncMarks, now: number): boolean {
-    if (this.syncCurate()) return false;
+    if (this.db.prepare('SELECT 1 FROM digests WHERE curated = 0 LIMIT 1').get() !== undefined) return false;
     const keys = this.db
       .prepare(
         `SELECT DISTINCT c.session_key AS key FROM chunks c LEFT JOIN sessions s ON s.key = c.session_key
