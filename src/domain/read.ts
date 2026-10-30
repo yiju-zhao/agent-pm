@@ -124,6 +124,8 @@ export type ProjectCard = {
   why: string | null;
   done_criteria: string | null;
   merged_into: string | null;
+  /** The stage a parked project returns to when resumed; `null` unless parked. */
+  stage_before_park: Stage | null;
   locks: string[];
   created_by: string;
   created_at: string;
@@ -227,6 +229,7 @@ type ProjectRaw = {
   why: string | null;
   done_criteria: string | null;
   merged_into: string | null;
+  stage_before_park: Stage | null;
   locks: string;
   created_by: string;
   user_touched: number;
@@ -234,7 +237,7 @@ type ProjectRaw = {
 };
 
 const PROJECT_COLUMNS =
-  'id, title, stage, priority, summary, why, done_criteria, merged_into, locks, created_by, user_touched, created_at';
+  'id, title, stage, priority, summary, why, done_criteria, merged_into, stage_before_park, locks, created_by, user_touched, created_at';
 
 function loadMilestones(db: DatabaseSync, projectId: string): MilestoneRow[] {
   const rows = db
@@ -390,6 +393,7 @@ function assemble(db: DatabaseSync, now: Date, project: ProjectRaw, sessions: Ma
     why: project.why,
     done_criteria: project.done_criteria,
     merged_into: project.merged_into,
+    stage_before_park: project.stage_before_park,
     locks: readLocks(project),
     created_by: project.created_by,
     created_at: project.created_at,

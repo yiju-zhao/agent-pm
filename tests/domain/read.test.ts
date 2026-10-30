@@ -171,6 +171,7 @@ test('a card carries the project fields, parsed locks and the closed flag', () =
     why: '原因',
     done_criteria: '完成标准',
     merged_into: null,
+    stage_before_park: null,
     created_by: 'user',
     created_at: NOW,
     closed: false,
@@ -191,6 +192,16 @@ test('closed is true for done, abandoned and merged projects, and merged_into is
   expect(card(gone).closed).toBe(true);
   expect(card(merged)).toMatchObject({ closed: true, stage: 'merged', merged_into: target });
   expect(card(target).closed).toBe(false);
+});
+
+test('a parked card shows the stage it was parked from, so the page can offer to resume it', () => {
+  const p = t.user('create_project', { title: 'p', stage: 'build' }).id;
+  expect(t.user('transition_stage', { project: p, stage: 'parked' }).status).toBe('applied');
+  expect(card(p)).toMatchObject({ stage: 'parked', stage_before_park: 'build', closed: false });
+  expect(detail(p)).toMatchObject({ stage_before_park: 'build' });
+
+  expect(t.user('transition_stage', { project: p, stage: 'verify' }).status).toBe('applied');
+  expect(card(p)).toMatchObject({ stage: 'verify', stage_before_park: null });
 });
 
 test('an ai-created idea stays in the inbox until the user sets priority or moves the stage', () => {
