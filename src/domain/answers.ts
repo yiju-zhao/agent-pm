@@ -1,6 +1,8 @@
 import type { DatabaseSync } from 'node:sqlite';
+import { z } from 'zod';
 import { transaction } from '../server/db.ts';
 import { runOp } from './execute.ts';
+import { OP_SCHEMAS } from './ops.ts';
 import { expireQuestions, guardsHold, setArgPath } from './questions.ts';
 import type { Guard, QuestionOption } from './questions.ts';
 import { OpRejected } from './types.ts';
@@ -67,8 +69,9 @@ function pick(question: QuestionRow, options: QuestionOption[], answer: unknown)
  * (`question_id`); an option without an operation (拒绝) is recorded as a rejection, which starts the re-ask cooldown.
  *
  * Returns `applied` (`event_id` is null when nothing ran), or a `rejected` result: `not_found`, `not_pending`,
- * `stale` (a guard no longer holds; the question is withdrawn), `invalid` (the answer does not fit the question; it
- * stays pending), or the code of the bound operation's rejection (the question is withdrawn with it as the note).
+ * `stale` (a guard no longer holds; the question is withdrawn), `invalid` (the answer does not fit the question, or
+ * the typed text does not fit the op's args; it stays pending), or the code of any other rejection from the bound
+ * operation (the question is withdrawn with it as the note).
  * Never throws `OpRejected`.
  */
 export function answerQuestion(
@@ -98,9 +101,15 @@ export function answerQuestion(
   }
 
   try {
+    const base = option.args ?? {};
+    const args = picked.text !== null && option.text_arg !== undefined ? setArgPath(base, option.text_arg, picked.text) : base;
+    if (picked.text !== null) {
+      // The op's own schema can still refuse what the user typed (e.g. too long). That is the user's to fix, so the
+      // question stays pending instead of being withdrawn.
+      const parsed = OP_SCHEMAS[op].safeParse(args);
+      if (!parsed.success) return rejected('invalid', `invalid args for ${op}: ${z.prettifyError(parsed.error)}`);
+    }
     return transaction(db, () => {
-      const base = option.args ?? {};
-      const args = picked.text !== null && option.text_arg !== undefined ? setArgPath(base, option.text_arg, picked.text) : base;
       const result = runOp(db, deps, { op, args, actor: 'user', question_id: id });
       // The op may have withdrawn this very question as stale (it moved the column the question guards); answered wins.
       resolve(db, deps, id, { status: 'answered', answer: stored });

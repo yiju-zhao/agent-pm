@@ -151,6 +151,22 @@ test('a text question passes the typed text into its op', () => {
   });
 });
 
+test('typed text the op refuses is invalid and keeps the question pending so the user can retype', () => {
+  const q = askText();
+  const before = events();
+
+  const r = answer(q, { text: '字'.repeat(4001) });
+
+  expect(r).toMatchObject({ status: 'rejected', code: 'invalid' });
+  expect(question(q)).toMatchObject({ status: 'pending', answer: null, resolution_note: null, resolved_at: null, rejected: 0 });
+  expect(events()).toBe(before);
+  expect(project(p).done_criteria).toBeNull();
+
+  expect(answer(q, { text: '跑通 3 个基准' })).toMatchObject({ status: 'applied' });
+  expect(project(p).done_criteria).toBe('跑通 3 个基准');
+  expect(question(q)).toMatchObject({ status: 'answered', answer: '{"option_index":0,"text":"跑通 3 个基准"}' });
+});
+
 test('an answer that does not fit the question is invalid and leaves the question pending', () => {
   const text = askText();
   const choice = askChoice();
