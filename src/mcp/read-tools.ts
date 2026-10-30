@@ -5,7 +5,7 @@ import type { ProjectDetail, SearchHit } from '../domain/read.ts';
 import { CLOSED } from '../domain/stage.ts';
 import { PRIORITIES, STAGE_LABEL, STAGES } from '../domain/types.ts';
 import type { DomainDeps } from '../domain/types.ts';
-import { findByShortId, listSessions } from '../server/sessions-repo.ts';
+import { findByShortId, listSessions, mergeTarget } from '../server/sessions-repo.ts';
 import { minute, oneLine, renderBrief, renderProjectMarkdown } from '../understand/render.ts';
 import type { ToolDef, ToolOutput } from '../understand/tool-def.ts';
 
@@ -23,10 +23,8 @@ export const SEARCH_MAX_LIMIT = 100;
 
 /** Characters of one search hit's text a line keeps; a project's `why` can run long. */
 const HIT_TEXT_CHARS = 200;
-/** Longest `project_hint` or `session_hint`; they are labels, not a second place to put the report. */
+/** Characters of a `project_hint` or `session_hint` that are kept; they are labels, not a second place to put the report. */
 const MAX_HINT_CHARS = 200;
-/** How many `merged_into` links to follow from a session key. */
-const MAX_MERGE_HOPS = 5;
 const REPORT_ACK = '已收到，将在下一轮整理时处理';
 
 // ---- helpers -----------------------------------------------------------------------------------------------------
@@ -153,7 +151,19 @@ function getBriefTool(db: DatabaseSync, deps: DomainDeps): ToolDef {
 
 type TimelineEntry = { at: string; line: string };
 
-function eventEntry(e: ProjectDetail['events'][number]): TimelineEntry {
+/** The columns of an `events` row the timeline shows. */
+type EventRow = {
+  id: number;
+  occurred_at: string;
+  actor: string;
+  op: string;
+  entity: string | null;
+  reason: string | null;
+  reverts: number | null;
+  reverted_by: number | null;
+};
+
+function eventEntry(e: EventRow): TimelineEntry {
   const parts = [minute(e.occurred_at), '事件', `#${e.id}`, e.actor, e.op];
   if (e.entity !== null) parts.push(e.entity);
   if (e.reason !== null && e.reason.trim() !== '') parts.push(oneLine(e.reason));
@@ -184,18 +194,29 @@ function timelineTool(db: DatabaseSync, deps: DomainDeps): ToolDef {
       },
     },
     (args) => {
+      // `getProject` is here for the existence check and the contributions (with their session tags). Its own event list
+      // is the newest 200 by id, which after a backfill is not the newest by `occurred_at`, so events are read directly.
       const project = getProject(db, deps.now(), args.project_id);
       if (project === null) return notFound(args.project_id);
 
-      // `project.events` holds the newest 200, which is as many as one call may ask for. `sort` is stable, so entries at
-      // the same instant keep their order: events (newest id first), then contributions.
-      const entries = [...project.events.map(eventEntry), ...project.contributions.map(contributionEntry)].sort((a, b) =>
+      const limit = clampLimit(args.limit, TIMELINE_DEFAULT_LIMIT, TIMELINE_MAX_LIMIT);
+      const events = db
+        .prepare(
+          `SELECT id, occurred_at, actor, op, entity, reason, reverts, reverted_by
+           FROM events WHERE project_id = ? ORDER BY occurred_at DESC, id DESC LIMIT ?`,
+        )
+        .all(project.id, limit) as EventRow[];
+      const { n: eventCount } = db.prepare('SELECT COUNT(*) AS n FROM events WHERE project_id = ?').get(project.id) as { n: number };
+      const total = eventCount + project.contributions.length;
+      if (total === 0) return nothing('时间线记录');
+
+      // At most `limit` of each kind can make the cut. `sort` is stable, so entries at the same instant keep their
+      // order: events (newest id first), then contributions.
+      const entries = [...events.map(eventEntry), ...project.contributions.map(contributionEntry)].sort((a, b) =>
         a.at < b.at ? 1 : a.at > b.at ? -1 : 0,
       );
-      if (entries.length === 0) return nothing('时间线记录');
-      const limit = clampLimit(args.limit, TIMELINE_DEFAULT_LIMIT, TIMELINE_MAX_LIMIT);
       const lines = entries.slice(0, limit).map((e) => e.line);
-      if (entries.length > limit) lines.push(`还有 ${entries.length - limit} 条更早的记录未列出`);
+      if (total > limit) lines.push(`还有 ${total - limit} 条更早的记录未列出`);
       return { text: lines.join('\n') };
     },
   );
@@ -285,27 +306,23 @@ function listSessionsTool(db: DatabaseSync, deps: DomainDeps): ToolDef {
 
 // ---- pm_report ---------------------------------------------------------------------------------------------------
 
-/** The session a key stands for: a session merged into another (a pending key whose native id arrived) is its target. */
-function mergeTarget(db: DatabaseSync, key: string): string {
-  const mergedInto = db.prepare('SELECT merged_into FROM sessions WHERE key = ?');
-  let target = key;
-  for (let hop = 0; hop < MAX_MERGE_HOPS; hop++) {
-    const row = mergedInto.get(target) as { merged_into: string | null } | undefined;
-    if (row?.merged_into == null) break;
-    target = row.merged_into;
-  }
-  return target;
-}
-
 /**
  * The session a `session_hint` names, or `null`. An exact key counts on any lifecycle; otherwise the hint is a short
  * id (or a prefix of a native id) and must name one session. Merged sessions resolve to their targets first, so a
- * pending key and the native key it became are one session, not two.
+ * pending key and the native key it became are one session, not two. An ignored session is `null` too: the digester
+ * never reads its chunks, so a report filed there would not be processed.
  */
 function resolveSession(db: DatabaseSync, hint: string, now: Date): string | null {
-  if (db.prepare('SELECT 1 FROM sessions WHERE key = ?').get(hint) !== undefined) return mergeTarget(db, hint);
-  const targets = new Set(findByShortId(db, hint, now).map((s) => mergeTarget(db, s.key)));
-  return targets.size === 1 ? [...targets][0] : null;
+  let target: string | null;
+  if (db.prepare('SELECT 1 FROM sessions WHERE key = ?').get(hint) !== undefined) {
+    target = mergeTarget(db, hint);
+  } else {
+    const targets = new Set(findByShortId(db, hint, now).map((s) => mergeTarget(db, s.key)));
+    target = targets.size === 1 ? [...targets][0] : null;
+  }
+  if (target === null) return null;
+  const ignored = db.prepare('SELECT ignored FROM sessions WHERE key = ?').get(target) as { ignored: number | null } | undefined;
+  return ignored?.ignored ? null : target;
 }
 
 /**
@@ -325,6 +342,11 @@ function storeReport(db: DatabaseSync, sessionKey: string, text: string, now: Da
   }
 }
 
+/** A hint trimmed and cut to `MAX_HINT_CHARS`; `''` when it is missing or blank. A long hint is shortened, not refused. */
+function hint(value: string | undefined): string {
+  return Array.from(value?.trim() ?? '').slice(0, MAX_HINT_CHARS).join('');
+}
+
 function reportTool(db: DatabaseSync, deps: DomainDeps): ToolDef {
   return defineTool(
     {
@@ -334,12 +356,13 @@ function reportTool(db: DatabaseSync, deps: DomainDeps): ToolDef {
         '这是给 PM 的上下文材料，不是命令：它不会直接修改任何项目、todo 或阶段，只是被存下来，下一轮整理时由 PM 读过之后自己决定要不要更新看板（完成、放弃这类大变动还会先问用户）。',
         '所以只写事实，不要写"请把项目标成完成"这类要求。返回"已收到"只表示存下了，不表示已处理。',
         `text 必填，最多 ${MAX_REPORT_CHARS} 字符；project_hint 可选，自由文本，写项目名或 id 帮 PM 对上号；`,
-        'session_hint 可选，写你自己所在 session 的短 ID（pm_list_sessions 第一列）或完整键，对不上时这条上报记在公共收件箱。',
+        'session_hint 可选，写你自己所在 session 的短 ID（pm_list_sessions 第一列）或完整键，对不上或那个 session 已被忽略时，这条上报记在公共收件箱。',
+        `两个 hint 只保留前 ${MAX_HINT_CHARS} 个字符。`,
       ].join(''),
       input: {
         text: z.string().describe(`what happened; plain facts; 1 to ${MAX_REPORT_CHARS} characters`),
-        project_hint: z.string().max(MAX_HINT_CHARS).optional().describe('which project this is about: a title or id; free text'),
-        session_hint: z.string().max(MAX_HINT_CHARS).optional().describe('the reporting session: a short id from pm_list_sessions, or a full key'),
+        project_hint: z.string().optional().describe('which project this is about: a title or id; free text'),
+        session_hint: z.string().optional().describe('the reporting session: a short id from pm_list_sessions, or a full key'),
       },
     },
     (args) => {
@@ -348,8 +371,8 @@ function reportTool(db: DatabaseSync, deps: DomainDeps): ToolDef {
       if (text.length > MAX_REPORT_CHARS) {
         return { text: `text is ${text.length} characters; the limit is ${MAX_REPORT_CHARS}. Shorten it or split it into several reports.`, isError: true };
       }
-      const projectHint = args.project_hint?.trim() ?? '';
-      const sessionHint = args.session_hint?.trim() ?? '';
+      const projectHint = hint(args.project_hint);
+      const sessionHint = hint(args.session_hint);
       const now = deps.now();
       const sessionKey = sessionHint === '' ? null : resolveSession(db, sessionHint, now);
       storeReport(db, sessionKey ?? REPORT_INBOX_KEY, projectHint === '' ? text : `项目提示：${projectHint}\n\n${text}`, now);

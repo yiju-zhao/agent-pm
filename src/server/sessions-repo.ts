@@ -192,8 +192,23 @@ export function applySnapshot(db: DatabaseSync, push: SnapshotPush, now: Date): 
   });
 }
 
-/** How many `merged_into` links `insertChunks` follows from a pushed session key. */
+/** How many `merged_into` links `mergeTarget` follows. */
 const MAX_MERGE_HOPS = 5;
+
+/**
+ * The key a session is known by now: follows `merged_into` (a pending key whose session got its native id) at most 5
+ * hops, so a cycle cannot loop. A key that is not a session, or was not merged, comes back as it is.
+ */
+export function mergeTarget(db: DatabaseSync, key: string): string {
+  const mergedInto = db.prepare('SELECT merged_into FROM sessions WHERE key = ?');
+  let target = key;
+  for (let hop = 0; hop < MAX_MERGE_HOPS; hop++) {
+    const row = mergedInto.get(target) as { merged_into: string | null } | undefined;
+    if (row?.merged_into == null) break;
+    target = row.merged_into;
+  }
+  return target;
+}
 
 /**
  * Stores one push atomically; chunks already stored at the same (session_key, offset_start) count as
@@ -212,17 +227,11 @@ export function insertChunks(
          (session_key, kind, offset_start, offset_end, ts_start, ts_end, text, backfill, received_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
-    const mergedInto = db.prepare('SELECT merged_into FROM sessions WHERE key = ?');
     const targets = new Map<string, string>();
     const targetOf = (key: string): string => {
       let target = targets.get(key);
       if (target === undefined) {
-        target = key;
-        for (let hop = 0; hop < MAX_MERGE_HOPS; hop++) {
-          const row = mergedInto.get(target) as { merged_into: string | null } | undefined;
-          if (row?.merged_into == null) break;
-          target = row.merged_into;
-        }
+        target = mergeTarget(db, key);
         targets.set(key, target);
       }
       return target;

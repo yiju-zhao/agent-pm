@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, expect, test } from 'vitest';
+import { execute } from '../../src/domain/execute.ts';
 import { askUser } from '../../src/domain/questions.ts';
 import { getProject } from '../../src/domain/read.ts';
 import { applySnapshot, maxOffset } from '../../src/server/sessions-repo.ts';
 import { MAX_REPORT_CHARS, readTools, REPORT_INBOX_KEY } from '../../src/mcp/read-tools.ts';
+import { nextWindow } from '../../src/understand/digest.ts';
 import { renderBrief, renderProjectMarkdown } from '../../src/understand/render.ts';
 import type { ToolDef, ToolOutput } from '../../src/understand/tool-def.ts';
 import { count, NOW, rows, setup } from '../domain/helpers.ts';
@@ -278,6 +280,35 @@ test('pm_timeline: limit defaults to 50 and is clamped to 1..200, never rejected
   expect(cut.text.split('\n').at(-1)).toContain('未列出');
 });
 
+test('pm_timeline orders by occurred_at, not event id, even past the newest 200 ids', async () => {
+  const p = t.user('create_project', { title: '回填过的项目' }).id; // event #1, occurred at NOW
+  // A backfill: events recorded later whose conversations happened earlier (ids 2..206, 10-01 onward).
+  const earlier = (minutes: number) => new Date(Date.parse('2026-10-01T00:00:00.000Z') + minutes * 60_000).toISOString();
+  for (let i = 0; i < 205; i++) {
+    const r = execute(t.db, t.deps, { op: 'upsert_todo', args: { project: p, title: `old ${i}` }, actor: 'user', occurred_at: earlier(i) });
+    expect(r.status).toBe('applied');
+  }
+  addSession('claude:aaaa1111xxxxyyyy');
+  const linked = execute(t.db, t.deps, {
+    op: 'link_session',
+    args: { session: 'claude:aaaa1111xxxxyyyy', project: p, ts_end: '2026-10-20T00:00:00.000Z', summary: '回填的贡献' },
+    actor: 'user',
+    occurred_at: '2026-10-15T00:00:00.000Z',
+  });
+  expect(linked.status).toBe('applied'); // event #207, occurred 10-15
+
+  const out = await call('pm_timeline', { project_id: p, limit: 4 });
+  const lines = linesOf(out);
+  expect(lines).toHaveLength(4);
+  // #1 has the newest occurred_at although it is far outside the newest 200 ids
+  expect(lines[0]).toMatch(/^- 2026-10-29 12:00 · 事件 · #1 · user · create_project/);
+  expect(lines[1]).toMatch(/^- 2026-10-20 00:00 · 贡献 · .*回填的贡献/);
+  expect(lines[2]).toMatch(/^- 2026-10-15 00:00 · 事件 · #207 · user · link_session/);
+  expect(lines[3]).toMatch(/^- 2026-10-01 03:24 · 事件 · #206 /); // old 204
+  // 207 events and 1 contribution in all; 4 are listed
+  expect(out.text.split('\n').at(-1)).toBe('还有 204 条更早的记录未列出');
+});
+
 test('pm_timeline gives isError for an unknown project', async () => {
   const out = await call('pm_timeline', { project_id: 'p_nope' });
   expect(out.isError).toBe(true);
@@ -504,11 +535,66 @@ test('pm_report rejects empty and oversized text', async () => {
   expect(MAX_REPORT_CHARS).toBe(20000);
 });
 
-test('pm_report bounds the hints so they cannot smuggle in a huge body', async () => {
-  const before = count(t.db, 'chunks');
-  expect((await call('pm_report', { text: 'a', project_hint: 'p'.repeat(2000) })).isError).toBe(true);
-  expect((await call('pm_report', { text: 'a', session_hint: 's'.repeat(2000) })).isError).toBe(true);
-  expect(count(t.db, 'chunks')).toBe(before);
+test('pm_report cuts a long hint to 200 characters instead of refusing the report', async () => {
+  addSession('claude:aaaa1111xxxxyyyy');
+  const long = await call('pm_report', { text: '正文', project_hint: `  ${'项'.repeat(2000)}  `, session_hint: 's'.repeat(2000) });
+  expect(long).toEqual({ text: '已收到，将在下一轮整理时处理' });
+  // a cut session hint names nothing, so the report goes to the inbox
+  expect(reportChunks().map((c) => [c.session_key, c.text])).toEqual([[REPORT_INBOX_KEY, `项目提示：${'项'.repeat(200)}\n\n正文`]]);
+
+  // exactly 200 characters are kept whole
+  await call('pm_report', { text: '再一条', project_hint: 'p'.repeat(200) });
+  expect(reportChunks().at(-1)!.text).toBe(`项目提示：${'p'.repeat(200)}\n\n再一条`);
+});
+
+test('pm_report trims whitespace around a session_hint', async () => {
+  addSession('claude:aaaa1111xxxxyyyy');
+  addSession('codex:bbbb2222xxxxyyyy');
+  await call('pm_report', { text: '带空格的键', session_hint: '  claude:aaaa1111xxxxyyyy \n' });
+  await call('pm_report', { text: '带空格的短 ID', session_hint: '\tbbbb2222  ' });
+  expect(reportChunks().map((c) => c.session_key)).toEqual(['claude:aaaa1111xxxxyyyy', 'codex:bbbb2222xxxxyyyy']);
+});
+
+test('pm_report does not file under an ignored session: the digester would never read it', async () => {
+  addSession('claude:aaaa1111xxxxyyyy', { ignored: 1 });
+  addSession('codex:bbbb2222xxxxyyyy');
+  addSession('pending:laptop:term_88', { ignored: 1 });
+  t.db.prepare(`UPDATE sessions SET merged_into = 'codex:bbbb2222xxxxyyyy', lifecycle = 'ended' WHERE key = 'pending:laptop:term_88'`).run();
+
+  await call('pm_report', { text: '按完整键', session_hint: 'claude:aaaa1111xxxxyyyy' });
+  await call('pm_report', { text: '按短 ID', session_hint: 'aaaa1111' });
+  // an ignored pending key that merged into a session that is not ignored: the target counts
+  await call('pm_report', { text: '合并后的目标', session_hint: 'pending:laptop:term_88' });
+  // and the same target reached by its own short id
+  await call('pm_report', { text: '没被忽略的', session_hint: 'bbbb2222' });
+
+  expect(reportChunks().map((c) => [c.text, c.session_key])).toEqual([
+    ['按完整键', REPORT_INBOX_KEY],
+    ['按短 ID', REPORT_INBOX_KEY],
+    ['合并后的目标', 'codex:bbbb2222xxxxyyyy'],
+    ['没被忽略的', 'codex:bbbb2222xxxxyyyy'],
+  ]);
+});
+
+test('a stored report is the next realtime window of its key, tagged kind="report"', async () => {
+  await call('pm_report', { text: '我把 tokenizer 换成了 sentencepiece', project_hint: 'dLLM 评测' });
+  addSession('claude:aaaa1111xxxxyyyy');
+  await call('pm_report', { text: '给 session 的上报', session_hint: 'aaaa1111' });
+
+  const inbox = nextWindow(t.db, REPORT_INBOX_KEY, 'realtime');
+  expect(inbox).not.toBeNull();
+  const [chunk] = reportChunks();
+  expect(inbox!.chunkIds).toEqual([chunk.id]);
+  expect(inbox!.text).toBe(`<chunk id="${chunk.id}" kind="report">项目提示：dLLM 评测\n\n我把 tokenizer 换成了 sentencepiece</chunk>`);
+  expect(inbox!.backfill).toBe(false);
+  expect(inbox!.tsEnd).toBe(NOW);
+
+  // a report filed under a session is part of that session's window
+  const session = nextWindow(t.db, 'claude:aaaa1111xxxxyyyy', 'realtime');
+  expect(session!.text).toContain('kind="report"');
+  expect(session!.text).toContain('给 session 的上报');
+  // reports are never backfill
+  expect(nextWindow(t.db, REPORT_INBOX_KEY, 'backfill')).toBeNull();
 });
 
 test('report chunks never move the transcript resume offset', async () => {

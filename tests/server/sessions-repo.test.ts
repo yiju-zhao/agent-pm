@@ -10,6 +10,7 @@ import {
   insertChunks,
   listSessions,
   maxOffset,
+  mergeTarget,
   OFFLINE_AFTER_MS,
 } from '../../src/server/sessions-repo.ts';
 import type { ChunkPush, SnapshotPush, SnapshotSession } from '../../src/shared/protocol.ts';
@@ -570,6 +571,23 @@ test('chunks of a merged key follow merged_into at most 5 hops', () => {
   // A cycle cannot loop forever.
   db.prepare('UPDATE sessions SET merged_into = ? WHERE key = ?').run(keys[0]!, keys[7]!);
   expect(() => insertChunks(db, { machine: 'laptop', chunks: [chunk(keys[3]!, 99, 100)] }, t0)).not.toThrow();
+});
+
+test('mergeTarget follows merged_into, at most 5 hops, and returns other keys as they are', () => {
+  const keys = Array.from({ length: 8 }, (_, i) => `pending:laptop:term_${i}`);
+  keys.forEach((k, i) => {
+    db.prepare(
+      `INSERT INTO sessions (key, agent_kind, machine, lifecycle, merged_into) VALUES (?, 'codex', 'laptop', 'ended', ?)`,
+    ).run(k, keys[i + 1] ?? null);
+  });
+  expect(mergeTarget(db, keys[7]!)).toBe(keys[7]); // not merged
+  expect(mergeTarget(db, keys[6]!)).toBe(keys[7]);
+  expect(mergeTarget(db, keys[2]!)).toBe(keys[7]); // five hops
+  expect(mergeTarget(db, keys[0]!)).toBe(keys[5]); // the cap stops it
+  expect(mergeTarget(db, 'claude:not-a-session')).toBe('claude:not-a-session');
+
+  db.prepare('UPDATE sessions SET merged_into = ? WHERE key = ?').run(keys[0]!, keys[7]!);
+  expect(() => mergeTarget(db, keys[3]!)).not.toThrow(); // a cycle ends
 });
 
 test('maxOffset returns max offset_end or null', () => {
