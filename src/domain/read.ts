@@ -543,6 +543,74 @@ export function getProject(db: DatabaseSync, now: Date, id: string): ProjectDeta
   };
 }
 
+// ---- search and vetoed projects ----------------------------------------------------------------------------------
+
+export type SearchHit = {
+  project_id: string;
+  project_title: string;
+  kind: 'project' | 'todo' | 'decision' | 'milestone' | 'blocker';
+  id: string;
+  text: string;
+};
+
+/** The searched text of each kind of item, in the order hits are listed after the projects. Constants: spliced into SQL. */
+const SEARCH_ITEMS = [
+  { kind: 'milestone', table: 'milestones', column: 'title' },
+  { kind: 'todo', table: 'todos', column: 'title' },
+  { kind: 'decision', table: 'decisions', column: 'text' },
+  { kind: 'blocker', table: 'blockers', column: 'text' },
+] as const;
+
+const SEARCHED_PROJECT_COLUMNS = ['title', 'summary', 'why', 'done_criteria'] as const;
+
+/**
+ * Projects, milestones, todos, decisions and blockers whose text contains `query`, projects first and each kind in
+ * creation order, at most `limit` hits. Deleted items and everything under a deleted project are left out. The match is
+ * a plain substring (`%` and `_` in `query` are ordinary characters) that SQLite's `LIKE` folds for ASCII letters only;
+ * a blank query finds nothing. A project hit carries the first of title, summary, why and done criteria that matches.
+ */
+export function searchProjects(db: DatabaseSync, query: string, limit: number): SearchHit[] {
+  const needle = query.trim();
+  const max = Math.floor(limit);
+  if (needle === '' || !(max > 0)) return [];
+
+  const matches = (column: string): string => `${column} LIKE $pattern ESCAPE '\\'`;
+  const projectText = SEARCHED_PROJECT_COLUMNS.map((c) => `WHEN ${matches(`p.${c}`)} THEN p.${c}`).join(' ');
+  const parts = [
+    `SELECT p.id AS project_id, p.title AS project_title, 'project' AS kind, p.id AS id, CASE ${projectText} END AS text,
+            0 AS ord, p.rowid AS seq
+     FROM projects p
+     WHERE p.deleted_at IS NULL AND (${SEARCHED_PROJECT_COLUMNS.map((c) => matches(`p.${c}`)).join(' OR ')})`,
+    ...SEARCH_ITEMS.map(
+      ({ kind, table, column }, i) =>
+        `SELECT p.id, p.title, '${kind}', i.id, i.${column}, ${i + 1}, i.rowid
+         FROM ${table} i JOIN projects p ON p.id = i.project_id
+         WHERE p.deleted_at IS NULL AND i.deleted_at IS NULL AND ${matches(`i.${column}`)}`,
+    ),
+  ];
+  const pattern = `%${needle.replace(/[\\%_]/g, '\\$&')}%`;
+  const rows = db.prepare(`${parts.join(' UNION ALL ')} ORDER BY ord, seq LIMIT $limit`).all({ pattern, limit: max });
+  // `ord` and `seq` only order the union.
+  return asRows<SearchHit>(rows).map((r) => ({
+    project_id: r.project_id,
+    project_title: r.project_title,
+    kind: r.kind,
+    id: r.id,
+    text: r.text,
+  }));
+}
+
+/** Projects the user deleted (undid an AI's `create_project`), newest first, so the curator does not build them again. */
+export function listVetoedProjects(db: DatabaseSync): Array<{ id: string; title: string; deleted_at: string }> {
+  const rows = db
+    .prepare(
+      `SELECT id, title, deleted_at FROM projects WHERE vetoed = 1 AND deleted_at IS NOT NULL
+       ORDER BY deleted_at DESC, rowid DESC`,
+    )
+    .all();
+  return asRows<{ id: string; title: string; deleted_at: string }>(rows).map((r) => ({ ...r }));
+}
+
 // ---- questions ---------------------------------------------------------------------------------------------------
 
 /**
