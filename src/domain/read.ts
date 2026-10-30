@@ -525,14 +525,18 @@ export function getProject(db: DatabaseSync, now: Date, id: string): ProjectDeta
 
 // ---- questions ---------------------------------------------------------------------------------------------------
 
-/** Questions, newest first. Pending questions past their time limit are expired first, so this writes. */
+/**
+ * Questions, newest first, leaving out those about a deleted project (reverting an AI's `create_project` deletes it, and
+ * the questions asked about it carry no guards to withdraw them). Pending questions past their time limit are expired
+ * first, so this writes.
+ */
 export function listQuestions(
   db: DatabaseSync,
   deps: DomainDeps,
   filter: { status?: QuestionView['status']; project_id?: string },
 ): QuestionView[] {
   expireQuestions(db, deps);
-  const where: string[] = [];
+  const where = ['(project_id IS NULL OR project_id IN (SELECT id FROM projects WHERE deleted_at IS NULL))'];
   const params: string[] = [];
   if (filter.status !== undefined) {
     where.push('status = ?');
@@ -544,8 +548,7 @@ export function listQuestions(
   }
   const rows = db
     .prepare(
-      `SELECT ${QUESTION_COLUMNS} FROM questions ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
-       ORDER BY created_at DESC, rowid DESC`,
+      `SELECT ${QUESTION_COLUMNS} FROM questions WHERE ${where.join(' AND ')} ORDER BY created_at DESC, rowid DESC`,
     )
     .all(...params);
   return asRows<QuestionRaw>(rows).map(questionView);

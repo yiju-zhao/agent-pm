@@ -8,7 +8,7 @@ import {
 } from '../../src/domain/read.ts';
 import type { ProjectCard, ProjectDetail } from '../../src/domain/read.ts';
 import { askUser } from '../../src/domain/questions.ts';
-import { NOW, setup } from './helpers.ts';
+import { NOW, row, setup } from './helpers.ts';
 import type { Setup } from './helpers.ts';
 
 let t: Setup;
@@ -655,8 +655,12 @@ test('detail has everything a card has', () => {
 
 test('deleted projects are absent from the list and getProject returns null', () => {
   const keep = t.user('create_project', { title: 'keep' }).id;
-  const drop = t.user('create_project', { title: 'drop' }).id;
-  t.db.prepare('UPDATE projects SET deleted_at = ? WHERE id = ?').run(NOW, drop);
+  const created = t.ai('create_project', { title: 'drop' });
+  const drop = created.id;
+  expect(cards().map((c) => c.id).sort()).toEqual([keep, drop].sort());
+  // Reverting an AI's create_project is how a project gets deleted.
+  expect(t.user('revert_event', { event_id: created.event_id }).status).toBe('applied');
+  expect(row(t.db, 'projects', drop).deleted_at).not.toBeNull();
 
   expect(cards().map((c) => c.id)).toEqual([keep]);
   expect(getProject(t.db, now(), drop)).toBeNull();
@@ -735,6 +739,36 @@ test('listQuestions filters by status and project, newest first', () => {
   expect(listQuestions(t.db, t.deps, { project_id: a, status: 'withdrawn' })).toEqual([]);
   const withdrawn = listQuestions(t.db, t.deps, { status: 'withdrawn' });
   expect(withdrawn.map((q) => [q.id, q.resolution_note])).toEqual([[q2, 'stale']]);
+});
+
+test('listQuestions leaves out questions about a deleted project but keeps the others', () => {
+  const created = t.ai('create_project', { title: 'reverted idea' });
+  const gone = ask('about the reverted project', { project_id: created.id });
+  const kept = ask('about a live project');
+  const sessionOnly = askUser(
+    t.db,
+    t.deps,
+    {
+      kind: 'confirm',
+      prompt: 'about a session',
+      session_key: 'claude:aaaa1111xxxx',
+      option: { label: '确认', op: 'ignore_session', args: { session: 'claude:aaaa1111xxxx' } },
+      evidence: ['chunk:1'],
+    },
+    'ai:curator',
+  );
+  if (sessionOnly.status !== 'proposed') throw new Error(`ask failed: ${JSON.stringify(sessionOnly)}`);
+  const noProject = sessionOnly.question_ids[0];
+
+  expect(listQuestions(t.db, t.deps, {}).map((q) => q.id).sort()).toEqual([gone, kept, noProject].sort());
+  expect(t.user('revert_event', { event_id: created.event_id }).status).toBe('applied');
+
+  const ids = (filter: Parameters<typeof listQuestions>[2]) => listQuestions(t.db, t.deps, filter).map((q) => q.id);
+  expect(ids({}).sort()).toEqual([kept, noProject].sort());
+  expect(ids({ project_id: created.id })).toEqual([]);
+  expect(ids({ status: 'pending' }).sort()).toEqual([kept, noProject].sort());
+  // The question itself is untouched; it is only not listed.
+  expect(row(t.db, 'questions', gone).status).toBe('pending');
 });
 
 test('listQuestions expires questions past their time limit before listing', () => {
