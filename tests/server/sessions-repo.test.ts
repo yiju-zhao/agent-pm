@@ -186,6 +186,34 @@ test('pending session merges into native key and moves chunks', () => {
   ]);
 });
 
+test('a pending session that succeeded A passes predecessor A on to the native session it merges into (R10)', () => {
+  const P = 'pending:laptop:term_1';
+  applySnapshot(db, push('laptop', [session(A, 'term_1')]), t0);
+  // claude:A exits; the next agent on term_1 has no native id yet.
+  applySnapshot(db, push('laptop', [session(P, 'term_1', { agent_kind: 'claude' })]), t1);
+  expect(row(P)).toMatchObject({ predecessor_key: A });
+
+  applySnapshot(db, push('laptop', [session(B, 'term_1')]), t2);
+
+  expect(row(P)).toMatchObject({ lifecycle: 'ended', merged_into: B });
+  expect(row(B)).toMatchObject({ lifecycle: 'live', predecessor_key: A });
+});
+
+test('a merge does not overwrite a predecessor the native session already has', () => {
+  const P = 'pending:laptop:term_1';
+  applySnapshot(db, push('laptop', [session(C, 'term_2')]), t0);
+  applySnapshot(db, push('laptop', [session(A, 'term_1'), session(B, 'term_2')]), t1);
+  expect(row(B)).toMatchObject({ predecessor_key: C });
+  applySnapshot(db, push('laptop', [session(P, 'term_1', { agent_kind: 'claude' }), session(B, 'term_2')]), t2);
+  expect(row(P)).toMatchObject({ predecessor_key: A });
+
+  // B moves onto term_1 (e.g. resumed there) and is recognised as the pending session's identity.
+  applySnapshot(db, push('laptop', [session(B, 'term_1')]), new Date(t2.getTime() + 10_000));
+
+  expect(row(P)).toMatchObject({ merged_into: B });
+  expect(row(B)).toMatchObject({ predecessor_key: C });
+});
+
 test('pending merge keeps the native chunk when offsets collide', () => {
   const P = 'pending:laptop:term_1';
   applySnapshot(db, push('laptop', [session(P, 'term_1')]), t0);
@@ -280,7 +308,8 @@ test('a revived pending key can be merged again later', () => {
   applySnapshot(db, push('laptop', [session(Z, 'term_1')]), t3);
 
   expect(row(P)).toMatchObject({ lifecycle: 'ended', merged_into: Z });
-  expect(row(Z)).toMatchObject({ lifecycle: 'live', predecessor_key: null });
+  // Z is the revived P, which succeeded Y (R10: the predecessor carries across the merge).
+  expect(row(Z)).toMatchObject({ lifecycle: 'live', predecessor_key: Y });
   expect(chunkKeys().map((c) => [c.session_key, c.offset_start])).toEqual([[Z, t2.getTime()]]);
 });
 

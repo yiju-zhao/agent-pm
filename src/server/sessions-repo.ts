@@ -138,6 +138,11 @@ export function applySnapshot(db: DatabaseSync, push: SnapshotPush, now: Date): 
     const markMerged = db.prepare(
       `UPDATE sessions SET merged_into = ?, lifecycle = 'ended' WHERE key = ?`,
     );
+    // The pending session's predecessor is the native session's, unless it already has one (R10).
+    const inheritPredecessor = db.prepare(
+      `UPDATE sessions SET predecessor_key = COALESCE(predecessor_key, (SELECT predecessor_key FROM sessions WHERE key = ?))
+       WHERE key = ?`,
+    );
     for (const s of reported.values()) {
       if (parseSessionKey(s.key).kind !== 'native') continue;
       const pending = pendingKey(machine, s.terminal_id);
@@ -145,6 +150,7 @@ export function applySnapshot(db: DatabaseSync, push: SnapshotPush, now: Date): 
       moveChunks.run(s.key, pending);
       dropChunks.run(pending); // leftovers collided with chunks the native key already has
       markMerged.run(s.key, pending);
+      inheritPredecessor.run(pending, s.key);
       livePending.delete(pending);
       merged.add(pending);
     }
