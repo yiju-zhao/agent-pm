@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Central server (run on mac-mini). The __PLACEHOLDERS__ are filled in with sed, see README.md:
+    __NODE_BIN__     absolute path of node >= 26 (`command -v node`)
+    __REPO_DIR__     absolute path of the herdr-pm checkout on this machine
+    __CONFIG_PATH__  absolute path of the server config (copy of config/server.example.json)
+    __HOME__         absolute home directory (launchd does not expand "~")
+  The log directory must exist: mkdir -p ~/Library/Logs/herdr-pm
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.herdr-pm.server</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE_BIN__</string>
+    <string>__REPO_DIR__/src/cli.ts</string>
+    <string>server</string>
+    <string>--config</string>
+    <string>__CONFIG_PATH__</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__REPO_DIR__</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/herdr-pm/server.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/herdr-pm/server.err.log</string>
+</dict>
+</plist>

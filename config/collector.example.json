@@ -1,0 +1,10 @@
+{
+  "server": "http://mac-mini:7718",
+  "machine": "laptop",
+  "token": "REPLACE-WITH-RANDOM-TOKEN-laptop",
+  "herdrBin": "herdr",
+  "claudeDir": "~/.claude",
+  "codexDir": "~/.codex",
+  "stateFile": "~/.local/state/herdr-pm/collector.json",
+  "pollMs": 10000
+}

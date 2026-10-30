@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Collector (run on every macOS machine: laptop, mac-mini). The __PLACEHOLDERS__ are filled in with sed, see README.md:
+    __COLLECTOR_BIN__  absolute path of the compiled binary, e.g. /Users/you/.local/bin/herdr-pm
+    __CONFIG_PATH__    absolute path of this machine's collector config (copy of config/collector.example.json)
+    __HOME__           absolute home directory (launchd does not expand "~")
+  launchd starts jobs with a minimal PATH, so PATH below adds the places `herdr` is installed
+  (or set an absolute "herdrBin" in the collector config).
+  The log directory must exist: mkdir -p ~/Library/Logs/herdr-pm
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.herdr-pm.collector</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__COLLECTOR_BIN__</string>
+    <string>collect</string>
+    <string>--config</string>
+    <string>__CONFIG_PATH__</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/herdr-pm/collector.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/herdr-pm/collector.err.log</string>
+</dict>
+</plist>

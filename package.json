@@ -6,6 +6,9 @@
     "test": "vitest run"
   },
   "type": "module",
+  "bin": {
+    "herdr-pm": "src/cli.ts"
+  },
   "engines": {
     "node": ">=26"
   },

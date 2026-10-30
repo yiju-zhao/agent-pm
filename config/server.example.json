@@ -1,0 +1,10 @@
+{
+  "port": 7718,
+  "dbPath": "./herdr-pm.db",
+  "collectors": {
+    "laptop": "REPLACE-WITH-RANDOM-TOKEN-laptop",
+    "mac-mini": "REPLACE-WITH-RANDOM-TOKEN-mac-mini",
+    "gx10-090e": "REPLACE-WITH-RANDOM-TOKEN-gx10-090e",
+    "gx10-c757": "REPLACE-WITH-RANDOM-TOKEN-gx10-c757"
+  }
+}

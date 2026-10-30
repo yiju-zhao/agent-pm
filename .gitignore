@@ -4,3 +4,5 @@ dist/
 .superpowers/
 *.db-wal
 *.db-shm
+config/*.local.json
+*.bun-build
