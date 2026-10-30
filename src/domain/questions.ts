@@ -75,12 +75,25 @@ export function setArgPath(args: Record<string, unknown>, path: string, value: u
   return { ...args, [key]: setArgPath(child, rest.join('.'), value) };
 }
 
-/** Checks that answering `option` can never fail on the shape of its args. */
-function checkOption(option: QuestionOption): void {
+/**
+ * Operations only the user may perform. Answering a question runs the chosen option as the user, so an AI must not
+ * be able to bind one of these to an option.
+ */
+export const USER_ONLY_OPS = ['unlock_field', 'revert_event'] as const satisfies readonly OpName[];
+
+function isUserOnlyOp(op: OpName): boolean {
+  return (USER_ONLY_OPS as readonly OpName[]).includes(op);
+}
+
+/** Checks that answering `option` can never fail on the shape of its args, and that `creator` may offer it. */
+function checkOption(option: QuestionOption, creator: Actor): void {
   const where = `invalid option ${JSON.stringify(option.label)}`;
   if (option.op === null) {
     if (option.text_arg !== undefined) throw new OpRejected('invalid', `${where}: text_arg needs an op`);
     return;
+  }
+  if (isAi(creator) && isUserOnlyOp(option.op)) {
+    throw new OpRejected('invalid', `${where}: ${option.op} is user-only and cannot be offered by an AI`);
   }
   if (!Object.hasOwn(OP_SCHEMAS, option.op)) throw new OpRejected('invalid', `${where}: unknown op ${JSON.stringify(option.op)}`);
   const args = option.args ?? {};
@@ -103,12 +116,12 @@ export function confirmOptions(op: OpName, args: object): QuestionOption[] {
 
 /**
  * Stores a pending question. If a pending question with the same `dedupe_key` exists, adds the new evidence to it
- * instead. Throws `OpRejected`: `invalid` (an option's args don't fit its op), `recently_rejected` (the user rejected
- * this `dedupe_key` within `REJECT_COOLDOWN_DAYS` of the rejection), `question_limit` (an AI already has
- * `MAX_PENDING_AI_QUESTIONS` pending). Does not open a transaction; callers wrap it.
+ * instead. Throws `OpRejected`: `invalid` (an option's args don't fit its op, or an AI offers a `USER_ONLY_OPS`
+ * op), `recently_rejected` (the user rejected this `dedupe_key` within `REJECT_COOLDOWN_DAYS` of the rejection),
+ * `question_limit` (an AI already has `MAX_PENDING_AI_QUESTIONS` pending). Does not open a transaction; callers wrap it.
  */
 export function createQuestion(db: DatabaseSync, deps: DomainDeps, draft: QuestionDraft): { id: string; deduped: boolean } {
-  for (const option of draft.options) checkOption(option);
+  for (const option of draft.options) checkOption(option, draft.created_by);
   const evidence = [...new Set(draft.evidence)];
 
   const existing = db

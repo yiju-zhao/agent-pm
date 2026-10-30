@@ -11,6 +11,7 @@ import {
   QUESTION_TTL_DAYS,
   REJECT_COOLDOWN_DAYS,
   setArgPath,
+  USER_ONLY_OPS,
   withdrawStale,
 } from '../../src/domain/questions.ts';
 import type { QuestionDraft } from '../../src/domain/questions.ts';
@@ -563,6 +564,47 @@ test('askUser surfaces the question cap and the cooldown as rejections and leave
 
   reject('q_1', daysAgo(1));
   expect(ask('t0')).toMatchObject({ status: 'rejected', code: 'recently_rejected' });
+});
+
+// user-only ops
+
+const UNLOCK = { label: '解锁', op: 'unlock_field' as const, args: { table: 'projects', id: 'p_1', field: 'title' } };
+const REVERT = { label: '撤销', op: 'revert_event' as const, args: { event_id: 1 } };
+
+test('USER_ONLY_OPS lists the operations an AI may never put in a question', () => {
+  expect([...USER_ONLY_OPS]).toEqual(['unlock_field', 'revert_event']);
+});
+
+test('an AI cannot bind unlock_field or revert_event to an option through askUser', () => {
+  for (const bound of [UNLOCK, REVERT]) {
+    const confirm = askUser(db, deps, { kind: 'confirm', ...askBase, option: bound }, 'ai:curator');
+    expect(confirm).toMatchObject({ status: 'rejected', code: 'invalid' });
+    expect((confirm as { message: string }).message).toMatch(new RegExp(`${bound.op} is user-only`));
+
+    const choice = askUser(db, deps, { kind: 'choice', ...askBase, options: [bound, { label: '否', op: null }] }, 'ai:curator');
+    expect(choice).toMatchObject({ status: 'rejected', code: 'invalid' });
+
+    const text = askUser(db, deps, { kind: 'text', ...askBase, option: { ...bound, text_arg: 'field' } }, 'ai:curator');
+    expect(text).toMatchObject({ status: 'rejected', code: 'invalid' });
+  }
+  expect(countQuestions()).toBe(0);
+});
+
+test('createQuestion refuses user-only ops for any ai creator, even when it would only dedupe', () => {
+  const first = createQuestion(db, deps, draft({ dedupe_key: 'k', evidence: ['chunk:1'] }));
+  const sneaky = draft({ dedupe_key: 'k', evidence: ['chunk:2'], options: [UNLOCK, { label: '拒绝', op: null }] });
+  expect(() => createQuestion(db, deps, sneaky)).toThrow(/unlock_field is user-only/);
+  expect(() => createQuestion(db, deps, { ...sneaky, created_by: 'ai:other' })).toThrow(OpRejected);
+  expect(() => createQuestion(db, deps, { ...sneaky, options: [REVERT] })).toThrow(/revert_event is user-only/);
+  expect(evidenceOf(first.id)).toEqual(['chunk:1']);
+  expect(countQuestions()).toBe(1);
+});
+
+test('a user-created question may bind user-only ops', () => {
+  const direct = createQuestion(db, deps, draft({ created_by: 'user', options: [UNLOCK, REVERT, { label: '否', op: null }] }));
+  expect(direct.deduped).toBe(false);
+  const viaAsk = askUser(db, deps, { kind: 'confirm', ...askBase, option: UNLOCK }, 'user');
+  expect(viaAsk).toMatchObject({ status: 'proposed' });
 });
 
 test('AskUserInput is exported as a schema usable on its own', () => {
