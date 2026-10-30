@@ -234,6 +234,31 @@ test('only pending ai questions count towards the cap', () => {
   expect(createQuestion(db, deps, draft()).deduped).toBe(false);
 });
 
+test('createQuestion expires questions past their time limit first, so they neither hold cap slots nor absorb a new one', () => {
+  const old: string[] = [];
+  for (let i = 0; i < MAX_PENDING_AI_QUESTIONS; i++) old.push(createQuestion(db, deps, draft({ dedupe_key: `old-${i}` })).id);
+  db.prepare('UPDATE questions SET created_at = ?').run(daysAgo(QUESTION_TTL_DAYS + 1));
+
+  const fresh = createQuestion(db, deps, draft({ dedupe_key: 'old-0', evidence: ['chunk:9'] }));
+  expect(fresh.deduped).toBe(false);
+  expect(question(old[0])).toMatchObject({ status: 'expired', resolved_at: NOW });
+  expect(evidenceOf(old[0])).toEqual(['chunk:1']);
+  expect(question(old[MAX_PENDING_AI_QUESTIONS - 1]).status).toBe('expired');
+});
+
+test('pending ai questions about a deleted project do not count towards the cap', () => {
+  seedProject('p_gone', 'gone');
+  seedProject('p_live', 'live');
+  for (let i = 0; i < MAX_PENDING_AI_QUESTIONS; i++) createQuestion(db, deps, draft({ project_id: 'p_gone' }));
+  expect(() => createQuestion(db, deps, draft({ project_id: 'p_live' }))).toThrow(OpRejected);
+
+  db.prepare("UPDATE projects SET deleted_at = ? WHERE id = 'p_gone'").run(NOW);
+  expect(createQuestion(db, deps, draft({ project_id: 'p_live' })).deduped).toBe(false);
+  // Questions with no project still count.
+  for (let i = 1; i < MAX_PENDING_AI_QUESTIONS; i++) createQuestion(db, deps, draft({ project_id: null }));
+  expect(() => createQuestion(db, deps, draft({ project_id: null }))).toThrow(OpRejected);
+});
+
 // createQuestion: cooldown
 
 test('a question rejected within REJECT_COOLDOWN_DAYS blocks the same dedupe_key; after the cooldown it is allowed', () => {

@@ -115,14 +115,16 @@ export function confirmOptions(op: OpName, args: object): QuestionOption[] {
 // ---- creating ----------------------------------------------------------------------------------------------------
 
 /**
- * Stores a pending question. If a pending question with the same `dedupe_key` exists, adds the new evidence to it
- * instead. Throws `OpRejected`: `invalid` (an option's args don't fit its op, or an AI offers a `USER_ONLY_OPS`
- * op), `recently_rejected` (the user rejected this `dedupe_key` within `REJECT_COOLDOWN_DAYS` of the rejection),
- * `question_limit` (an AI already has `MAX_PENDING_AI_QUESTIONS` pending). Does not open a transaction; callers wrap it.
+ * Stores a pending question. Questions past their time limit are expired first. If a pending question with the same
+ * `dedupe_key` exists, adds the new evidence to it instead. Throws `OpRejected`: `invalid` (an option's args don't
+ * fit its op, or an AI offers a `USER_ONLY_OPS` op), `recently_rejected` (the user rejected this `dedupe_key` within
+ * `REJECT_COOLDOWN_DAYS` of the rejection), `question_limit` (an AI already has `MAX_PENDING_AI_QUESTIONS` pending,
+ * not counting those about a deleted project). Does not open a transaction; callers wrap it.
  */
 export function createQuestion(db: DatabaseSync, deps: DomainDeps, draft: QuestionDraft): { id: string; deduped: boolean } {
   for (const option of draft.options) checkOption(option, draft.created_by);
   const evidence = [...new Set(draft.evidence)];
+  expireQuestions(db, deps);
 
   const existing = db
     .prepare("SELECT id, evidence FROM questions WHERE status = 'pending' AND dedupe_key = ? ORDER BY rowid LIMIT 1")
@@ -142,7 +144,11 @@ export function createQuestion(db: DatabaseSync, deps: DomainDeps, draft: Questi
 
   if (isAi(draft.created_by)) {
     const { n } = db
-      .prepare("SELECT COUNT(*) AS n FROM questions WHERE status = 'pending' AND created_by <> 'user'")
+      .prepare(
+        // Questions about a deleted project are never listed, so the user cannot answer them to free a slot.
+        `SELECT COUNT(*) AS n FROM questions WHERE status = 'pending' AND created_by <> 'user'
+           AND (project_id IS NULL OR project_id NOT IN (SELECT id FROM projects WHERE deleted_at IS NOT NULL))`,
+      )
       .get() as { n: number };
     if (n >= MAX_PENDING_AI_QUESTIONS) {
       throw new OpRejected('question_limit', `${MAX_PENDING_AI_QUESTIONS} AI questions are already waiting for an answer`);
