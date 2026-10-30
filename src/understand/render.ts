@@ -29,7 +29,7 @@ const BLOCKER_KIND_LABEL: Record<BlockerRow['kind'], string> = {
 // ---- small helpers -----------------------------------------------------------------------------------------------
 
 /** Whitespace runs, line breaks included, become one space, so a list item stays on its line. */
-function oneLine(text: string): string {
+export function oneLine(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
@@ -43,7 +43,7 @@ function day(iso: string): string {
 }
 
 /** `2026-10-29T12:00:00.000Z` as `2026-10-29 12:00` (UTC). */
-function minute(iso: string): string {
+export function minute(iso: string): string {
   return iso.slice(0, 16).replace('T', ' ');
 }
 
