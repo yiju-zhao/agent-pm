@@ -47,6 +47,14 @@ test('throws a clear error naming the file and the invalid fields', async () => 
   expect(() => loadServerConfig(path)).toThrow(/collectors\.laptop/);
 });
 
+test('rejects collector machine labels that cannot be part of a session key', async () => {
+  for (const label of ['mac mini', 'gx10:090e', ' laptop', 'a/b', '']) {
+    const path = await configFile({ port: 8787, dbPath: 'x', collectors: { laptop: 't', [label]: 't2' } });
+    expect(() => loadServerConfig(path), JSON.stringify(label)).toThrow(/collectors/);
+    expect(() => loadServerConfig(path), JSON.stringify(label)).toThrow(/letters, digits/);
+  }
+});
+
 test('rejects a missing file', () => {
   expect(() => loadServerConfig(join(dir, 'missing.json'))).toThrow(/missing\.json/);
 });

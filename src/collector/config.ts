@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { MachineLabel } from '../shared/protocol.ts';
 
 /** `~` or a leading `~/` refers to the home directory of the user running the collector. */
 export function expandHome(path: string, home = homedir()): string {
@@ -18,7 +19,7 @@ const PathSetting = (fallback: string) => z.string().min(1).default(fallback).tr
  */
 export const CollectorConfig = z.object({
   server: z.url({ protocol: /^https?$/ }),
-  machine: z.string().min(1),
+  machine: MachineLabel,
   token: z.string().min(1),
   herdrBin: z.string().min(1).default('herdr'),
   claudeDir: PathSetting('~/.claude'),

@@ -64,6 +64,19 @@ test('rejects missing fields, bad urls and invalid JSON with the file path', asy
   expect(() => loadCollectorConfig(garbage)).toThrow(/not valid JSON/);
 });
 
+test('rejects a machine label that cannot be part of a session key', async () => {
+  for (const machine of ['mac mini', 'gx10:090e', 'laptop\t', '', 'a/b']) {
+    const path = await configFile({ server: 'http://x', machine, token: 't' });
+    expect(() => loadCollectorConfig(path), JSON.stringify(machine)).toThrow(/machine/);
+  }
+  const path = await configFile({ server: 'http://x', machine: 'mac mini', token: 't' });
+  expect(() => loadCollectorConfig(path)).toThrow(/letters, digits/);
+  for (const machine of ['laptop', 'gx10-090e', 'mac_mini.local', 'M1']) {
+    const ok = await configFile({ server: 'http://x', machine, token: 't' });
+    expect(loadCollectorConfig(ok).machine).toBe(machine);
+  }
+});
+
 test('expandHome only rewrites a leading ~', () => {
   expect(expandHome('~', '/h')).toBe('/h');
   expect(expandHome('~/x/y', '/h')).toBe('/h/x/y');

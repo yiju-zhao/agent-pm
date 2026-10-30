@@ -7,11 +7,12 @@ import { createPmClient, RetryableError } from '../../src/collector/client.ts';
 import type { PmClient } from '../../src/collector/client.ts';
 import type { CollectorConfig } from '../../src/collector/config.ts';
 import { CursorStore } from '../../src/collector/cursor-store.ts';
-import { backoffDelay, collectOnce, MAX_BACKOFF_MS } from '../../src/collector/loop.ts';
+import { backoffDelay, collectOnce, MAX_BACKOFF_MS, READ_MAX_BYTES } from '../../src/collector/loop.ts';
 import type { Deps } from '../../src/collector/loop.ts';
 import { MAX_CHUNK_CHARS } from '../../src/collector/normalize.ts';
 import { openDb } from '../../src/server/db.ts';
 import { createApp } from '../../src/server/http.ts';
+import { OFFLINE_AFTER_MS } from '../../src/server/sessions-repo.ts';
 
 const MACHINE = 'laptop';
 const TOKEN = 'laptop-token';
@@ -31,6 +32,14 @@ let pushResults: Array<{ inserted: number; duplicates: number }>;
 let failChunks: boolean;
 let client: PmClient;
 let transcript: string;
+let app: ReturnType<typeof createApp>;
+
+/** Points the client at a brand-new server with an empty database (as after restoring an empty backup). */
+function freshServer(): void {
+  if (db?.isOpen) db.close();
+  db = openDb(':memory:');
+  app = createApp(db, { port: 1, dbPath: ':memory:', collectors: { [MACHINE]: TOKEN } }, () => now);
+}
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'herdr-pm-loop-'));
@@ -44,9 +53,8 @@ beforeEach(async () => {
     stateFile: join(dir, 'state', 'collector.json'),
     pollMs: 10_000,
   };
-  db = openDb(':memory:');
   now = new Date('2026-10-29T10:10:00.000Z');
-  const app = createApp(db, { port: 1, dbPath: ':memory:', collectors: { [MACHINE]: TOKEN } }, () => now);
+  freshServer();
   const real = createPmClient({
     server: cfg.server,
     machine: MACHINE,
@@ -281,6 +289,155 @@ test('lost state file: resumes from server max offset, no duplicates', async () 
   expect(fresh.get(CLAUDE_KEY)!.offset).toBe(end);
 });
 
+test('server database restored from an empty backup: a new collector process re-sends everything', async () => {
+  await writeLines(transcript, [claudeUser(OLD_TS, 'first question')]);
+  const deps = fakeDeps(() => [claudePane()]);
+  const store = await CursorStore.load(cfg.stateFile);
+  await collectOnce(cfg, store, deps);
+  await appendLines(transcript, [claudeUser(NEW_TS, 'second question')]);
+  await collectOnce(cfg, store, deps);
+  expect(chunks()).toHaveLength(2);
+  const end = await size(transcript);
+
+  freshServer();
+  pushResults = [];
+  // A new process: same state file (cursor at the end), but nothing checked against the server yet.
+  const restarted = await CursorStore.load(cfg.stateFile);
+  expect(restarted.get(CLAUDE_KEY)!.offset).toBe(end);
+  await collectOnce(cfg, restarted, deps);
+
+  expect(pushResults.reduce((n, r) => n + r.inserted, 0)).toBeGreaterThan(0);
+  const text = chunks().map((c) => c.text).join('\n');
+  expect(text).toContain('first question');
+  expect(text).toContain('second question');
+  expect(Math.max(...chunks().map((c) => c.offset_end))).toBe(end);
+  expect(restarted.get(CLAUDE_KEY)!.offset).toBe(end);
+
+  // Later ticks of the same process trust the local cursor again.
+  pushResults = [];
+  expect((await collectOnce(cfg, restarted, deps)).chunksPushed).toBe(0);
+  expect(pushResults).toEqual([]);
+});
+
+test('server database restored from an older backup: only the lost gap is re-sent, with no duplicates', async () => {
+  await writeLines(transcript, [claudeUser(OLD_TS, 'kept')]);
+  const deps = fakeDeps(() => [claudePane()]);
+  const store = await CursorStore.load(cfg.stateFile);
+  await collectOnce(cfg, store, deps);
+  const backupEnd = await size(transcript);
+  await appendLines(transcript, [claudeUser(NEW_TS, 'lost one')]);
+  await collectOnce(cfg, store, deps);
+  await appendLines(transcript, [claudeUser(NEW_TS, 'lost two')]);
+  await collectOnce(cfg, store, deps);
+  const before = chunks();
+  expect(before).toHaveLength(3);
+
+  // Restoring the backup taken after the first push drops everything the server stored since.
+  db.prepare('DELETE FROM chunks WHERE offset_start >= ?').run(backupEnd * 1000);
+  pushResults = [];
+  await collectOnce(cfg, await CursorStore.load(cfg.stateFile), deps);
+
+  expect(pushResults).toEqual([{ inserted: 1, duplicates: 0 }]);
+  const after = chunks();
+  expect(after).toHaveLength(2);
+  expect(after[0]).toEqual(before[0]);
+  // The gap is re-read in one window starting at the server's max offset_end.
+  expect(after[1]).toMatchObject({ offset_start: backupEnd * 1000, offset_end: await size(transcript) });
+  expect(after[1]!.text).toContain('lost one');
+  expect(after[1]!.text).toContain('lost two');
+});
+
+test('a normal collector restart against the same server database re-sends nothing', async () => {
+  await writeLines(transcript, [claudeUser(OLD_TS, 'q'), claudeAssistant(OLD_TS, 'a')]);
+  const deps = fakeDeps(() => [claudePane()]);
+  await collectOnce(cfg, await CursorStore.load(cfg.stateFile), deps);
+  await appendLines(transcript, [claudeUser(NEW_TS, 'more')]);
+  // A thinking-only tail: the local cursor passes it, the server's max offset_end stays behind it.
+  await appendLines(transcript, [claudeThinking(NEW_TS)]);
+  const store = await CursorStore.load(cfg.stateFile);
+  await collectOnce(cfg, store, deps);
+  expect(chunks()).toHaveLength(2);
+
+  pushResults = [];
+  const restarted = await CursorStore.load(cfg.stateFile);
+  expect((await collectOnce(cfg, restarted, deps)).chunksPushed).toBe(0);
+  expect(pushResults).toEqual([]);
+  expect(chunks()).toHaveLength(2);
+  expect(restarted.get(CLAUDE_KEY)!.offset).toBe(await size(transcript));
+});
+
+test('a transcript truncated or replaced below the cursor is logged with the session key', async () => {
+  await writeLines(transcript, [claudeUser(OLD_TS, 'a long first question'), claudeAssistant(OLD_TS, 'a long first answer')]);
+  const store = await CursorStore.load(cfg.stateFile);
+  const deps = fakeDeps(() => [claudePane()]);
+  await collectOnce(cfg, store, deps);
+  expect(deps.calls.log).toEqual([]);
+
+  await writeLines(transcript, [claudeUser(NEW_TS, 'short')]);
+  await collectOnce(cfg, store, deps);
+
+  expect(deps.calls.log).toHaveLength(1);
+  expect(deps.calls.log[0]).toContain(CLAUDE_KEY);
+  expect(deps.calls.log[0]).toMatch(/truncated or replaced/);
+  expect(store.get(CLAUDE_KEY)!.offset).toBe(await size(transcript));
+});
+
+function heartbeats(): string | undefined {
+  return (db.prepare('SELECT last_heartbeat FROM machines WHERE label = ?').get(MACHINE) as { last_heartbeat: string } | undefined)
+    ?.last_heartbeat;
+}
+
+/** Deps whose clock moves `stepMs` forward on every chunk push, recording each snapshot push time. */
+function slowPushDeps(panes: () => Pane[], stepMs: number, opts: Parameters<typeof fakeDeps>[1] = {}) {
+  const deps = fakeDeps(panes, opts);
+  const snapshots: string[] = [];
+  deps.client = {
+    pushSnapshot: async (p) => {
+      snapshots.push(now.toISOString());
+      return client.pushSnapshot(p);
+    },
+    getOffset: (key) => client.getOffset(key),
+    pushChunks: async (p) => {
+      const r = await client.pushChunks(p);
+      now = new Date(now.getTime() + stepMs);
+      return r;
+    },
+  };
+  return { deps, snapshots };
+}
+
+test('a long initial import re-pushes the snapshot heartbeat between read windows', async () => {
+  // ~9 MB of complete lines: three read windows of at most READ_MAX_BYTES.
+  const line = claudeUser(OLD_TS, 'x'.repeat(100_000));
+  await writeLines(transcript, Array.from({ length: Math.ceil((2 * READ_MAX_BYTES + 1_000_000) / line.length) }, () => line));
+  const start = now;
+  const { deps, snapshots } = slowPushDeps(() => [claudePane()], 40_000);
+
+  await collectOnce(cfg, await CursorStore.load(cfg.stateFile), deps);
+
+  // Pushes end at +40 s, +80 s, +120 s; the heartbeat is due (>= 60 s) only before the third window.
+  const at = (ms: number) => new Date(start.getTime() + ms).toISOString();
+  expect(snapshots).toEqual([at(0), at(80_000)]);
+  expect(heartbeats()).toBe(at(80_000));
+  expect(chunks().at(-1)!.offset_end).toBe(await size(transcript));
+});
+
+test('a slow tick re-pushes the snapshot heartbeat between sessions', async () => {
+  await writeLines(transcript, [claudeUser(NEW_TS, 'hello')]);
+  const start = now;
+  const { deps, snapshots } = slowPushDeps(
+    () => [claudePane(), { pane_id: 'w1:p3', terminal_id: 'term_3', agent: 'opencode', agent_status: 'idle' }],
+    70_000,
+    { screen: () => 'opencode> ' },
+  );
+
+  await collectOnce(cfg, await CursorStore.load(cfg.stateFile), deps);
+
+  expect(snapshots).toEqual([start.toISOString(), new Date(start.getTime() + 70_000).toISOString()]);
+  // The screen chunk keeps the tick's timestamp.
+  expect(chunks().at(-1)).toMatchObject({ kind: 'screen', offset_start: start.getTime() });
+});
+
 test('id-less codex resolved via matchRollout becomes native key with full fidelity', async () => {
   const startedAt = new Date(now.getTime() - 60_000);
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -475,12 +632,15 @@ test('id-less codex that cannot be matched stays on screen and is retried at mos
   expect(deps.calls.processStartTime).toEqual([4242, 4242]);
 });
 
-test('backoffDelay doubles pollMs per consecutive failure up to 5 minutes', () => {
+test('backoffDelay doubles pollMs per consecutive failure up to 2 minutes, below the offline threshold', () => {
+  // Ruling R8: a recovered machine must be back before it would show offline for long.
+  expect(MAX_BACKOFF_MS).toBe(120_000);
+  expect(MAX_BACKOFF_MS).toBeLessThan(OFFLINE_AFTER_MS);
   expect(backoffDelay(10_000, 0)).toBe(10_000);
   expect(backoffDelay(10_000, 1)).toBe(20_000);
   expect(backoffDelay(10_000, 3)).toBe(80_000);
-  expect(backoffDelay(10_000, 5)).toBe(MAX_BACKOFF_MS);
-  expect(backoffDelay(10_000, 5000)).toBe(MAX_BACKOFF_MS);
+  expect(backoffDelay(10_000, 4)).toBe(120_000);
+  expect(backoffDelay(10_000, 5000)).toBe(120_000);
 });
 
 test('a failing session is logged and skipped; later sessions are still collected', async () => {

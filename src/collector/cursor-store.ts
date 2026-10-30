@@ -43,6 +43,12 @@ function isNotFound(err: unknown): boolean {
 export class CursorStore {
   readonly path: string;
   lastPurgeCheck: Date | undefined;
+  /**
+   * Sessions whose transcript cursor was checked against the server's resume position since this
+   * store was loaded. Kept in memory only, so every collector process checks each session once
+   * (the server database may have been restored from an older backup while it was down).
+   */
+  readonly serverChecked = new Set<string>();
   private readonly cursors: Map<string, Cursor>;
   private readonly resolutions: Map<string, Resolution>;
 

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { SnapshotSession } from '../shared/protocol.ts';
+import type { SnapshotPush, SnapshotSession } from '../shared/protocol.ts';
 import { makeSessionKey } from '../shared/session-key.ts';
 import { createPmClient, RetryableError } from './client.ts';
 import type { PmClient } from './client.ts';
@@ -21,7 +21,10 @@ export const READ_MAX_BYTES = 4 * 1024 * 1024;
 const PURGE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 /** An id-less codex pane whose rollout could not be matched is retried at most this often. */
 const RESOLVE_RETRY_MS = 60 * 1000;
-export const MAX_BACKOFF_MS = 5 * 60 * 1000;
+/** Retry cap after failed ticks; below the server's 3-minute offline threshold (Ruling R8). */
+export const MAX_BACKOFF_MS = 120_000;
+/** During a long tick (initial import) the snapshot is pushed again this often, as the machine's heartbeat. */
+const HEARTBEAT_MS = 60 * 1000;
 
 export type Deps = {
   readSnapshot(): Promise<unknown>;
@@ -44,6 +47,9 @@ type Tick = {
   rollouts: () => Promise<RolloutCandidate[]>;
   /** Set when in-memory state changed that no cursor save will persist. */
   dirty: boolean;
+  log(line: string): void;
+  /** Re-pushes the tick's snapshot when the last push was HEARTBEAT_MS or more ago (by `deps.now()`). */
+  heartbeat(): Promise<void>;
 };
 
 async function isFile(path: string): Promise<boolean> {
@@ -132,12 +138,19 @@ async function pushTranscript(s: SnapshotSession, t: Tick): Promise<number> {
   const { store, deps } = t;
   const path = s.transcript_path!;
   const cur = store.get(s.key);
+  const local = cur !== undefined && cur.path === path ? cur.offset : null;
   let offset: number;
-  if (cur !== undefined && cur.path === path) {
-    offset = cur.offset;
+  if (local !== null && store.serverChecked.has(s.key)) {
+    offset = local;
   } else {
-    // No local cursor for this file (first sight, or the state file was lost): resume where the server is.
-    offset = (await deps.client.getOffset(s.key)) ?? 0;
+    // First push of this session in this process (Ruling R9), or no local cursor for this file (first
+    // sight, state file lost): never resume past the server, whose database may have been restored
+    // from an older backup. Re-reading [server max, local cursor) cannot duplicate: every chunk the
+    // server holds has offset_start < its max offset_end * 1000, every re-read chunk starts at or
+    // above it, and a range the local cursor passed without the server advancing yields no chunks.
+    const serverMax = (await deps.client.getOffset(s.key)) ?? 0;
+    offset = local === null ? serverMax : Math.min(local, serverMax);
+    store.serverChecked.add(s.key);
     store.set(s.key, { path, offset, fidelity: 'full' });
     await store.save();
   }
@@ -149,6 +162,13 @@ async function pushTranscript(s: SnapshotSession, t: Tick): Promise<number> {
     const r = await readDelta(path, offset, READ_MAX_BYTES);
     // A transcript that vanished mid-tick is retried next tick with the cursor untouched.
     if (r.missing || r.newOffset === offset) break;
+    if (r.reset) {
+      // Chunks re-read from 0 whose offset_start collides with the old file's are dropped as duplicates.
+      t.log(
+        `${t.now.toISOString()} herdr-pm collector: session ${s.key}: transcript ${path} was truncated or replaced ` +
+          `(shorter than cursor ${offset}); re-reading from 0`,
+      );
+    }
     const readStart = r.reset ? 0 : offset;
     const chunks = buildChunks(normalize(r.lines), readStart, r.newOffset, { maxChunkChars: MAX_CHUNK_CHARS });
     if (chunks.length > 0) {
@@ -166,6 +186,7 @@ async function pushTranscript(s: SnapshotSession, t: Tick): Promise<number> {
     offset = r.newOffset;
     store.set(s.key, { path, offset, fidelity: 'full' });
     await store.save();
+    await t.heartbeat();
   }
   return pushed;
 }
@@ -209,7 +230,10 @@ async function pushScreen(s: SnapshotSession, t: Tick): Promise<number> {
 /**
  * One collection tick: reads the herdr snapshot, resolves every agent's transcript, pushes the
  * snapshot (with purged sessions, checked hourly), then pushes new transcript chunks and changed
- * screens. Throws on any failure that should make the caller back off (herdr, snapshot push, server
+ * screens. While that takes long (initial import), the same snapshot is re-pushed whenever
+ * HEARTBEAT_MS passed since the last push (checked between sessions and read windows), so the
+ * machine does not look offline mid-tick.
+ * Throws on any failure that should make the caller back off (herdr, snapshot push, server
  * unavailable). Any other failure in one session's push is logged, counted in `errors` and skipped,
  * so one bad transcript cannot stop the machine's heartbeat or the other sessions.
  */
@@ -220,7 +244,25 @@ export async function collectOnce(
 ): Promise<{ sessions: number; chunksPushed: number; errors: number }> {
   const now = deps.now();
   const parsed = parseHerdrSnapshot(await deps.readSnapshot(), cfg.machine);
-  const t: Tick = { cfg, store, deps, now, rollouts: once(() => listRecentRollouts(cfg.codexDir, now)), dirty: false };
+  const log = deps.log ?? ((line: string) => console.error(line));
+  let snapshot: SnapshotPush | undefined;
+  let snapshotPushedAt = 0;
+  const pushSnapshot = async (p: SnapshotPush) => {
+    await deps.client.pushSnapshot(p);
+    snapshotPushedAt = deps.now().getTime();
+  };
+  const t: Tick = {
+    cfg,
+    store,
+    deps,
+    now,
+    rollouts: once(() => listRecentRollouts(cfg.codexDir, now)),
+    dirty: false,
+    log,
+    heartbeat: async () => {
+      if (snapshot !== undefined && deps.now().getTime() - snapshotPushedAt >= HEARTBEAT_MS) await pushSnapshot(snapshot);
+    },
+  };
 
   store.retainResolutions(new Set(parsed.filter((s) => s.native_id === null).map((s) => s.key)));
   const resolved: SnapshotSession[] = [];
@@ -232,7 +274,8 @@ export async function collectOnce(
   const purgeDue = last === undefined || now.getTime() - last.getTime() >= PURGE_CHECK_INTERVAL_MS;
   const { purged, dropped } = purgeDue ? await purgeCheck(sessions, store) : { purged: [], dropped: [] };
 
-  await deps.client.pushSnapshot({ machine: cfg.machine, collector_version: COLLECTOR_VERSION, sessions, purged });
+  snapshot = { machine: cfg.machine, collector_version: COLLECTOR_VERSION, sessions, purged };
+  await pushSnapshot(snapshot);
   if (purgeDue) {
     for (const key of [...purged, ...dropped]) store.delete(key);
     store.lastPurgeCheck = now;
@@ -240,10 +283,10 @@ export async function collectOnce(
   }
   if (t.dirty) await store.save();
 
-  const log = deps.log ?? ((line: string) => console.error(line));
   let chunksPushed = 0;
   let errors = 0;
   for (const s of sessions) {
+    await t.heartbeat();
     try {
       chunksPushed += s.fidelity === 'full' ? await pushTranscript(s, t) : await pushScreen(s, t);
     } catch (err) {
