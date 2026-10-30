@@ -469,10 +469,10 @@ test('askUser choice stores the question and reports it as proposed', () => {
 });
 
 test('askUser confirm appends the 拒绝 option and text requires text_arg', () => {
-  const confirm = { kind: 'confirm', ...askBase, option: { label: '合并', op: 'transition_stage', args: { project: 'p_1', stage: 'done' } } };
+  const confirm = { kind: 'confirm', ...askBase, option: { label: '开工', op: 'transition_stage', args: { project: 'p_1', stage: 'build' } } };
   expect(askUser(db, deps, confirm, 'ai:curator')).toMatchObject({ status: 'proposed' });
   expect(JSON.parse(question('q_1').options as string)).toEqual([
-    { label: '合并', op: 'transition_stage', args: { project: 'p_1', stage: 'done' } },
+    { label: '开工', op: 'transition_stage', args: { project: 'p_1', stage: 'build' } },
     { label: '拒绝', op: null },
   ]);
 
@@ -522,6 +522,29 @@ test('askUser rejects unknown keys, unknown kinds and non-objects without throwi
   expect(askUser(db, deps, { kind: 'poll', ...askBase, options }, 'ai:curator')).toMatchObject({ code: 'invalid' });
   expect(askUser(db, deps, null, 'ai:curator')).toMatchObject({ code: 'invalid' });
   expect(askUser(db, deps, 'hello', 'ai:curator')).toMatchObject({ code: 'invalid' });
+});
+
+test('an ai may not ask its own way to close, merge or park a project; those come only from domain proposals', () => {
+  for (const stage of ['done', 'abandoned', 'merged', 'parked']) {
+    const args = { project: 'p_1', stage, ...(stage === 'merged' ? { merge_into: 'p_2' } : {}) };
+    const confirm = { kind: 'confirm', ...askBase, topic: `c-${stage}`, option: { label: '加个 todo', op: 'transition_stage', args } };
+    expect(askUser(db, deps, confirm, 'ai:curator'), stage).toMatchObject({
+      status: 'rejected',
+      code: 'invalid',
+      message: expect.stringContaining(stage),
+    });
+    const choice = { kind: 'choice', ...askBase, topic: `ch-${stage}`, options: [{ label: '好', op: 'transition_stage', args }, { label: '不', op: null }] };
+    expect(askUser(db, deps, choice, 'ai:curator'), stage).toMatchObject({ status: 'rejected', code: 'invalid' });
+  }
+  expect(countQuestions()).toBe(0);
+
+  // Other stages are fine, and so is the user asking.
+  const build = { kind: 'confirm', ...askBase, topic: 'build', option: { label: '开工', op: 'transition_stage', args: { project: 'p_1', stage: 'build' } } };
+  expect(askUser(db, deps, build, 'ai:curator')).toMatchObject({ status: 'proposed' });
+  const done = { kind: 'confirm', ...askBase, topic: 'done', option: { label: '完成', op: 'transition_stage', args: { project: 'p_1', stage: 'done' } } };
+  expect(askUser(db, deps, done, 'user')).toMatchObject({ status: 'proposed' });
+  // The domain's own proposal (built by transition_stage) still goes through createQuestion.
+  expect(createQuestion(db, deps, draft())).toMatchObject({ deduped: false });
 });
 
 test('askUser validates option args at creation and reports it as invalid', () => {

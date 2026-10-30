@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { listSessions } from '../server/sessions-repo.ts';
 import type { SessionView } from '../server/sessions-repo.ts';
 import { readLocks } from './changes.ts';
+import type { OpName } from './ops.ts';
 import { expireQuestions, QUESTION_TTL_DAYS } from './questions.ts';
 import type { QuestionOption } from './questions.ts';
 import { CLOSED } from './stage.ts';
@@ -87,12 +88,24 @@ export type SessionTag = {
   milestone_id: string | null;
 };
 
-/** A question as the page shows it. The ops and args behind each option stay on the server: the page sends back an index. */
+/**
+ * One answer as the page shows it: the label and what answering runs (`op` with `args`; both `null` when it does
+ * nothing), so the user can see past a misleading label. The page still sends back only the option's index.
+ */
+export type QuestionOptionView = {
+  label: string;
+  has_op: boolean;
+  op: OpName | null;
+  args: Record<string, unknown> | null;
+  text_arg?: string;
+};
+
+/** A question as the page shows it. */
 export type QuestionView = {
   id: string;
   kind: 'choice' | 'text' | 'confirm';
   prompt: string;
-  options: Array<{ label: string; has_op: boolean; text_arg?: string }>;
+  options: QuestionOptionView[];
   project_id: string | null;
   session_key: string | null;
   status: 'pending' | 'answered' | 'withdrawn' | 'expired';
@@ -291,7 +304,10 @@ function questionView(r: QuestionRaw): QuestionView {
     kind: r.kind,
     prompt: r.prompt,
     options: jsonArray<QuestionOption>(r.options).map((o) => {
-      const view: QuestionView['options'][number] = { label: o.label, has_op: o.op !== null };
+      const view: QuestionOptionView =
+        o.op === null
+          ? { label: o.label, has_op: false, op: null, args: null }
+          : { label: o.label, has_op: true, op: o.op, args: { ...(o.args ?? {}) } };
       if (o.text_arg !== undefined) view.text_arg = o.text_arg;
       return view;
     }),

@@ -247,8 +247,25 @@ export const AskUserInput = z.discriminatedUnion('kind', [
 export type AskUserInput = z.infer<typeof AskUserInput>;
 
 /**
+ * Stages an AI may not offer through `askUser`, where it writes the prompt and labels itself: a label like "add a todo"
+ * could hide closing the project. These come only from the domain's own proposals, whose prompt says what happens.
+ */
+const PROPOSAL_ONLY_STAGES: readonly string[] = ['done', 'abandoned', 'merged', 'parked'];
+
+function checkAiOption(option: QuestionOption): void {
+  const stage = option.args?.stage;
+  if (option.op === 'transition_stage' && typeof stage === 'string' && PROPOSAL_ONLY_STAGES.includes(stage)) {
+    throw new OpRejected(
+      'invalid',
+      `invalid option ${JSON.stringify(option.label)}: an AI cannot ask to move a project to ${stage}; call transition_stage, which asks the user itself`,
+    );
+  }
+}
+
+/**
  * Lets an actor put a question to the user. Returns `proposed` with the question's id (the existing one when the
- * question was a duplicate) or `rejected` (`invalid`, `question_limit`, `recently_rejected`). Runs in its own transaction.
+ * question was a duplicate) or `rejected` (`invalid`, `question_limit`, `recently_rejected`). An AI may not bind
+ * `transition_stage` to done, abandoned, merged or parked here (`invalid`). Runs in its own transaction.
  */
 export function askUser(db: DatabaseSync, deps: DomainDeps, input: unknown, actor: Actor): OpResult {
   const parsed = AskUserInput.safeParse(input);
@@ -265,6 +282,7 @@ export function askUser(db: DatabaseSync, deps: DomainDeps, input: unknown, acto
   const sessionKey = ask.session_key ?? null;
 
   try {
+    if (isAi(actor)) for (const option of options) checkAiOption(option);
     const { id } = transaction(db, () =>
       createQuestion(db, deps, {
         kind: ask.kind,

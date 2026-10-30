@@ -633,7 +633,7 @@ test('answering a question executes its op; answering again is 409', async () =>
 
   const pending = await call('GET', '/questions?status=pending', undefined, null);
   expect(pending.status).toBe(200);
-  expect(pending.body).toMatchObject([{ id: q, kind: 'confirm', status: 'pending', project_id: p, options: [{ label: '确认', has_op: true }, { label: '拒绝', has_op: false }] }]);
+  expect(pending.body).toMatchObject([{ id: q, kind: 'confirm', status: 'pending', project_id: p, options: [{ label: '确认', has_op: true, op: 'transition_stage', args: { project: p, stage: 'done' } }, { label: '拒绝', has_op: false, op: null, args: null }] }]);
 
   const answered = await call('POST', `/questions/${q}/answer`, { option_index: 0 });
   expect(answered.status).toBe(200);

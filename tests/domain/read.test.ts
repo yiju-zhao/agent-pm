@@ -681,22 +681,51 @@ test('read models write nothing', () => {
 
 // ---- questions ---------------------------------------------------------------------------------------------------
 
-test('question views hide the bound ops', () => {
-  ask('one');
+test('question views show the op and args bound to each option, so the user can see what an answer does', () => {
+  const project = t.user('create_project', { title: 'p' }).id;
+  ask('one', { project_id: project });
   const views = listQuestions(t.db, t.deps, {});
 
-  expect(views[0].options[0]).toEqual({ label: '确认', has_op: true });
-  expect(views[0].options[1]).toEqual({ label: '拒绝', has_op: false });
-  expect(JSON.stringify(views)).not.toContain('update_project');
-  expect(JSON.stringify(views)).not.toContain('"args"');
-  expect(JSON.stringify(views)).not.toContain('"op"');
+  expect(views[0].options[0]).toEqual({
+    label: '确认',
+    has_op: true,
+    op: 'update_project',
+    args: { project, fields: { summary: 'one' } },
+  });
+  expect(views[0].options[1]).toEqual({ label: '拒绝', has_op: false, op: null, args: null });
+});
+
+test('an option without an op shows null args; one with an op but no stored args shows empty args', () => {
+  const r = askUser(
+    t.db,
+    t.deps,
+    {
+      kind: 'choice',
+      prompt: 'p?',
+      topic: 'no-args',
+      options: [
+        { label: '是', op: 'ignore_session', args: { session: 's' } },
+        { label: '否', op: null, args: { ignored: 1 } },
+      ],
+      evidence: ['chunk:1'],
+    },
+    'ai:curator',
+  );
+  expect(r.status).toBe('proposed');
+  // An op-less option's args are never used, so they are not shown.
+  expect(listQuestions(t.db, t.deps, {})[0].options[1]).toEqual({ label: '否', has_op: false, op: null, args: null });
+  t.db.prepare("UPDATE questions SET options = ? WHERE status = 'pending'").run(JSON.stringify([{ label: '是', op: 'unlink_session' }]));
+  expect(listQuestions(t.db, t.deps, {})[0].options[0]).toEqual({ label: '是', has_op: true, op: 'unlink_session', args: {} });
 });
 
 test('a text question shows the text_arg path so the page knows to render an input', () => {
-  ask('two', { kind: 'text' });
+  const project = t.user('create_project', { title: 'p' }).id;
+  ask('two', { kind: 'text', project_id: project });
   const [view] = listQuestions(t.db, t.deps, {});
   expect(view.kind).toBe('text');
-  expect(view.options).toEqual([{ label: '写完成标准', has_op: true, text_arg: 'fields.done_criteria' }]);
+  expect(view.options).toEqual([
+    { label: '写完成标准', has_op: true, op: 'update_project', args: { project, fields: {} }, text_arg: 'fields.done_criteria' },
+  ]);
 });
 
 test('a question view has the fields in the brief and nothing internal', () => {
@@ -709,8 +738,8 @@ test('a question view has the fields in the brief and nothing internal', () => {
     kind: 'confirm',
     prompt: '确认 three',
     options: [
-      { label: '确认', has_op: true },
-      { label: '拒绝', has_op: false },
+      { label: '确认', has_op: true, op: 'update_project', args: { project, fields: { summary: 'three' } } },
+      { label: '拒绝', has_op: false, op: null, args: null },
     ],
     project_id: project,
     session_key: null,

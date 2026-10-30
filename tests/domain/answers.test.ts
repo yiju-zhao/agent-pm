@@ -41,15 +41,15 @@ function ask(input: unknown): string {
   return r.question_ids[0];
 }
 
-/** A three-way choice: park, abandon, or leave it. */
+/** A three-way choice: explore, build, or leave it. (An AI may not offer closing or parking this way.) */
 function askChoice(): string {
   return ask({
     kind: 'choice',
     prompt: '这个项目怎么处理？',
     evidence: ['chunk:1'],
     options: [
-      { label: '搁置', op: 'transition_stage', args: { project: p, stage: 'parked' } },
-      { label: '放弃', op: 'transition_stage', args: { project: p, stage: 'abandoned' } },
+      { label: '探索', op: 'transition_stage', args: { project: p, stage: 'explore' } },
+      { label: '开工', op: 'transition_stage', args: { project: p, stage: 'build' } },
       { label: '先不处理', op: null },
     ],
   });
@@ -119,7 +119,7 @@ test('a choice question runs the option that was picked', () => {
 
   expect(answer(q, { option_index: 1 })).toMatchObject({ status: 'applied' });
 
-  expect(project(p).stage).toBe('abandoned');
+  expect(project(p).stage).toBe('build');
   expect(lastEvent(t.db)).toMatchObject({ actor: 'user', question_id: q });
   expect(question(q)).toMatchObject({ status: 'answered', answer: '{"option_index":1}', rejected: 0 });
 });
