@@ -148,6 +148,7 @@ function windowOf(chunkIds: number[], over: Partial<DigestWindow> = {}): DigestW
     tsEnd: '2026-10-29T10:30:00.000Z',
     backfill: false,
     totalChars: MIN_DIGEST_CHARS + 100,
+    hasReport: false,
     ...over,
   };
 }
@@ -265,6 +266,27 @@ test('report chunks carry kind="report" and transcript chunks carry no kind attr
   const w = nextWindow(t.db, KEY, 'realtime');
   expect(w?.text).toContain(`<chunk id="${tr}">from transcript</chunk>`);
   expect(w?.text).toContain(`<chunk id="${rp}" kind="report">from report</chunk>`);
+});
+
+test('hasReport is set only when a report chunk is placed in the window', () => {
+  addChunk('plain transcript');
+  expect(nextWindow(t.db, KEY, 'realtime')?.hasReport).toBe(false);
+  addChunk('a report', { kind: 'report' });
+  expect(nextWindow(t.db, KEY, 'realtime')?.hasReport).toBe(true);
+  // A report chunk that does not fit in this window does not count.
+  t.db.exec('DELETE FROM chunks');
+  addChunk('a'.repeat(REALTIME_WINDOW_CHARS));
+  addChunk('later report', { kind: 'report' });
+  expect(nextWindow(t.db, KEY, 'realtime')?.hasReport).toBe(false);
+});
+
+test('a cap override shrinks the window but the first chunk always goes in', () => {
+  const a = addChunk('a'.repeat(300));
+  const b = addChunk('b'.repeat(300));
+  addChunk('c'.repeat(300));
+  expect(nextWindow(t.db, KEY, 'realtime', 600)?.chunkIds).toEqual([a, b]);
+  expect(nextWindow(t.db, KEY, 'realtime', 599)?.chunkIds).toEqual([a]);
+  expect(nextWindow(t.db, KEY, 'realtime', 1)?.chunkIds).toEqual([a]);
 });
 
 test('realtime windows exclude backfill chunks and backfill windows exclude realtime ones', () => {
@@ -392,8 +414,8 @@ test('structured output that fails DigestSchema is bad_output and leaves chunks 
   expect(res).toMatchObject({ status: 'failed', kind: 'bad_output' });
   expect(digestRows()).toHaveLength(0);
   expect(digestedFlags([c, stale, newest])).toEqual([0, 0, 0]);
-  // The call itself happened and cost tokens, so it is logged.
-  expect(runRows()).toEqual([{ role: 'digest', model: MODEL, ok: 1, error_kind: null }]);
+  // The call itself happened and cost tokens, so it is logged, as a failed run: its output was unusable.
+  expect(runRows()).toEqual([{ role: 'digest', model: MODEL, ok: 0, error_kind: 'bad_output' }]);
 });
 
 test('a runner failure records an llm_run with the error kind and writes nothing else', async () => {
@@ -446,6 +468,21 @@ test('without force a tiny window still goes to the model', async () => {
   const res = await runDigest(t.db, t.deps, runner, w, { model: MODEL, force: false });
   expect(calls).toHaveLength(1);
   expect(res.status).toBe('digested');
+  expect(digestedFlags([c])).toEqual([1]);
+});
+
+test('force on a tiny window with a report chunk still calls the model', async () => {
+  const c = addChunk('switched the tokenizer', { kind: 'report' });
+  const w = nextWindow(t.db, KEY, 'realtime')!;
+  expect(w.hasReport).toBe(true);
+  expect(w.totalChars).toBeLessThan(MIN_DIGEST_CHARS);
+  const { runner, calls } = fakeRunner({ ...SUCCESS, structured: GOOD_DIGEST });
+
+  const res = await runDigest(t.db, t.deps, runner, w, { model: MODEL, force: true });
+
+  expect(calls).toHaveLength(1);
+  expect(res.status).toBe('digested');
+  expect(digestRows()[0]).toMatchObject({ skipped: 0 });
   expect(digestedFlags([c])).toEqual([1]);
 });
 

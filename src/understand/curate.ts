@@ -3,9 +3,10 @@ import { getProject, listProjects, listQuestions, listVetoedProjects } from '../
 import type { QuestionView } from '../domain/read.ts';
 import type { DomainDeps } from '../domain/types.ts';
 import { curatorTools } from './curator-tools.ts';
+import type { CuratorBatch } from './curator-tools.ts';
 import { DigestSchema, neutralizeTags } from './digest.ts';
 import { recordRun } from './llm.ts';
-import type { LlmCall, LlmErrorKind, LlmRunner } from './llm.ts';
+import type { LlmCall, LlmErrorKind, LlmResult, LlmRunner } from './llm.ts';
 import { renderBrief, renderProjectIndex, renderTombstones, TOMBSTONES_TITLE } from './render.ts';
 
 /** Most digests one curator run takes; the rest wait for the next run. */
@@ -175,7 +176,13 @@ export function buildCuratorPrompt(db: DatabaseSync, deps: DomainDeps, digestIds
 
 // ---- run ---------------------------------------------------------------------------------------------------------
 
-export type CurateOutcome = { status: 'curated'; digestIds: number[] } | { status: 'failed'; kind: LlmErrorKind; message: string };
+/**
+ * `curated` with `partialError`: the call failed after at least one tool call had changed state, so the batch was marked
+ * curated anyway (replaying it would repeat those writes); the error is still the caller's to report, and to pause on.
+ */
+export type CurateOutcome =
+  | { status: 'curated'; digestIds: number[]; partialError?: { kind: LlmErrorKind; message: string } }
+  | { status: 'failed'; kind: LlmErrorKind; message: string };
 
 /** Marks the digests curated with one statement. */
 function markCurated(db: DatabaseSync, ids: number[]): void {
@@ -184,8 +191,11 @@ function markCurated(db: DatabaseSync, ids: number[]): void {
 
 /**
  * Runs the curator over one batch. The call is logged either way. When it succeeds, even if the model used no tool, the
- * batch is marked curated; when it fails nothing is marked, so the next run takes the same digests again. An empty batch
- * is already done and calls nothing.
+ * batch is marked curated. When it fails before any tool call changed state nothing is marked, so the next run takes
+ * the same digests again; when it fails after one did, the batch is marked curated and the error comes back as
+ * `partialError`, since the writes are not idempotent. A runner that throws is treated the same way: with writes landed
+ * it is logged as a failed run of kind `other`, without them the exception propagates. The tools stop working when this
+ * returns. An empty batch is already done and calls nothing.
  */
 export async function runCurate(
   db: DatabaseSync,
@@ -198,18 +208,42 @@ export async function runCurate(
   if (ids.length === 0) return { status: 'curated', digestIds: [] };
 
   const { system, prompt } = buildCuratorPrompt(db, deps, ids);
+  const batch: CuratorBatch = { digestIds: ids, landedWrites: 0, closed: false };
   const call: LlmCall = {
     role: 'curate',
     model: opts.model,
     system,
     prompt,
-    tools: curatorTools(db, deps, { digestIds: ids }),
+    tools: curatorTools(db, deps, batch),
     maxTurns: CURATOR_MAX_TURNS,
   };
-  const result = await runner(call);
+  const startedAt = Date.now();
+  let result: LlmResult;
+  try {
+    result = await runner(call);
+  } catch (err) {
+    if ((batch.landedWrites ?? 0) === 0) throw err;
+    const message = `the runner threw: ${err instanceof Error ? err.message : safeString(err)}`;
+    result = { ok: false, kind: 'other', message, durationMs: Date.now() - startedAt };
+  } finally {
+    batch.closed = true;
+  }
   recordRun(db, deps, call, result);
-  if (!result.ok) return { status: 'failed', kind: result.kind, message: result.message };
+  if (!result.ok) {
+    if ((batch.landedWrites ?? 0) === 0) return { status: 'failed', kind: result.kind, message: result.message };
+    markCurated(db, ids);
+    return { status: 'curated', digestIds: ids, partialError: { kind: result.kind, message: result.message } };
+  }
 
   markCurated(db, ids);
   return { status: 'curated', digestIds: ids };
+}
+
+/** `String(value)`, or a placeholder for values that cannot be turned into one. */
+function safeString(value: unknown): string {
+  try {
+    return String(value);
+  } catch {
+    return 'a value that cannot be printed';
+  }
 }

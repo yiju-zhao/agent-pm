@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import { z } from 'zod';
 import { CURATOR_ACTOR, curatorTools } from '../../src/understand/curator-tools.ts';
+import type { CuratorBatch } from '../../src/understand/curator-tools.ts';
 import type { ToolDef, ToolOutput } from '../../src/understand/tool-def.ts';
 import { count, lastEvent, NOW, row, rows, setup } from '../domain/helpers.ts';
 import type { Setup } from '../domain/helpers.ts';
@@ -470,4 +471,60 @@ test('get_project changes nothing', async () => {
 
 test('each tool input is a zod raw shape that builds an object schema', () => {
   for (const tool of tools) expect(() => z.object(tool.input), tool.name).not.toThrow();
+});
+
+// ---- run state ---------------------------------------------------------------------------------------------------
+
+test('the batch counts tool calls that came back applied or proposed (questions included), and nothing else', async () => {
+  const batch: CuratorBatch = { digestIds: [d1, d2] };
+  const list = curatorTools(t.db, t.deps, batch);
+  const run = (name: string, args: Record<string, unknown>) => byName(list, name).handler(args);
+
+  const p = JSON.parse((await run('create_project', { title: 'P', reason: 'r', evidence: cite(d1) })).text).id as string;
+  expect(batch.landedWrites).toBe(1);
+  // A rejection, bad arguments, unusable evidence and a read do not count.
+  await run('update_project', { project: 'p_nope', fields: { summary: 'x' }, reason: 'r', evidence: cite(d1) });
+  await run('upsert_todo', { project: p, reason: 'r', evidence: cite(d1) });
+  await run('upsert_todo', { project: p, title: 'T', reason: 'r', evidence: cite(d3) });
+  await run('get_project', { project_id: p });
+  expect(batch.landedWrites).toBe(1);
+  // A proposal (here: a completion turned into a question) landed too.
+  await run('transition_stage', { project: p, stage: 'done', reason: 'r', evidence: cite(d1) });
+  expect(batch.landedWrites).toBe(2);
+  // A question is state too: asking again under another topic would duplicate it.
+  const asked = await run('ask_user', {
+    kind: 'choice',
+    prompt: '归属？',
+    project_id: p,
+    session_key: null,
+    topic: 'owner',
+    evidence: cite(d1),
+    options: [
+      { label: '是', op: null },
+      { label: '否', op: null },
+    ],
+  });
+  expect(asked.isError).toBeFalsy();
+  expect(batch.landedWrites).toBe(3);
+});
+
+test('once the batch is closed every tool refuses without touching anything', async () => {
+  const p = t.user('create_project', { title: 'P' }).id;
+  const batch: CuratorBatch = { digestIds: [d1] };
+  const list = curatorTools(t.db, t.deps, batch);
+  batch.closed = true;
+  const before = count(t.db, 'events');
+
+  for (const [name, args] of [
+    ['create_project', { title: 'Q', reason: 'r', evidence: cite(d1) }],
+    ['upsert_todo', { project: p, title: 'T', reason: 'r', evidence: cite(d1) }],
+    ['ask_user', { kind: 'confirm', prompt: '?', evidence: cite(d1), option: { label: 'ok', op: null } }],
+    ['get_project', { project_id: p }],
+  ] as const) {
+    const out = await byName(list, name).handler(args);
+    expect(out, name).toEqual({ text: 'this curate run has ended', isError: true });
+  }
+  expect(count(t.db, 'events')).toBe(before);
+  expect(count(t.db, 'projects')).toBe(1);
+  expect(count(t.db, 'questions')).toBe(0);
 });

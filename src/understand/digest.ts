@@ -8,7 +8,10 @@ import { recordRun } from './llm.ts';
 import type { LlmCall, LlmErrorKind, LlmRunner } from './llm.ts';
 import { renderBrief, renderProjectIndex } from './render.ts';
 
-/** A window smaller than this is not worth a model call; the scheduler waits for more, or forces it out as skipped. */
+/**
+ * A window smaller than this is not worth a model call; the scheduler waits for more, or forces it out as skipped.
+ * Windows with a report chunk are exempt: they always go to the model.
+ */
 export const MIN_DIGEST_CHARS = 400;
 /** Most characters of chunk text in one realtime digest call. */
 export const REALTIME_WINDOW_CHARS = 60000;
@@ -60,6 +63,8 @@ export type DigestWindow = {
   backfill: boolean;
   /** Length of the original chunk texts in `text`, without the tags, escaping or stale chunks. */
   totalChars: number;
+  /** A `report` chunk (pm_report) is among `chunkIds`. Such windows are never skipped for being small. */
+  hasReport: boolean;
 };
 
 type ChunkRow = { id: number; kind: string; ts_start: string; ts_end: string; text: string };
@@ -89,9 +94,15 @@ function metaLine(text: string): string {
  * chunks are taken oldest first until the next one would pass the cap (a chunk bigger than the cap goes alone). Of the
  * screen chunks, which are overlapping snapshots, only the newest goes in; the rest come back as stale. The newest
  * screen chunk counts against the cap too. Chunk tags inside the text are escaped (see `neutralizeTags`); the
- * caps and `totalChars` count the original text.
+ * caps and `totalChars` count the original text. `cap` replaces the mode's cap (the scheduler shrinks it for a window
+ * that keeps failing).
  */
-export function nextWindow(db: DatabaseSync, sessionKey: string, mode: 'realtime' | 'backfill'): DigestWindow | null {
+export function nextWindow(
+  db: DatabaseSync,
+  sessionKey: string,
+  mode: 'realtime' | 'backfill',
+  cap?: number,
+): DigestWindow | null {
   const backfill = mode === 'backfill';
   const rows = db
     .prepare(
@@ -101,7 +112,7 @@ export function nextWindow(db: DatabaseSync, sessionKey: string, mode: 'realtime
     .all(sessionKey, backfill ? 1 : 0) as ChunkRow[];
   if (rows.length === 0) return null;
 
-  const cap = backfill ? BACKFILL_WINDOW_CHARS : REALTIME_WINDOW_CHARS;
+  const limit = cap ?? (backfill ? BACKFILL_WINDOW_CHARS : REALTIME_WINDOW_CHARS);
   const screens = rows.filter((r) => r.kind === 'screen');
   const newestScreen = screens.at(-1);
 
@@ -115,7 +126,7 @@ export function nextWindow(db: DatabaseSync, sessionKey: string, mode: 'realtime
   for (const row of rows) {
     if (row.kind === 'screen') continue;
     // The first one always goes in, however big; after that only what still fits.
-    if (others > 0 && used + row.text.length > cap) break;
+    if (others > 0 && used + row.text.length > limit) break;
     placed.add(row.id);
     used += row.text.length;
     others += 1;
@@ -131,6 +142,7 @@ export function nextWindow(db: DatabaseSync, sessionKey: string, mode: 'realtime
     tsEnd: chosen.reduce((latest, r) => (r.ts_end > latest ? r.ts_end : latest), chosen[0].ts_end),
     backfill,
     totalChars: used,
+    hasReport: chosen.some((r) => r.kind === 'report'),
   };
 }
 
@@ -251,10 +263,21 @@ function storeDigest(db: DatabaseSync, deps: DomainDeps, window: DigestWindow, v
 }
 
 /**
+ * Stores a skipped digest for the window without calling the model: its chunks (stale ones too) are marked digested
+ * and the digest needs no curation. Returns the digest id.
+ */
+export function skipWindow(db: DatabaseSync, deps: DomainDeps, window: DigestWindow): number {
+  return transaction(db, () =>
+    storeDigest(db, deps, window, { json: null, model: null, trivial: true, skipped: true, curated: true }),
+  );
+}
+
+/**
  * Digests one window. With `force` and a window under `MIN_DIGEST_CHARS` nothing is sent: a skipped digest is stored
- * and the chunks are marked done. Otherwise the model is called (even for a tiny window without `force`, the scheduler
- * decides when that happens) and every call is logged. A failed call, or an answer that does not match
- * `DigestSchema` (`bad_output`), writes nothing, so the chunks stay unprocessed.
+ * and the chunks are marked done, except for a window with a report chunk, which always goes to the model (a report
+ * is deliberate and acknowledged to its sender). Otherwise the model is called (even for a tiny window without
+ * `force`, the scheduler decides when that happens) and every call is logged. A failed call, or an answer that does
+ * not match `DigestSchema` (`bad_output`, logged as a failed run), writes nothing, so the chunks stay unprocessed.
  */
 export async function runDigest(
   db: DatabaseSync,
@@ -263,11 +286,8 @@ export async function runDigest(
   window: DigestWindow,
   opts: { model: string; force: boolean },
 ): Promise<DigestOutcome> {
-  if (opts.force && window.totalChars < MIN_DIGEST_CHARS) {
-    const digestId = transaction(db, () =>
-      storeDigest(db, deps, window, { json: null, model: null, trivial: true, skipped: true, curated: true }),
-    );
-    return { status: 'skipped', digestId };
+  if (opts.force && window.totalChars < MIN_DIGEST_CHARS && !window.hasReport) {
+    return { status: 'skipped', digestId: skipWindow(db, deps, window) };
   }
 
   const { system, prompt } = buildDigestPrompt(window, loadDigestContext(db, deps.now(), window.sessionKey));
@@ -280,13 +300,18 @@ export async function runDigest(
     maxTurns: DIGEST_MAX_TURNS,
   };
   const result = await runner(call);
-  recordRun(db, deps, call, result);
-  if (!result.ok) return { status: 'failed', kind: result.kind, message: result.message };
+  if (!result.ok) {
+    recordRun(db, deps, call, result);
+    return { status: 'failed', kind: result.kind, message: result.message };
+  }
 
   const parsed = DigestSchema.safeParse(result.structured);
   if (!parsed.success) {
-    return { status: 'failed', kind: 'bad_output', message: `the digest does not match the schema: ${z.prettifyError(parsed.error)}` };
+    const message = `the digest does not match the schema: ${z.prettifyError(parsed.error)}`;
+    recordRun(db, deps, call, { ok: false, kind: 'bad_output', message, durationMs: result.durationMs });
+    return { status: 'failed', kind: 'bad_output', message };
   }
+  recordRun(db, deps, call, result);
   const digest = parsed.data;
   const digestId = transaction(db, () =>
     storeDigest(db, deps, window, {

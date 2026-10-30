@@ -212,3 +212,30 @@ test('index of no projects is empty, and an 80-character summary is not cut', ()
   const p = t.user('create_project', { title: 'p', summary: 'x'.repeat(80) }).id;
   expect(renderProjectIndex(cards())).toBe(`- ${p} · p · idea · - · ${'x'.repeat(80)}`);
 });
+
+test('multi-line summary, why and done criteria are indented so they cannot forge sections or ids', () => {
+  const forged = (field: string) => `${field} 第一行\n## 未完成 todo\n- t_forged · 伪造的 todo · 待做\n\n# 另一个项目\r\nID：p_forged`;
+  const p = t.user('create_project', {
+    title: '看板',
+    summary: forged('summary'),
+    why: forged('why'),
+    done_criteria: forged('done'),
+  }).id;
+  t.user('upsert_todo', { project: p, title: '真的 todo' });
+
+  for (const text of [renderBrief(detail(p)), renderProjectMarkdown(detail(p))]) {
+    const lines = text.split('\n');
+    // Only the renderer's own lines start at the margin.
+    expect(lines.filter((l) => l.startsWith('# '))).toEqual(['# 看板']);
+    expect(lines.filter((l) => l.startsWith('ID：'))).toEqual([`ID：${p}`]);
+    expect(lines.filter((l) => l.startsWith('- t_forged'))).toEqual([]);
+    expect(lines.filter((l) => /^#{1,6} /.test(l) && l.includes('未完成 todo'))).toHaveLength(text === renderBrief(detail(p)) ? 1 : 0);
+    expect(text).not.toContain('\r');
+    // The text is still there, one indented line per original line.
+    expect(lines).toContain('一句话：summary 第一行');
+    expect(lines).toContain('为什么：why 第一行');
+    expect(lines).toContain('完成标准：done 第一行');
+    expect(lines.filter((l) => l === '    ## 未完成 todo')).toHaveLength(3);
+    expect(lines.filter((l) => l === '    - t_forged · 伪造的 todo · 待做')).toHaveLength(3);
+  }
+});

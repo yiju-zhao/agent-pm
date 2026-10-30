@@ -69,15 +69,19 @@ function addSession(key: string, opts: SessionOpts = {}): void {
     );
 }
 
-function addChunk(key: string, text: string, opts: { backfill?: number; receivedAt?: string; digested?: number } = {}): number {
+function addChunk(
+  key: string,
+  text: string,
+  opts: { backfill?: number; receivedAt?: string; digested?: number; kind?: string } = {},
+): number {
   nextOffset += 1;
   const ts = iso(Date.parse('2026-10-29T08:00:00.000Z') + nextOffset * 60_000);
   const info = t.db
     .prepare(
       `INSERT INTO chunks (session_key, kind, offset_start, offset_end, ts_start, ts_end, text, backfill, digested, received_at)
-       VALUES (?, 'transcript', ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(key, nextOffset * 1000, nextOffset * 1000 + text.length, ts, ts, text, opts.backfill ?? 0, opts.digested ?? 0, opts.receivedAt ?? iso(clock));
+    .run(key, opts.kind ?? 'transcript', nextOffset * 1000, nextOffset * 1000 + text.length, ts, ts, text, opts.backfill ?? 0, opts.digested ?? 0, opts.receivedAt ?? iso(clock));
   return Number(info.lastInsertRowid);
 }
 
@@ -223,6 +227,54 @@ test('report keys are digested once their oldest chunk is 2 minutes old', async 
   expect(digested(id)).toBe(1);
 });
 
+// ---- short reports (R14) -----------------------------------------------------------------------------------------
+
+/** The digest rows, oldest first: whether each was skipped and its session. */
+function digestFlags(): Array<{ session_key: string; skipped: number }> {
+  return t.db.prepare('SELECT session_key, skipped FROM digests ORDER BY id').all() as Array<{ session_key: string; skipped: number }>;
+}
+
+test('a short inbox report goes to the model after the 2-minute debounce, not the 30-minute fallback', async () => {
+  const id = addChunk('report:inbox', '换成了 sentencepiece，分数涨了 2 个点', { kind: 'report' });
+  const { calls, runner } = fakeRunner();
+  const s = scheduler(runner);
+  advance(DEBOUNCE_MS - 1);
+  expect(await s.tick()).toBe('idle');
+  advance(1);
+  expect(await s.tick()).toBe('digested');
+  expect(calls.map((c) => c.role)).toEqual(['digest']);
+  expect(digested(id)).toBe(1);
+  expect(digestFlags()).toEqual([{ session_key: 'report:inbox', skipped: 0 }]);
+});
+
+test('a short inbox report under requestSync goes to the model at once', async () => {
+  addChunk('report:inbox', '阻塞在 GPU 配额', { kind: 'report' });
+  const { calls, runner } = fakeRunner();
+  const s = scheduler(runner);
+  s.requestSync();
+  expect(await s.tick()).toBe('digested');
+  expect(calls).toHaveLength(1);
+  expect(digestFlags()).toEqual([{ session_key: 'report:inbox', skipped: 0 }]);
+});
+
+test('a short report filed under a real session is digested by the model, not skipped or held back', async () => {
+  // A live session that has settled: a short transcript window would wait for more; a report does not.
+  addSession(A, { live_status: 'idle' });
+  addChunk(A, '短上报', { kind: 'report' });
+  // An ended session: a short transcript window would be force-skipped; a report is not.
+  addSession(B, { lifecycle: 'ended' });
+  addChunk(B, '另一条短上报', { kind: 'report' });
+  const { calls, runner } = fakeRunner();
+  const s = scheduler(runner);
+  expect(await s.tick()).toBe('digested');
+  expect(await s.tick()).toBe('digested');
+  expect(calls).toHaveLength(2);
+  expect(digestFlags()).toEqual([
+    { session_key: A, skipped: 0 },
+    { session_key: B, skipped: 0 },
+  ]);
+});
+
 test('realtime work always goes before backfill', async () => {
   addSession(A);
   addSession(B);
@@ -362,6 +414,42 @@ test('three curate failures in a row give up on that batch; digesting continues 
 
 // ---- failures ----------------------------------------------------------------------------------------------------
 
+test('a curate run that fails after a write landed is not replayed and its error is recorded', async () => {
+  const id = addDigest();
+  const { calls, runner } = fakeRunner((call) => {
+    if (call.role !== 'curate') return ok();
+    void call.tools!.find((x) => x.name === 'create_project')!.handler({ title: '半途', reason: 'r', evidence: [`digest:${id}`] });
+    return fail('other', 'stream cut');
+  });
+  const s = scheduler(runner);
+  s.requestSync();
+  expect(await s.tick()).toBe('curated');
+  expect(uncurated()).toBe(0);
+  expect(t.db.prepare('SELECT count(*) AS n FROM projects').get()).toEqual({ n: 1 });
+  expect(s.status().last_error).toContain('stream cut');
+  expect(s.status().paused_until).toBeNull();
+  expect(await s.tick()).toBe('idle');
+  expect(calls).toHaveLength(1);
+});
+
+test('a curate run cut off by a rate limit after a write landed is not replayed, and the scheduler still pauses', async () => {
+  const id = addDigest();
+  const { calls, runner } = fakeRunner((call) => {
+    void call.tools!.find((x) => x.name === 'create_project')!.handler({ title: '半途', reason: 'r', evidence: [`digest:${id}`] });
+    return fail('rate_limit', '429');
+  });
+  const s = scheduler(runner);
+  s.requestSync();
+  expect(await s.tick()).toBe('paused');
+  expect(s.status().paused_until).toBe(iso(clock + BACKOFF_START_MS));
+  expect(s.status().last_error).toContain('429');
+  expect(uncurated()).toBe(0);
+  advance(BACKOFF_START_MS);
+  expect(await s.tick()).toBe('idle');
+  expect(calls).toHaveLength(1);
+  expect(t.db.prepare('SELECT count(*) AS n FROM projects').get()).toEqual({ n: 1 });
+});
+
 test('a rate limit pauses with doubling backoff, keeps chunks undigested, and resumes after the pause', async () => {
   addSession(A);
   const id = addChunk(A, BIG);
@@ -426,6 +514,112 @@ test('three consecutive failures cool a session down for an hour while other ses
   advance(SESSION_COOLDOWN_MS);
   expect(await s.tick()).toBe('skipped');
   expect(calls).toHaveLength(6);
+});
+
+test('a single chunk that fails every time is skipped after its first cycle past the two-cycle grace', async () => {
+  addSession(A);
+  const only = addChunk(A, `${BIG} poison`, { receivedAt: iso(clock - 60_000) });
+  const { calls, runner } = fakeRunner((call) => (call.prompt.includes('poison') ? fail('other', 'always') : ok()));
+  const s = scheduler(runner);
+  for (let n = 0; n < 2; n++) {
+    for (let i = 0; i < 3; i++) expect(await s.tick()).toBe('skipped');
+    advance(SESSION_COOLDOWN_MS);
+  }
+  expect(digested(only)).toBe(0);
+  for (let i = 0; i < 3; i++) expect(await s.tick()).toBe('skipped');
+  expect(digested(only)).toBe(1);
+  expect(calls).toHaveLength(9);
+  expect(s.status().last_error).toContain(`chunk ${only}`);
+});
+
+test('a digest window that fails every time shrinks after two cooldowns and its first chunk is finally skipped', async () => {
+  addSession(A);
+  addSession(B);
+  const poison = Array.from({ length: 4 }, () => addChunk(A, `${BIG} poison`, { receivedAt: iso(clock - 60_000) }));
+  const { calls, runner } = fakeRunner((call) => (call.prompt.includes('poison') ? fail('other', 'always') : ok()));
+  const s = scheduler(runner);
+  const chunksPerCall = () => calls.map((c) => c.prompt.split('<chunk id=').length - 1);
+
+  /** One full cycle: three failed calls, then the cooldown. */
+  async function cycle(): Promise<void> {
+    for (let i = 0; i < 3; i++) expect(await s.tick()).toBe('skipped');
+    expect(await s.tick()).toBe('idle');
+    advance(SESSION_COOLDOWN_MS);
+  }
+
+  await cycle();
+  await cycle();
+  expect(chunksPerCall()).toEqual([4, 4, 4, 4, 4, 4]);
+  // Two cycles on the same first chunk: the cap halves on each further cycle.
+  await cycle();
+  expect(chunksPerCall().slice(6)).toEqual([2, 2, 2]);
+  expect(digested(poison[0])).toBe(0);
+
+  // Down to one chunk; when that exhausts a cycle too, it is stored as skipped and the session moves on.
+  for (let i = 0; i < 3; i++) expect(await s.tick()).toBe('skipped');
+  expect(chunksPerCall().slice(9)).toEqual([1, 1, 1]);
+  expect(digested(poison[0])).toBe(1);
+  expect(poison.slice(1).map(digested)).toEqual([0, 0, 0]);
+  expect(t.db.prepare('SELECT chunk_ids, skipped, curated, json FROM digests').all()).toEqual([
+    { chunk_ids: JSON.stringify([poison[0]]), skipped: 1, curated: 1, json: null },
+  ]);
+  expect(s.status().last_error).toContain(A);
+  expect(s.status().last_error).toContain(`chunk ${poison[0]}`);
+
+  // The rest of the session is tried right away, with the full cap again.
+  expect(await s.tick()).toBe('skipped');
+  expect(chunksPerCall().at(-1)).toBe(3);
+
+  // Meanwhile other sessions were never held up.
+  const good = addChunk(B, BIG);
+  expect(await s.tick()).toBe('digested');
+  expect(digested(good)).toBe(1);
+});
+
+test('a failing window that cannot shrink below the newest screen plus one chunk is skipped as a whole', async () => {
+  addSession(A);
+  const screen = addChunk(A, `${BIG} poison screen`, { kind: 'screen', receivedAt: iso(clock - 60_000) });
+  const t1 = addChunk(A, `${BIG} poison`);
+  const t2 = addChunk(A, `${BIG} poison`);
+  const { calls, runner } = fakeRunner((call) => (call.prompt.includes('poison') ? fail('other', 'always') : ok()));
+  const s = scheduler(runner);
+  for (let n = 0; n < 3; n++) {
+    for (let i = 0; i < 3; i++) expect(await s.tick()).toBe('skipped');
+    advance(SESSION_COOLDOWN_MS);
+  }
+  // The halved cap cannot be met (the screen and the first chunk always go in), so that window is as small as it gets
+  // and the cycle it failed is its last.
+  expect(calls.map((c) => c.prompt.split('<chunk id=').length - 1)).toEqual([3, 3, 3, 3, 3, 3, 2, 2, 2]);
+  expect([screen, t1, t2].map(digested)).toEqual([1, 1, 0]);
+  expect(t.db.prepare('SELECT chunk_ids, skipped FROM digests').all()).toEqual([
+    { chunk_ids: JSON.stringify([screen, t1]), skipped: 1 },
+  ]);
+});
+
+test('a success resets a failing window\'s cycle count', async () => {
+  addSession(A);
+  const first = addChunk(A, `${BIG} poison`, { receivedAt: iso(clock - 60_000) });
+  let healthy = false;
+  const { calls, runner } = fakeRunner((call) => (call.prompt.includes('poison') && !healthy ? fail('other', 'flaky') : ok()));
+  const s = scheduler(runner);
+  for (let n = 0; n < 2; n++) {
+    for (let i = 0; i < 3; i++) expect(await s.tick()).toBe('skipped');
+    advance(SESSION_COOLDOWN_MS);
+  }
+  healthy = true;
+  expect(await s.tick()).toBe('digested');
+  expect(digested(first)).toBe(1);
+
+  // A new failing window starts from scratch: two full cycles at the full cap before anything shrinks or is skipped.
+  healthy = false;
+  addChunk(A, `${BIG} poison`);
+  addChunk(A, `${BIG} poison`);
+  for (let n = 0; n < 2; n++) {
+    for (let i = 0; i < 3; i++) expect(await s.tick()).toBe('skipped');
+    advance(SESSION_COOLDOWN_MS);
+  }
+  expect(calls.slice(-6).map((c) => c.prompt.split('<chunk id=').length - 1)).toEqual([2, 2, 2, 2, 2, 2]);
+  expect(t.db.prepare('SELECT count(*) AS n FROM digests WHERE skipped = 1').get()).toEqual({ n: 0 });
 });
 
 test('an exception inside a tick is logged and does not break the next tick', async () => {
@@ -495,6 +689,19 @@ test('a curator that keeps throwing is given up on like a failing one, and diges
   expect(await s.tick()).toBe('skipped');
   expect(uncurated()).toBe(0);
   expect(s.status().last_error).toMatch(/curator crashed.*放弃/);
+});
+
+test('tick still resolves when the thrown value cannot even be turned into a string', async () => {
+  addSession(A);
+  addChunk(A, BIG);
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  // String() on an object without a prototype throws a TypeError.
+  const runner: LlmRunner = async () => {
+    throw Object.create(null);
+  };
+  const s = scheduler(runner);
+  expect(await s.tick()).toBe('skipped');
+  expect(s.status().last_error).not.toBeNull();
 });
 
 test('tick still resolves when recording a failure fails too', async () => {
@@ -701,6 +908,10 @@ test('backfill progress counts sessions with backfill chunks and those fully dig
   addChunk(B, BIG, { backfill: 1 });
   addChunk(C, BIG);
   addChunk('report:laptop:x', BIG);
+  // An ignored session is never digested, so its backfill must not count towards the total.
+  const D = 'claude:dddd4444dddd4444';
+  addSession(D, { ignored: 1 });
+  addChunk(D, BIG, { backfill: 1 });
   addDigest();
   addDigest();
 

@@ -73,6 +73,7 @@ test.skipIf(!live)(
         tsEnd: '2026-10-29T10:10:00.000Z',
         backfill: false,
         totalChars: text.length,
+        hasReport: false,
       },
       {
         session: { agent_kind: 'claude', machine: 'laptop', cwd: '/work/herdr-pm', title: '写摘要员' },

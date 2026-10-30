@@ -230,25 +230,33 @@ test('buildQueryOptions passes the oauth token on top of the process env, and th
   expect(o.outputFormat).toEqual({ type: 'json_schema', schema });
 });
 
-test('buildQueryOptions never hands API credentials to the subprocess, with or without an oauth token', () => {
-  const saved = { key: process.env.ANTHROPIC_API_KEY, auth: process.env.ANTHROPIC_AUTH_TOKEN, other: process.env.HERDR_PM_TEST_KEEP };
-  process.env.ANTHROPIC_API_KEY = 'sk-ant-should-not-leak';
-  process.env.ANTHROPIC_AUTH_TOKEN = 'bearer-should-not-leak';
+test('buildQueryOptions never hands API credentials or other billing routes to the subprocess, with or without an oauth token', () => {
+  // Any of these would make the call bill something other than the subscription.
+  const scrubbed = [
+    'ANTHROPIC_API_KEY',
+    'ANTHROPIC_AUTH_TOKEN',
+    'ANTHROPIC_BASE_URL',
+    'CLAUDE_CODE_USE_BEDROCK',
+    'CLAUDE_CODE_USE_VERTEX',
+    'CLAUDE_CODE_USE_FOUNDRY',
+  ];
+  const names = [...scrubbed, 'HERDR_PM_TEST_KEEP'];
+  const saved = new Map(names.map((name) => [name, process.env[name]]));
+  for (const name of scrubbed) process.env[name] = `${name.toLowerCase()}-should-not-leak`;
   process.env.HERDR_PM_TEST_KEEP = 'kept';
   try {
     const { sdk } = fakeSdk();
     for (const oauthToken of [undefined, 'tok-123']) {
       const env = buildQueryOptions(sdk as never, call, { oauthToken }).env!;
-      expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
-      expect(env).not.toHaveProperty('ANTHROPIC_AUTH_TOKEN');
+      for (const name of scrubbed) expect(env, name).not.toHaveProperty(name);
       expect(env.HERDR_PM_TEST_KEEP).toBe('kept');
       expect(env.PATH).toBe(process.env.PATH);
       expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe(oauthToken ?? process.env.CLAUDE_CODE_OAUTH_TOKEN);
     }
     // The real environment is left alone; only the copy handed to the SDK is stripped.
-    expect(process.env.ANTHROPIC_API_KEY).toBe('sk-ant-should-not-leak');
+    for (const name of scrubbed) expect(process.env[name]).toBe(`${name.toLowerCase()}-should-not-leak`);
   } finally {
-    for (const [name, value] of [['ANTHROPIC_API_KEY', saved.key], ['ANTHROPIC_AUTH_TOKEN', saved.auth], ['HERDR_PM_TEST_KEEP', saved.other]] as const) {
+    for (const [name, value] of saved) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
     }

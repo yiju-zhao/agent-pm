@@ -149,3 +149,16 @@ test('GET and DELETE on /mcp answer 405: the endpoint is stateless and has no ev
     expect(res.headers.get('Allow')).toBe('POST');
   }
 });
+
+test('a body over 64 KB is refused with 413 once the token checks out; without a token it is still 401', async () => {
+  const big = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: { pad: 'x'.repeat(64 * 1024) } });
+  const send = (authorization?: string) => {
+    const headers: Record<string, string> = { 'content-type': 'application/json', accept: 'application/json, text/event-stream' };
+    if (authorization !== undefined) headers.Authorization = authorization;
+    return app.request(MCP_URL, { method: 'POST', headers, body: big });
+  };
+  expect((await send(`Bearer ${MCP_TOKEN}`)).status).toBe(413);
+  expect((await send()).status).toBe(401);
+  // A normal request still goes through.
+  expect((await initialize(`Bearer ${MCP_TOKEN}`)).status).toBe(200);
+});

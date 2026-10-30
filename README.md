@@ -340,7 +340,7 @@ curl -s http://<mac-mini>:7718/status
 | `backfill.sessions_done` / `backfill.sessions_total` | 历史导入进度（按 session 算） |
 | `last_digest_at`、`last_curate_at` | 最近一次摘要 / 整理完成的时间 |
 
-调度器平时自己跑：session 停下来（不再是 `working`）2 分钟后摘要它的新内容，一直在跑的 session 最晚 30 分钟摘要一次；摘要攒够 8 条或最早一条等满 5 分钟就整理一次。想马上处理已收到的内容：
+调度器平时自己跑：session 停下来（不再是 `working`）2 分钟后摘要它的新内容，一直在跑的 session 最晚 30 分钟摘要一次；`pm_report` 的上报再短也会交给模型，收到 2 分钟后摘要；摘要攒够 8 条或最早一条等满 5 分钟就整理一次。某个 session 的摘要连续失败 3 次会冷却 1 小时；同一段内容冷却两轮后每轮把窗口减半，缩到一段也还失败就跳过那一段（`last_error` 里写着 session 和 chunk id）。整理中途失败但已经写进了改动的那一批不会重跑（避免重复建项目、加 todo），错误同样记在 `last_error`。想马上处理已收到的内容：
 
 ```bash
 curl -s -XPOST http://<mac-mini>:7718/sync -H "Authorization: Bearer <userToken>"   # 202 {"accepted":true}
@@ -352,7 +352,7 @@ curl -s -XPOST http://<mac-mini>:7718/sync -H "Authorization: Bearer <userToken>
 
 中心在 `http://<mac-mini>:7718/mcp` 提供 MCP（Streamable HTTP，无状态）。工具：`pm_list_projects`、`pm_get_project`、`pm_get_brief`、`pm_timeline`、`pm_search`、`pm_list_sessions`（只读）和 `pm_report`（上报进展：内容存成一段对话片段，下一轮整理时由整理员处理，不会直接改项目）。没有写工具。
 
-每个请求必须带 `Authorization: Bearer <mcpToken>`，否则 401；`userToken` 和采集器的 token 在这里无效，`mcpToken` 在别处也无效。`mcpToken` 会放在每台跑 agent 的机器上，泄露后的影响只是能读项目和上报。
+每个请求必须带 `Authorization: Bearer <mcpToken>`，否则 401；请求体最大 64 KB，超过返回 413；`userToken` 和采集器的 token 在这里无效，`mcpToken` 在别处也无效。`mcpToken` 会放在每台跑 agent 的机器上，泄露后的影响只是能读项目和上报。
 
 **Claude Code**（每台机器跑一次；默认只对当前目录的项目生效，加 `--scope user` 对这台机器上的所有项目生效）：
 

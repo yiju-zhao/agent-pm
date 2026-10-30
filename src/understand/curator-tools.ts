@@ -12,8 +12,24 @@ import type { ToolDef, ToolOutput } from './tool-def.ts';
 /** The actor every curator write is filed under; the trust rules of the operation layer apply to it in full. */
 export const CURATOR_ACTOR = 'ai:curator';
 
-/** What one curator run may cite as evidence: the digests it was handed. */
-export type CuratorBatch = { digestIds: number[] };
+/**
+ * One curator run's state, shared with its tools. `digestIds` is what the run may cite as evidence: the digests it was
+ * handed. The tools count in `landedWrites` every call that came back `applied` or `proposed` (questions included),
+ * so a failed run can tell whether replaying the batch would repeat writes. Once `closed` is set (the run returned)
+ * every tool refuses, in case the SDK keeps calling after an abort it ignored.
+ */
+export type CuratorBatch = { digestIds: number[]; landedWrites?: number; closed?: boolean };
+
+/** What every handler gets: the citable ids as a set, and the batch whose counter and flag it reads and updates. */
+type RunState = { ids: ReadonlySet<number>; batch: CuratorBatch };
+
+const ENDED: ToolOutput = { text: 'this curate run has ended', isError: true };
+
+/** Counts a call that changed state; a rejection did not. */
+function landed(run: RunState, result: OpResult): OpResult {
+  if (result.status !== 'rejected') run.batch.landedWrites = (run.batch.landedWrites ?? 0) + 1;
+  return result;
+}
 
 // ---- results -----------------------------------------------------------------------------------------------------
 
@@ -154,7 +170,7 @@ const WRITE_OPS = [
   },
 ] as const satisfies ReadonlyArray<{ op: OpName; description: string }>;
 
-function writeTool(db: DatabaseSync, deps: DomainDeps, batch: ReadonlySet<number>, spec: (typeof WRITE_OPS)[number]): ToolDef {
+function writeTool(db: DatabaseSync, deps: DomainDeps, run: RunState, spec: (typeof WRITE_OPS)[number]): ToolDef {
   const { op } = spec;
   // Every entry of OP_SCHEMAS used here is a plain z.object(...).strict(), so its fields can be reused as they are.
   const input: z.ZodRawShape = { ...OP_SCHEMAS[op].shape, ...WRITE_ENVELOPE };
@@ -165,6 +181,7 @@ function writeTool(db: DatabaseSync, deps: DomainDeps, batch: ReadonlySet<number
     description: `${spec.description}${REMINDER}`,
     input,
     handler: async (raw) => {
+      if (run.batch.closed) return ENDED;
       const parsed = schema.safeParse(raw);
       if (!parsed.success) return rejected('invalid', `invalid arguments for ${op}: ${z.prettifyError(parsed.error)}`);
       const { reason, evidence, occurred_at, ...args } = parsed.data as {
@@ -173,10 +190,13 @@ function writeTool(db: DatabaseSync, deps: DomainDeps, batch: ReadonlySet<number
         occurred_at?: string;
       } & Record<string, unknown>;
 
-      const cited = checkEvidence(db, batch, evidence);
+      const cited = checkEvidence(db, run.ids, evidence);
       if (!cited.ok) return rejected('missing_evidence', cited.message);
       return resultOutput(
-        execute(db, deps, { op, args, actor: CURATOR_ACTOR, reason, evidence, occurred_at: occurred_at ?? cited.occurredAt }),
+        landed(
+          run,
+          execute(db, deps, { op, args, actor: CURATOR_ACTOR, reason, evidence, occurred_at: occurred_at ?? cited.occurredAt }),
+        ),
       );
     },
   };
@@ -204,27 +224,28 @@ const ASK_DESCRIPTION = [
   '必须给 evidence（本批摘要 digest:<id> 或已有 chunk:<id>）；topic 相同的重复提问会合并。',
 ].join('');
 
-function askTool(db: DatabaseSync, deps: DomainDeps, batch: ReadonlySet<number>): ToolDef {
+function askTool(db: DatabaseSync, deps: DomainDeps, run: RunState): ToolDef {
   const schema = z.strictObject(ASK_INPUT);
   return {
     name: 'ask_user',
     description: ASK_DESCRIPTION,
     input: ASK_INPUT,
     handler: async (raw) => {
+      if (run.batch.closed) return ENDED;
       const parsed = schema.safeParse(raw);
       if (!parsed.success) return rejected('invalid', `invalid arguments for ask_user: ${z.prettifyError(parsed.error)}`);
       const { reason: _reason, ...ask } = parsed.data;
 
-      const cited = checkEvidence(db, batch, ask.evidence);
+      const cited = checkEvidence(db, run.ids, ask.evidence);
       if (!cited.ok) return rejected('missing_evidence', cited.message);
-      return resultOutput(askUser(db, deps, ask, CURATOR_ACTOR));
+      return resultOutput(landed(run, askUser(db, deps, ask, CURATOR_ACTOR)));
     },
   };
 }
 
 // ---- get_project -------------------------------------------------------------------------------------------------
 
-function getProjectTool(db: DatabaseSync, deps: DomainDeps): ToolDef {
+function getProjectTool(db: DatabaseSync, deps: DomainDeps, run: RunState): ToolDef {
   const input = { project_id: z.string().min(1) };
   const schema = z.strictObject(input);
   return {
@@ -233,6 +254,7 @@ function getProjectTool(db: DatabaseSync, deps: DomainDeps): ToolDef {
       '只读：取一个项目的完整 Markdown（阶段、里程碑、todo、决策、阻塞、关联 session、用户删除过的内容、最近事件）。动手改一个项目前先看一眼，避免重复添加。',
     input,
     handler: async (raw) => {
+      if (run.batch.closed) return ENDED;
       const parsed = schema.safeParse(raw);
       if (!parsed.success) return { text: `invalid arguments for get_project: ${z.prettifyError(parsed.error)}`, isError: true };
       const project = getProject(db, deps.now(), parsed.data.project_id);
@@ -247,9 +269,10 @@ function getProjectTool(db: DatabaseSync, deps: DomainDeps): ToolDef {
 /**
  * The tools one curator run gets: the write tools of spec section 11 (each a thin wrapper over `execute` as
  * `ai:curator`), `ask_user` and a read-only `get_project`. There is deliberately no `unlock_field`, `revert_event`,
- * `delete_*` or `unlink_session`. Evidence may only cite digests in `batch` and chunks that exist.
+ * `delete_*` or `unlink_session`. Evidence may only cite digests in `batch` and chunks that exist. The tools update
+ * `batch.landedWrites` and stop working once `batch.closed` is set (see `CuratorBatch`).
  */
 export function curatorTools(db: DatabaseSync, deps: DomainDeps, batch: CuratorBatch): ToolDef[] {
-  const digestIds = new Set(batch.digestIds);
-  return [...WRITE_OPS.map((spec) => writeTool(db, deps, digestIds, spec)), askTool(db, deps, digestIds), getProjectTool(db, deps)];
+  const run: RunState = { ids: new Set(batch.digestIds), batch };
+  return [...WRITE_OPS.map((spec) => writeTool(db, deps, run, spec)), askTool(db, deps, run), getProjectTool(db, deps, run)];
 }

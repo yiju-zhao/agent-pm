@@ -3,7 +3,7 @@ import type { DomainDeps } from '../domain/types.ts';
 import { effectiveStatus } from '../server/sessions-repo.ts';
 import type { SessionRow } from '../server/sessions-repo.ts';
 import { pickCurateBatch, runCurate } from './curate.ts';
-import { MIN_DIGEST_CHARS, nextWindow, runDigest } from './digest.ts';
+import { MIN_DIGEST_CHARS, nextWindow, runDigest, skipWindow } from './digest.ts';
 import type { DigestWindow } from './digest.ts';
 import { isPausing } from './llm.ts';
 import type { LlmErrorKind, LlmRunner } from './llm.ts';
@@ -28,6 +28,8 @@ export const BACKOFF_MAX_MS = 1800000;
 /** Consecutive failures after which a session cools down, or a curate batch is given up. */
 export const MAX_SESSION_FAILURES = 3;
 export const SESSION_COOLDOWN_MS = 3600000;
+/** Cooldowns the same window may cause at its full size; after that each further one halves the session's window. */
+export const STALL_GRACE_CYCLES = 2;
 
 export type TickResult = 'curated' | 'digested' | 'skipped' | 'idle' | 'paused' | 'busy';
 
@@ -47,6 +49,16 @@ function age(now: number, iso: string | null): number {
   return iso === null ? Number.POSITIVE_INFINITY : now - Date.parse(iso);
 }
 
+/** An error's message, or the thrown value as text; never throws. */
+function describeError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  try {
+    return String(err);
+  } catch {
+    return 'a thrown value that cannot be printed';
+  }
+}
+
 function nextBackoff(current: number): number {
   return Math.min(current * 2, BACKOFF_MAX_MS);
 }
@@ -55,7 +67,12 @@ type Candidate = { key: string; oldest: string };
 type SessionWithHeartbeat = SessionRow & { machine_heartbeat: string | null };
 type Picked = { window: DigestWindow; force: boolean };
 /** What the tick in flight is working on, so an exception can be counted against it. */
-type Work = { kind: 'curate'; ids: number[]; now: number } | { kind: 'digest'; key: string; now: number };
+type Work = { kind: 'curate'; ids: number[]; now: number } | { kind: 'digest'; window: DigestWindow; now: number };
+/**
+ * A session whose window keeps failing: the window's first chunk, how many cooldowns it has caused, and the cap its
+ * windows are cut to once those pass `STALL_GRACE_CYCLES` (unset until then).
+ */
+type Stall = { firstChunk: number; cycles: number; cap?: number };
 /** Realtime chunks with ids up to `chunk` existed when the sync was requested; only they get the sync treatment. */
 type SyncMarks = { chunk: number };
 
@@ -83,6 +100,7 @@ export class Scheduler {
 
   private readonly sessionFailures = new Map<string, number>();
   private readonly cooldownUntil = new Map<string, number>();
+  private readonly stalls = new Map<string, Stall>();
   private curateFailures = 0;
   private curateWaitUntil: number | null = null;
   /** The session the last backfill window came from; the next one starts after it. */
@@ -106,18 +124,27 @@ export class Scheduler {
     this.work = null;
     const run = this.step()
       .catch((err: unknown): TickResult => {
-        console.error('herdr-pm scheduler: tick failed:', err);
-        const message = `exception: ${err instanceof Error ? err.message : String(err)}`;
-        const work = this.work;
-        this.lastError = `调度出错：${message}`;
-        if (work === null) return 'idle';
+        // Everything in here can throw too (logging, an exotic thrown value, the database); the timer must still never
+        // see a rejection.
         try {
+          console.error('herdr-pm scheduler: tick failed:', err);
+        } catch {
+          // Nowhere left to report it.
+        }
+        try {
+          const message = `exception: ${describeError(err)}`;
+          const work = this.work;
+          this.lastError = `调度出错：${message}`;
+          if (work === null) return 'idle';
           if (work.kind === 'curate') this.curateFailed(work.now, work.ids, 'other', message);
-          else this.digestFailed(work.now, work.key, 'other', message);
+          else this.digestFailed(work.now, work.window, 'other', message);
           return 'skipped';
         } catch (accountingErr) {
-          // Recording the failure touches the database too; the timer must still never see a rejection.
-          console.error('herdr-pm scheduler: recording the failure failed:', accountingErr);
+          try {
+            console.error('herdr-pm scheduler: recording the failure failed:', accountingErr);
+          } catch {
+            // As above.
+          }
           return 'idle';
         }
       })
@@ -132,7 +159,7 @@ export class Scheduler {
 
   /**
    * "Run a round now": the realtime chunks that exist at this moment skip the debounce (and a small window of only such
-   * chunks is stored as skipped), and while the sync lasts every uncurated digest, including the ones the sync itself
+   * chunks is stored as skipped, unless it holds a report), and while the sync lasts every uncurated digest, including the ones the sync itself
    * writes, skips the curate delay. The sync ends once those chunks are processed and nothing is left to curate. Chunks
    * that arrive later follow the normal rules, so a session that keeps working cannot keep the sync going. Calling it
    * again during a sync takes in what arrived since.
@@ -170,11 +197,17 @@ export class Scheduler {
          WHERE c.digested = 0 AND c.backfill = 0 AND coalesce(s.ignored, 0) = 0`,
       ),
       uncurated_digests: scalar('SELECT count(*) AS n FROM digests WHERE curated = 0'),
+      // Ignored sessions are never digested, so they are left out like in `waiting_sessions`.
       backfill: {
-        sessions_total: scalar('SELECT count(DISTINCT session_key) AS n FROM chunks WHERE backfill = 1'),
+        sessions_total: scalar(
+          `SELECT count(DISTINCT c.session_key) AS n FROM chunks c LEFT JOIN sessions s ON s.key = c.session_key
+           WHERE c.backfill = 1 AND coalesce(s.ignored, 0) = 0`,
+        ),
         sessions_done: scalar(
           `SELECT count(*) AS n FROM (
-             SELECT session_key FROM chunks WHERE backfill = 1 GROUP BY session_key HAVING sum(digested = 0) = 0
+             SELECT c.session_key FROM chunks c LEFT JOIN sessions s ON s.key = c.session_key
+             WHERE c.backfill = 1 AND coalesce(s.ignored, 0) = 0
+             GROUP BY c.session_key HAVING sum(c.digested = 0) = 0
            )`,
         ),
       },
@@ -221,10 +254,16 @@ export class Scheduler {
     this.running = 'curate';
     const outcome = await runCurate(this.db, this.deps, this.runner, ids, { model: this.models.curate });
     if (outcome.status === 'curated') {
-      this.backoffMs = BACKOFF_START_MS;
       this.curateFailures = 0;
       this.curateWaitUntil = null;
-      return 'curated';
+      const partial = outcome.partialError;
+      if (partial === undefined) {
+        this.backoffMs = BACKOFF_START_MS;
+        return 'curated';
+      }
+      // The batch was marked curated because writes had landed; the failure itself still counts.
+      this.lastError = `整理中途失败（${partial.kind}）：${partial.message}；已写入的部分保留，摘要 ${ids.join(', ')} 不再重试`;
+      return isPausing(partial.kind) ? this.pause(now, partial.kind) : 'curated';
     }
     if (isPausing(outcome.kind)) return this.pause(now, outcome.kind);
     this.curateFailed(now, ids, outcome.kind, outcome.message);
@@ -248,34 +287,71 @@ export class Scheduler {
   }
 
   private async digest(now: number, picked: Picked): Promise<TickResult> {
-    const key = picked.window.sessionKey;
-    this.work = { kind: 'digest', key, now };
+    const { window } = picked;
+    const key = window.sessionKey;
+    this.work = { kind: 'digest', window, now };
     this.running = 'digest';
-    const outcome = await runDigest(this.db, this.deps, this.runner, picked.window, {
+    const outcome = await runDigest(this.db, this.deps, this.runner, window, {
       model: this.models.digest,
       force: picked.force,
     });
     if (outcome.status !== 'failed') {
       if (outcome.status === 'digested') this.backoffMs = BACKOFF_START_MS;
       this.sessionFailures.delete(key);
+      this.stalls.delete(key);
       return outcome.status;
     }
     if (isPausing(outcome.kind)) return this.pause(now, outcome.kind);
-    this.digestFailed(now, key, outcome.kind, outcome.message);
+    this.digestFailed(now, window, outcome.kind, outcome.message);
     return 'skipped';
   }
 
-  /** A digest failure that does not pause: counts against the session, which cools down after `MAX_SESSION_FAILURES`. */
-  private digestFailed(now: number, key: string, kind: LlmErrorKind, message: string): void {
+  /**
+   * A digest failure that does not pause: counts against the session, which cools down after `MAX_SESSION_FAILURES`.
+   * Each cooldown is also a cycle of the window's stall (see `stalled`).
+   */
+  private digestFailed(now: number, window: DigestWindow, kind: LlmErrorKind, message: string): void {
+    const key = window.sessionKey;
     this.lastError = `摘要失败（${key}，${kind}）：${message}`;
     const failures = (this.sessionFailures.get(key) ?? 0) + 1;
     if (failures >= MAX_SESSION_FAILURES) {
       this.sessionFailures.delete(key);
       this.cooldownUntil.set(key, now + SESSION_COOLDOWN_MS);
       this.lastError += `；连续 ${failures} 次失败，冷却到 ${shortIso(now + SESSION_COOLDOWN_MS)}`;
+      this.stalled(window);
     } else {
       this.sessionFailures.set(key, failures);
     }
+  }
+
+  /**
+   * A window just used up a whole cycle (failures up to a cooldown). The same first chunk gets `STALL_GRACE_CYCLES`
+   * cycles at full size; from then on, after each cycle the session's windows are cut to half of what this one held.
+   * Once the window cannot get smaller (a single chunk, or the newest screen plus the first other chunk, which always
+   * go in) and still fails one of those further cycles, it is stored as a skipped digest so the session can move on
+   * (its cooldown is lifted).
+   */
+  private stalled(window: DigestWindow): void {
+    const key = window.sessionKey;
+    const firstChunk = window.chunkIds[0];
+    const previous = this.stalls.get(key);
+    const stall: Stall = previous?.firstChunk === firstChunk ? previous : { firstChunk, cycles: 0 };
+    stall.cycles += 1;
+    this.stalls.set(key, stall);
+    if (stall.cycles < STALL_GRACE_CYCLES) return;
+
+    const smallest = window.chunkIds.length === 1 || (stall.cap !== undefined && window.totalChars > stall.cap);
+    if (!smallest) {
+      stall.cap = Math.floor(window.totalChars / 2);
+      this.lastError += `；同一窗口已冷却 ${stall.cycles} 次，窗口减半到 ${stall.cap} 字`;
+      return;
+    }
+    // A window that was this small from the start still gets its first cycle past the grace.
+    if (stall.cycles === STALL_GRACE_CYCLES) return;
+    skipWindow(this.db, this.deps, window);
+    this.stalls.delete(key);
+    this.cooldownUntil.delete(key);
+    this.lastError += `；session ${key} 的 chunk ${window.chunkIds.join(', ')} 单独摘要仍然失败 ${stall.cycles} 轮，已跳过`;
   }
 
   private pause(now: number, kind: LlmErrorKind): TickResult {
@@ -348,7 +424,7 @@ export class Scheduler {
       }
       if (!ready && this.sync === null) continue;
 
-      const window = nextWindow(this.db, key, 'realtime');
+      const window = nextWindow(this.db, key, 'realtime', this.stalls.get(key)?.cap);
       if (window === null) continue;
       // Under sync, a window that starts with a chunk from before the sync is ready; it may be forced out as skipped
       // only when every chunk in it is from before the sync, so a fragment that arrived since is not thrown away.
@@ -357,8 +433,9 @@ export class Scheduler {
       if (!ready && !syncReady) continue;
       const syncForce = this.sync !== null && window.chunkIds.every((id) => id <= mark);
       const force = finished || overdue || syncForce;
-      // Too little to be worth a call: wait for more while the session may still add to it.
-      if (window.totalChars < MIN_DIGEST_CHARS && !force) continue;
+      // Too little to be worth a call: wait for more while the session may still add to it. A report is never held
+      // back for its size (and `runDigest` never skips it).
+      if (window.totalChars < MIN_DIGEST_CHARS && !force && !window.hasReport) continue;
       return { window, force };
     }
     return null;
@@ -374,7 +451,7 @@ export class Scheduler {
     const after = cursor === null ? -1 : keys.findIndex((k) => k > cursor);
     const ordered = after < 0 ? keys : [...keys.slice(after), ...keys.slice(0, after)];
     for (const key of ordered) {
-      const window = nextWindow(this.db, key, 'backfill');
+      const window = nextWindow(this.db, key, 'backfill', this.stalls.get(key)?.cap);
       if (window === null) continue;
       this.backfillCursor = key;
       return { window, force: true };

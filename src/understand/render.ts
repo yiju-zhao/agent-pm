@@ -33,6 +33,15 @@ export function oneLine(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * Free text that may span lines (summary, why, done criteria): every line after the first is indented by four spaces,
+ * so AI-written text cannot start a line of its own that reads as a section, an id or a list item, in the prompt or as
+ * Markdown (CommonMark still takes a heading indented by up to three spaces).
+ */
+function indented(text: string): string {
+  return text.replace(/\r\n?|\n/g, '\n    ');
+}
+
 function present(text: string | null): text is string {
   return text !== null && text.trim() !== '';
 }
@@ -105,9 +114,9 @@ function headLines(p: ProjectDetail): string[] {
   if (p.merged_into !== null) stage.push(`已合并到：${p.merged_into}`);
 
   const lines = [`# ${oneLine(p.title)}`, `ID：${p.id}`, stage.join(' · ')];
-  if (present(p.summary)) lines.push(`一句话：${p.summary}`);
-  if (present(p.why)) lines.push(`为什么：${p.why}`);
-  if (present(p.done_criteria)) lines.push(`完成标准：${p.done_criteria}`);
+  if (present(p.summary)) lines.push(`一句话：${indented(p.summary)}`);
+  if (present(p.why)) lines.push(`为什么：${indented(p.why)}`);
+  if (present(p.done_criteria)) lines.push(`完成标准：${indented(p.done_criteria)}`);
   if (p.current_milestone !== null) {
     const m = p.current_milestone;
     lines.push(`当前里程碑：${m.id} · ${oneLine(m.title)}（${ITEM_STATUS_LABEL[m.status]}）`);

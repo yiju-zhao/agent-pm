@@ -508,3 +508,77 @@ test('the prompt says so when there are no projects, no vetoes and no questions'
   expect(prompt).toContain('（暂无项目）');
   expect(prompt).toContain('（没有）');
 });
+
+// ---- partial failures --------------------------------------------------------------------------------------------
+
+const OTHER_FAILURE: LlmResult = { ok: false, kind: 'other', message: 'the SDK process died', durationMs: 90 };
+
+/** Creates one project through the call's tools, as a curator that got that far before failing would. */
+async function createOne(call: LlmCall, digestId: number): Promise<void> {
+  await tool(call, 'create_project').handler({ title: '半途项目', reason: '新课题', evidence: [`digest:${digestId}`] });
+}
+
+test('a run that fails after a write landed marks the batch curated and carries the error', async () => {
+  const a = addDigest();
+  const b = addDigest();
+  const { runner } = fakeRunner(OTHER_FAILURE, (call) => createOne(call, a));
+
+  const outcome = await runCurate(t.db, t.deps, runner, [a, b], { model: MODEL });
+
+  expect(outcome).toEqual({
+    status: 'curated',
+    digestIds: [a, b],
+    partialError: { kind: 'other', message: 'the SDK process died' },
+  });
+  expect(curatedFlags([a, b])).toEqual([1, 1]);
+  expect(count(t.db, 'projects')).toBe(1);
+  expect(runRows()).toEqual([{ role: 'curate', model: MODEL, ok: 0, error_kind: 'other', error: 'the SDK process died' }]);
+  // Nothing left to replay.
+  expect(pickCurateBatch(t.db)).toEqual([]);
+});
+
+test('a run that fails after only refused tool calls is a plain failure', async () => {
+  const a = addDigest();
+  const { runner } = fakeRunner(OTHER_FAILURE, async (call) => {
+    await tool(call, 'create_project').handler({ title: 'x', reason: 'r', evidence: ['digest:999999'] });
+  });
+  const outcome = await runCurate(t.db, t.deps, runner, [a], { model: MODEL });
+  expect(outcome).toEqual({ status: 'failed', kind: 'other', message: 'the SDK process died' });
+  expect(curatedFlags([a])).toEqual([0]);
+});
+
+test('a runner that throws after a write landed still marks the batch curated', async () => {
+  const a = addDigest();
+  const runner: LlmRunner = async (call) => {
+    await createOne(call, a);
+    throw new Error('sdk crashed');
+  };
+  const outcome = await runCurate(t.db, t.deps, runner, [a], { model: MODEL });
+  expect(outcome).toMatchObject({ status: 'curated', digestIds: [a], partialError: { kind: 'other' } });
+  expect(outcome.status === 'curated' && outcome.partialError?.message).toContain('sdk crashed');
+  expect(curatedFlags([a])).toEqual([1]);
+  expect(runRows()).toMatchObject([{ role: 'curate', ok: 0, error_kind: 'other' }]);
+});
+
+test('a runner that throws before any write propagates the exception and leaves the batch uncurated', async () => {
+  const a = addDigest();
+  const runner: LlmRunner = async () => {
+    throw new Error('sdk crashed');
+  };
+  await expect(runCurate(t.db, t.deps, runner, [a], { model: MODEL })).rejects.toThrow('sdk crashed');
+  expect(curatedFlags([a])).toEqual([0]);
+});
+
+test('tool calls that arrive after the run returned are refused', async () => {
+  const a = addDigest();
+  let late: LlmCall | undefined;
+  // The runner returns (say, after a timeout) while the SDK still holds the tools.
+  const { runner } = fakeRunner(OTHER_FAILURE, async (call) => {
+    late = call;
+  });
+  await runCurate(t.db, t.deps, runner, [a], { model: MODEL });
+
+  const out = await tool(late!, 'create_project').handler({ title: '迟到', reason: 'r', evidence: [`digest:${a}`] });
+  expect(out).toEqual({ text: 'this curate run has ended', isError: true });
+  expect(count(t.db, 'projects')).toBe(0);
+});

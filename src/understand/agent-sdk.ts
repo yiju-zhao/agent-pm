@@ -91,6 +91,16 @@ export function mapSdkMessages(messages: unknown[], opts: { expectStructured?: b
   return { ok: false, kind, message };
 }
 
+/** Environment variables that route a call away from the subscription (an API key, another endpoint, a cloud provider). */
+const NON_SUBSCRIPTION_ENV = [
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_BASE_URL',
+  'CLAUDE_CODE_USE_BEDROCK',
+  'CLAUDE_CODE_USE_VERTEX',
+  'CLAUDE_CODE_USE_FOUNDRY',
+] as const;
+
 /**
  * The fixed `query()` options for one call. `sdk` supplies `tool()` and `createSdkMcpServer()`;
  * it is a parameter so tests can check the conversion without loading the real SDK.
@@ -111,12 +121,12 @@ export function buildQueryOptions(
     persistSession: false,
     cwd: tmpdir(),
   };
-  // `env` replaces the subprocess environment, so it has to carry everything else too. API credentials are
-  // stripped so an inherited key can never make the call bill the API instead of the subscription.
+  // `env` replaces the subprocess environment, so it has to carry everything else too. API credentials, a custom
+  // endpoint and the cloud-provider switches are stripped so an inherited setting can never make the call bill
+  // anything other than the subscription.
   const env: Record<string, string | undefined> = { ...process.env };
   if (opts.oauthToken) env.CLAUDE_CODE_OAUTH_TOKEN = opts.oauthToken;
-  delete env.ANTHROPIC_API_KEY;
-  delete env.ANTHROPIC_AUTH_TOKEN;
+  for (const name of NON_SUBSCRIPTION_ENV) delete env[name];
   options.env = env;
   if (call.outputSchema) options.outputFormat = { type: 'json_schema', schema: call.outputSchema };
   if (call.tools && call.tools.length > 0) {
