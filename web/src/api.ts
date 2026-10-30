@@ -101,11 +101,20 @@ export function sessionPath(key: string): string {
   return encodeURIComponent(key);
 }
 
+// Every code the operation layer can refuse with (RejectCode in src/domain/types.ts), plus the ones this client raises.
 const CODE_TEXT: Record<string, string> = {
   no_token: '需要先设置 token',
   network: '连不上服务器',
+  not_found: '找不到对象，可能已被删除',
+  merged: '项目已合并到别的项目',
+  vetoed: '这条已被你否决，AI 不会再加回来',
+  user_only: '这个操作只能由你来做',
+  missing_reason: '缺少理由',
+  missing_evidence: '缺少证据',
   not_pending: '这个问题已经处理过了',
   stale: '情况已变，这个问题已撤回',
+  question_limit: '待回答的问题太多了',
+  recently_rejected: '最近刚被拒绝过',
   conflict: '和后来的改动冲突，没法撤销',
   already_reverted: '已经撤销过了',
   not_revertible: '这条记录不能撤销',
@@ -113,11 +122,23 @@ const CODE_TEXT: Record<string, string> = {
   too_large: '内容太长',
 };
 
+// For these the server's own words say what exactly is wrong, so they follow a Chinese prefix.
+const CODE_PREFIX: Record<string, string> = {
+  invalid: '内容不符合要求',
+  not_allowed: '不允许这个操作',
+};
+
 /** What to tell the person about a failed request: our Chinese text for the codes we know, else the server's own message. */
 export function errorText(err: unknown): string {
   if (err instanceof ApiError) {
     if (err.status === 401) return CODE_TEXT.no_token;
-    return CODE_TEXT[err.code] ?? err.message;
+    if (Object.hasOwn(CODE_TEXT, err.code)) return CODE_TEXT[err.code];
+    if (Object.hasOwn(CODE_PREFIX, err.code)) {
+      // A reply without a `message` leaves the ApiError with the code as its message: that is no detail.
+      const detail = err.message === err.code ? '' : err.message;
+      return detail === '' ? CODE_PREFIX[err.code] : `${CODE_PREFIX[err.code]}：${detail}`;
+    }
+    return err.message;
   }
   return err instanceof Error ? err.message : String(err);
 }

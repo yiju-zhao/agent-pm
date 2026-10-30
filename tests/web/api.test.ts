@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import type { RejectCode } from '../../src/domain/types.ts';
 import { ApiError, AUTH_EVENT, TOKEN_KEY, apiGet, apiSend, errorText, getToken, sessionPath, setToken } from '../../web/src/api.ts';
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -196,7 +197,44 @@ test('errorText maps the known codes to Chinese and passes other server messages
     [413, 'too_large', '内容太长'],
   ];
   for (const [status, code, text] of table) expect(errorText(new ApiError(status, code, 'server words'))).toBe(text);
-  expect(errorText(new ApiError(404, 'not_found', '没有这个项目'))).toBe('没有这个项目');
+  expect(errorText(new ApiError(400, 'some_future_code', 'server words'))).toBe('server words');
   expect(errorText(new Error('boom'))).toBe('boom');
   expect(errorText('weird')).toBe('weird');
+});
+
+test('errorText gives every rejection of the operation layer a fixed Chinese text', () => {
+  const table: Array<[number, string, string]> = [
+    [404, 'not_found', '找不到对象，可能已被删除'],
+    [409, 'merged', '项目已合并到别的项目'],
+    [409, 'vetoed', '这条已被你否决，AI 不会再加回来'],
+    [403, 'user_only', '这个操作只能由你来做'],
+    [409, 'missing_reason', '缺少理由'],
+    [409, 'missing_evidence', '缺少证据'],
+    [409, 'question_limit', '待回答的问题太多了'],
+    [409, 'recently_rejected', '最近刚被拒绝过'],
+  ];
+  // The server's own (English) words are not shown for these.
+  for (const [status, code, text] of table) expect(errorText(new ApiError(status, code, 'server words'))).toBe(text);
+});
+
+test('errorText puts the server detail after a Chinese prefix for invalid and not_allowed', () => {
+  expect(errorText(new ApiError(400, 'invalid', 'invalid args for record_decision: text is too big'))).toBe(
+    '内容不符合要求：invalid args for record_decision: text is too big',
+  );
+  expect(errorText(new ApiError(409, 'not_allowed', 'AI cannot do this'))).toBe('不允许这个操作：AI cannot do this');
+});
+
+test('errorText leaves out the colon when there is no detail', () => {
+  expect(errorText(new ApiError(400, 'invalid', ''))).toBe('内容不符合要求');
+  expect(errorText(new ApiError(409, 'not_allowed', ''))).toBe('不允许这个操作');
+  // A reply without a `message` leaves the ApiError with the code as its message: that is no detail either.
+  expect(errorText(new ApiError(400, 'invalid'))).toBe('内容不符合要求');
+});
+
+test('errorText covers every code of RejectCode', () => {
+  const codes = [
+    'invalid', 'not_found', 'vetoed', 'merged', 'not_allowed', 'user_only', 'missing_reason', 'missing_evidence', 'conflict',
+    'already_reverted', 'not_revertible', 'not_pending', 'stale', 'question_limit', 'recently_rejected',
+  ] satisfies RejectCode[];
+  for (const code of codes) expect(errorText(new ApiError(409, code, 'server words')), code).toMatch(/[\u4e00-\u9fff]/);
 });
