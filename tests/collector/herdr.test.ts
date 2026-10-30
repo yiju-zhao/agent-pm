@@ -2,7 +2,13 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { parseHerdrSnapshot, readHerdrSnapshot } from '../../src/collector/herdr.ts';
+import {
+  parseHerdrSnapshot,
+  parsePaneProcessInfo,
+  readHerdrScreen,
+  readHerdrSnapshot,
+  readPaneProcess,
+} from '../../src/collector/herdr.ts';
 
 const fixture: unknown = JSON.parse(
   await readFile(new URL('../fixtures/herdr-snapshot.json', import.meta.url), 'utf8'),
@@ -192,4 +198,48 @@ test('readHerdrSnapshot throws a clear error on non-JSON output', async () => {
 
 test('readHerdrSnapshot throws when the binary does not exist', async () => {
   await expect(readHerdrSnapshot(join(binDir, 'missing'))).rejects.toThrow(/herdr api snapshot/);
+});
+
+function processInfo(groupId: number, procs: Record<string, unknown>[]): unknown {
+  return {
+    id: 'cli:pane:process-info',
+    result: {
+      type: 'pane_process_info',
+      process_info: { pane_id: 'w1:p1', shell_pid: 100, foreground_process_group_id: groupId, foreground_processes: procs },
+    },
+  };
+}
+
+test('parsePaneProcessInfo picks the foreground process group leader', () => {
+  const info = processInfo(300, [
+    { pid: 200, name: 'caffeinate', cwd: '/elsewhere' },
+    { pid: 300, name: 'codex', cwd: '/home/demo/proj' },
+  ]);
+  expect(parsePaneProcessInfo(info)).toEqual({ pid: 300, cwd: '/home/demo/proj' });
+});
+
+test('parsePaneProcessInfo falls back to the first foreground process and tolerates junk', () => {
+  expect(parsePaneProcessInfo(processInfo(999, [{ pid: 'x' }, { pid: 201 }]))).toEqual({ pid: 201, cwd: '' });
+  expect(parsePaneProcessInfo(processInfo(1, []))).toBeNull();
+  expect(parsePaneProcessInfo({ result: {} })).toBeNull();
+  expect(parsePaneProcessInfo(null)).toBeNull();
+});
+
+test('readPaneProcess runs `<bin> pane process-info --pane <id>`; null on failure', async () => {
+  const json = JSON.stringify(processInfo(42, [{ pid: 42, cwd: '/w' }]));
+  const bin = await fakeHerdr(
+    'pinfo',
+    `[ "$*" = "pane process-info --pane w1:p1" ] || { echo "bad args: $*" >&2; exit 2; }\necho '${json}'`,
+  );
+  await expect(readPaneProcess(bin, 'w1:p1')).resolves.toEqual({ pid: 42, cwd: '/w' });
+  await expect(readPaneProcess(bin, 'w1:p2')).resolves.toBeNull();
+});
+
+test('readHerdrScreen runs `<bin> agent read <pane> --source recent-unwrapped --lines 200`', async () => {
+  const bin = await fakeHerdr(
+    'screen',
+    '[ "$*" = "agent read w1:p1 --source recent-unwrapped --lines 200" ] || { echo "bad args: $*" >&2; exit 2; }\nprintf "line 1\\nline 2\\n"',
+  );
+  await expect(readHerdrScreen(bin, 'w1:p1')).resolves.toBe('line 1\nline 2\n');
+  await expect(readHerdrScreen(bin, 'w1:p2')).rejects.toThrow(/bad args/);
 });

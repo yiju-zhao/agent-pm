@@ -101,3 +101,46 @@ export async function readHerdrSnapshot(herdrBin: string): Promise<unknown> {
     throw new Error(`herdr api snapshot returned invalid JSON: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
   }
 }
+
+/** Runs `<herdrBin> agent read <pane> --source recent-unwrapped --lines 200` and returns the pane's recent text. */
+export async function readHerdrScreen(herdrBin: string, paneId: string): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync(
+      herdrBin,
+      ['agent', 'read', paneId, '--source', 'recent-unwrapped', '--lines', '200'],
+      { timeout: SNAPSHOT_TIMEOUT_MS, maxBuffer: SNAPSHOT_MAX_BUFFER },
+    );
+    return stdout;
+  } catch (e) {
+    throw new Error(`herdr agent read ${paneId} failed: ${describeExecError(e)}`, { cause: e });
+  }
+}
+
+/**
+ * The agent process of a pane from `herdr pane process-info` JSON
+ * (`{ result: { process_info: { foreground_process_group_id, foreground_processes: [{ pid, cwd }] } } }`):
+ * the foreground process group leader, else the first foreground process. Null when there is none.
+ */
+export function parsePaneProcessInfo(json: unknown): { pid: number; cwd: string } | null {
+  if (!isObj(json) || !isObj(json.result)) return null;
+  const info = json.result.process_info;
+  if (!isObj(info) || !Array.isArray(info.foreground_processes)) return null;
+  const procs = info.foreground_processes.filter(
+    (p): p is Obj => isObj(p) && typeof p.pid === 'number' && Number.isInteger(p.pid) && p.pid > 0,
+  );
+  const leader = procs.find((p) => p.pid === info.foreground_process_group_id) ?? procs[0];
+  return leader === undefined ? null : { pid: leader.pid as number, cwd: str(leader.cwd) };
+}
+
+/** Runs `<herdrBin> pane process-info --pane <id>`; null when herdr fails or reports no foreground process. */
+export async function readPaneProcess(herdrBin: string, paneId: string): Promise<{ pid: number; cwd: string } | null> {
+  try {
+    const { stdout } = await execFileAsync(herdrBin, ['pane', 'process-info', '--pane', paneId], {
+      timeout: SNAPSHOT_TIMEOUT_MS,
+      maxBuffer: SNAPSHOT_MAX_BUFFER,
+    });
+    return parsePaneProcessInfo(JSON.parse(stdout));
+  } catch {
+    return null;
+  }
+}
