@@ -169,6 +169,40 @@ export const MIGRATIONS: string[] = [
   CREATE INDEX idx_todos_project ON todos(project_id);
   CREATE INDEX idx_milestones_project ON milestones(project_id);
   `,
+  // v3: understanding layer. Digests are the model's per-session summaries of chunks; llm_runs logs every model call.
+  `
+  CREATE TABLE digests (
+    id INTEGER PRIMARY KEY,
+    session_key TEXT,
+    chunk_ids TEXT,
+    json TEXT,
+    model TEXT,
+    ts_start TEXT,
+    ts_end TEXT,
+    backfill INTEGER,
+    trivial INTEGER,
+    skipped INTEGER DEFAULT 0,
+    curated INTEGER DEFAULT 0,
+    created_at TEXT
+  );
+  CREATE TABLE llm_runs (
+    id INTEGER PRIMARY KEY,
+    role TEXT,
+    model TEXT,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    cache_read_tokens INTEGER,
+    cost_usd REAL,
+    duration_ms INTEGER,
+    ok INTEGER,
+    error_kind TEXT,
+    error TEXT,
+    ts TEXT
+  );
+  ALTER TABLE sessions ADD COLUMN status_changed_at TEXT;
+  CREATE INDEX idx_chunks_digested ON chunks(digested, session_key);
+  CREATE INDEX idx_digests_curated ON digests(curated);
+  `,
 ];
 
 /** Opens (creating if needed) the central database in WAL mode and applies pending migrations. */

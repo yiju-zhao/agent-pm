@@ -448,6 +448,51 @@ test('the same key twice in one snapshot: last occurrence wins', () => {
   expect(db.prepare('SELECT count(*) AS n FROM sessions').get()).toEqual({ n: 1 });
 });
 
+test('status_changed_at is set on insert and on a live_status change, and kept otherwise', () => {
+  applySnapshot(db, push('laptop', [session(A, 'term_1', { live_status: 'working' })]), t0);
+  expect(row(A).status_changed_at).toBe(t0.toISOString());
+
+  // Still working: other fields may change, but the status did not.
+  applySnapshot(db, push('laptop', [session(A, 'term_1', { live_status: 'working', title: 'Renamed' })]), t1);
+  expect(row(A)).toMatchObject({ status_changed_at: t0.toISOString(), last_seen: t1.toISOString() });
+
+  applySnapshot(db, push('laptop', [session(A, 'term_1', { live_status: 'idle' })]), t2);
+  expect(row(A).status_changed_at).toBe(t2.toISOString());
+});
+
+test('ending a session counts as a status change', () => {
+  applySnapshot(db, push('laptop', [session(A, 'term_1'), session(B, 'term_2')]), t0);
+  applySnapshot(db, push('laptop', [session(A, 'term_1')]), t1);
+  expect(row(B)).toMatchObject({ lifecycle: 'ended', status_changed_at: t1.toISOString() });
+  expect(row(A).status_changed_at).toBe(t0.toISOString());
+
+  // Already ended: a later snapshot that still omits it does not move the time.
+  applySnapshot(db, push('laptop', [session(A, 'term_1')]), t2);
+  expect(row(B).status_changed_at).toBe(t1.toISOString());
+});
+
+test('an ended session that comes back live counts as a status change', () => {
+  applySnapshot(db, push('laptop', [session(A, 'term_1', { live_status: 'idle' })]), t0);
+  applySnapshot(db, push('laptop', []), t1);
+  applySnapshot(db, push('laptop', [session(A, 'term_1', { live_status: 'idle' })]), t2);
+  expect(row(A)).toMatchObject({ lifecycle: 'live', status_changed_at: t2.toISOString() });
+});
+
+test('merging a pending session into its native session ends it as a status change', () => {
+  const P = 'pending:laptop:term_1';
+  applySnapshot(db, push('laptop', [session(P, 'term_1')]), t0);
+  applySnapshot(db, push('laptop', [session(Y, 'term_1')]), t1);
+  expect(row(P)).toMatchObject({ lifecycle: 'ended', merged_into: Y, status_changed_at: t1.toISOString() });
+});
+
+test('purging a session counts as a status change once', () => {
+  applySnapshot(db, push('laptop', [session(A, 'term_1')]), t0);
+  applySnapshot(db, push('laptop', [session(A, 'term_1')], [A]), t1);
+  expect(row(A)).toMatchObject({ lifecycle: 'purged', status_changed_at: t1.toISOString() });
+  applySnapshot(db, push('laptop', [], [A]), t2);
+  expect(row(A)).toMatchObject({ lifecycle: 'purged', status_changed_at: t1.toISOString() });
+});
+
 test('purged keys are marked purged', () => {
   applySnapshot(db, push('laptop', [session(A, 'term_1'), session(B, 'term_2')]), t0);
   applySnapshot(db, push('desktop', [session(C, 'term_3')]), t0);

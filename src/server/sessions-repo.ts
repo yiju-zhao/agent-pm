@@ -28,6 +28,8 @@ export type SessionRow = {
   ignored: number;
   first_seen: string;
   last_seen: string;
+  /** When live_status or lifecycle last changed; null for sessions that predate schema v3 and have not changed since. */
+  status_changed_at: string | null;
 };
 
 export type SessionView = SessionRow & {
@@ -39,8 +41,8 @@ export type SessionView = SessionRow & {
 const UPSERT_SESSION = `
   INSERT INTO sessions (
     key, agent_kind, native_id, machine, pane_id, terminal_id, workspace_id, tab_id, cwd, title,
-    live_status, lifecycle, fidelity, transcript_path, first_seen, last_seen
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'live', ?, ?, ?, ?)
+    live_status, lifecycle, fidelity, transcript_path, first_seen, last_seen, status_changed_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'live', ?, ?, ?, ?, ?)
   ON CONFLICT(key) DO UPDATE SET
     agent_kind = excluded.agent_kind,
     native_id = excluded.native_id,
@@ -51,6 +53,10 @@ const UPSERT_SESSION = `
     tab_id = excluded.tab_id,
     cwd = excluded.cwd,
     title = excluded.title,
+    status_changed_at = CASE
+      WHEN live_status IS NOT excluded.live_status OR lifecycle IS NOT 'live' THEN excluded.status_changed_at
+      ELSE status_changed_at
+    END,
     live_status = excluded.live_status,
     lifecycle = 'live',
     fidelity = excluded.fidelity,
@@ -112,7 +118,7 @@ export function applySnapshot(db: DatabaseSync, push: SnapshotPush, now: Date): 
     for (const s of reported.values()) {
       upsert.run(
         s.key, s.agent_kind, s.native_id, machine, s.pane_id, s.terminal_id, s.workspace_id, s.tab_id,
-        s.cwd, s.title, s.live_status, s.fidelity, s.transcript_path, nowIso, nowIso,
+        s.cwd, s.title, s.live_status, s.fidelity, s.transcript_path, nowIso, nowIso, nowIso,
       );
     }
     const restart = db.prepare('UPDATE sessions SET first_seen = ?, predecessor_key = NULL WHERE key = ?');
@@ -127,8 +133,8 @@ export function applySnapshot(db: DatabaseSync, push: SnapshotPush, now: Date): 
         )
         .all(machine) as Array<{ key: string; terminal_id: string }>
     ).filter((r) => !reported.has(r.key));
-    const endSession = db.prepare(`UPDATE sessions SET lifecycle = 'ended' WHERE key = ?`);
-    for (const r of ended) endSession.run(r.key);
+    const endSession = db.prepare(`UPDATE sessions SET lifecycle = 'ended', status_changed_at = ? WHERE key = ?`);
+    for (const r of ended) endSession.run(nowIso, r.key);
 
     // 5. A native session of the same agent kind on the terminal of a live pending session is that
     //    session, now identified.
@@ -145,7 +151,7 @@ export function applySnapshot(db: DatabaseSync, push: SnapshotPush, now: Date): 
       `UPDATE sessions SET ignored = 1 WHERE key = ? AND EXISTS (SELECT 1 FROM sessions WHERE key = ? AND ignored = 1)`,
     );
     const markMerged = db.prepare(
-      `UPDATE sessions SET merged_into = ?, lifecycle = 'ended' WHERE key = ?`,
+      `UPDATE sessions SET merged_into = ?, lifecycle = 'ended', status_changed_at = ? WHERE key = ?`,
     );
     // The pending session's predecessor is the native session's, unless it already has one (R10).
     const inheritPredecessor = db.prepare(
@@ -162,7 +168,7 @@ export function applySnapshot(db: DatabaseSync, push: SnapshotPush, now: Date): 
       dropLinks.run(pending); // leftovers link a project the native key is already linked to; the native row wins
       moveQuestions.run(s.key, pending);
       carryIgnored.run(s.key, pending);
-      markMerged.run(s.key, pending);
+      markMerged.run(s.key, nowIso, pending);
       inheritPredecessor.run(pending, s.key);
       livePending.delete(pending);
       merged.add(pending);
@@ -178,8 +184,11 @@ export function applySnapshot(db: DatabaseSync, push: SnapshotPush, now: Date): 
     }
 
     // 6. Purged transcripts (only this machine's sessions, any lifecycle).
-    const purge = db.prepare(`UPDATE sessions SET lifecycle = 'purged' WHERE key = ? AND machine = ?`);
-    for (const key of push.purged) purge.run(key, machine);
+    const purge = db.prepare(
+      `UPDATE sessions SET lifecycle = 'purged', status_changed_at = ?
+       WHERE key = ? AND machine = ? AND lifecycle IS NOT 'purged'`,
+    );
+    for (const key of push.purged) purge.run(nowIso, key, machine);
   });
 }
 
