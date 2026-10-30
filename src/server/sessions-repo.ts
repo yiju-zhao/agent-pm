@@ -140,6 +140,10 @@ export function applySnapshot(db: DatabaseSync, push: SnapshotPush, now: Date): 
     const moveLinks = db.prepare('UPDATE OR IGNORE contributions SET session_key = ? WHERE session_key = ?');
     const dropLinks = db.prepare('DELETE FROM contributions WHERE session_key = ?');
     const moveQuestions = db.prepare('UPDATE questions SET session_key = ? WHERE session_key = ?');
+    // An ignore on the pending session carries over; an ignore the native session already has is never cleared.
+    const carryIgnored = db.prepare(
+      `UPDATE sessions SET ignored = 1 WHERE key = ? AND EXISTS (SELECT 1 FROM sessions WHERE key = ? AND ignored = 1)`,
+    );
     const markMerged = db.prepare(
       `UPDATE sessions SET merged_into = ?, lifecycle = 'ended' WHERE key = ?`,
     );
@@ -157,6 +161,7 @@ export function applySnapshot(db: DatabaseSync, push: SnapshotPush, now: Date): 
       moveLinks.run(s.key, pending);
       dropLinks.run(pending); // leftovers link a project the native key is already linked to; the native row wins
       moveQuestions.run(s.key, pending);
+      carryIgnored.run(s.key, pending);
       markMerged.run(s.key, pending);
       inheritPredecessor.run(pending, s.key);
       livePending.delete(pending);

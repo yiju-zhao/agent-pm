@@ -321,6 +321,34 @@ test('nothing is left behind under the pending key after a merge, and a snapshot
   expect(db.prepare('SELECT count(*) AS n FROM questions WHERE session_key = ?').get(P)).toEqual({ n: 0 });
 });
 
+test('an ignored pending session makes its native session ignored when they merge', () => {
+  const P = 'pending:laptop:term_1';
+  applySnapshot(db, push('laptop', [session(P, 'term_1')]), t0);
+  db.prepare('UPDATE sessions SET ignored = 1 WHERE key = ?').run(P);
+
+  applySnapshot(db, push('laptop', [session(Y, 'term_1')]), t1);
+
+  expect(row(Y)).toMatchObject({ ignored: 1 });
+});
+
+test('a pending session that is not ignored leaves the native ignored flag as it was', () => {
+  const P = 'pending:laptop:term_1';
+  applySnapshot(db, push('laptop', [session(P, 'term_1')]), t0);
+  applySnapshot(db, push('laptop', [session(Y, 'term_1')]), t1);
+  expect(row(Y)).toMatchObject({ ignored: 0 });
+
+  // A native session the user already ignored stays ignored when an unignored pending session merges into it.
+  const Z = 'codex:ffffffff-6666-4666-8666-666666666666';
+  applySnapshot(db, push('laptop', [session(Z, 'term_2')]), t1);
+  db.prepare('UPDATE sessions SET ignored = 1 WHERE key = ?').run(Z);
+  applySnapshot(db, push('laptop', []), t2);
+  const P2 = 'pending:laptop:term_2';
+  applySnapshot(db, push('laptop', [session(P2, 'term_2')]), new Date('2026-10-29T10:00:30.000Z'));
+  applySnapshot(db, push('laptop', [session(Z, 'term_2')]), new Date('2026-10-29T10:00:40.000Z'));
+  expect(row(P2)).toMatchObject({ merged_into: Z });
+  expect(row(Z)).toMatchObject({ ignored: 1 });
+});
+
 test('a pending session of another agent kind keeps its contributions', () => {
   const P = 'pending:laptop:term_1';
   applySnapshot(db, push('laptop', [session(P, 'term_1')]), t0); // pending is a codex session
