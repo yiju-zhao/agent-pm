@@ -16,10 +16,12 @@ export function readFeedState(db: DatabaseSync, now: Date, status: SchedulerStat
   const { m } = db.prepare('SELECT MAX(id) AS m FROM events').get() as { m: number | null };
   const q = db
     .prepare(
-      `SELECT COUNT(*) AS n, COALESCE(SUM(status = 'pending'), 0) AS pending, MAX(rowid) AS last, MAX(resolved_at) AS resolved
+      // `evidence` grows when the same question is asked again (askUser's dedupe path), which writes nothing else.
+      `SELECT COUNT(*) AS n, COALESCE(SUM(status = 'pending'), 0) AS pending, MAX(rowid) AS last, MAX(resolved_at) AS resolved,
+              COALESCE(SUM(CASE WHEN status = 'pending' THEN length(evidence) END), 0) AS evidence
        FROM questions`,
     )
-    .get() as { n: number; pending: number; last: number | null; resolved: string | null };
+    .get() as { n: number; pending: number; last: number | null; resolved: string | null; evidence: number };
   const sessions = db
     .prepare('SELECT key, live_status, lifecycle, ignored, merged_into, title, machine FROM sessions ORDER BY key')
     .all()
@@ -30,7 +32,7 @@ export function readFeedState(db: DatabaseSync, now: Date, status: SchedulerStat
     .map((r) => r.label);
   return {
     eventId: m ?? 0,
-    questions: `${q.n}|${q.pending}|${q.last ?? ''}|${q.resolved ?? ''}`,
+    questions: `${q.n}|${q.pending}|${q.last ?? ''}|${q.resolved ?? ''}|${q.evidence}`,
     sessions: JSON.stringify({ sessions, offline }),
     status: JSON.stringify(status),
   };

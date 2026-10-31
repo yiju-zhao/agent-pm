@@ -10,6 +10,7 @@ import {
   FALLBACK_MS,
   Scheduler,
   SESSION_COOLDOWN_MS,
+  STATUS_CACHE_MS,
   TICK_MS,
 } from '../../src/understand/scheduler.ts';
 import { openDb } from '../../src/server/db.ts';
@@ -929,6 +930,47 @@ test('backfill progress counts sessions with backfill chunks and those fully dig
     last_digest_at: NOW,
     last_curate_at: null,
   });
+});
+
+test('the chunk counts in the status are cached for STATUS_CACHE_MS; the cheap fields stay live', async () => {
+  addSession(A);
+  addSession(B);
+  addChunk(A, BIG, { backfill: 1 });
+  const { runner } = fakeRunner(() => fail('rate_limit'));
+  const s = scheduler(runner);
+  expect(s.status().backfill).toEqual({ sessions_total: 1, sessions_done: 0 });
+  expect(s.status().waiting_sessions).toBe(0);
+
+  // New chunks and a new digest arrive; within the TTL the chunk scans are not run again.
+  addChunk(B, BIG, { backfill: 1 });
+  addChunk(B, BIG);
+  advance(STATUS_CACHE_MS - 1);
+  addDigest();
+  let status = s.status();
+  expect(status.backfill).toEqual({ sessions_total: 1, sessions_done: 0 });
+  expect(status.waiting_sessions).toBe(0);
+  // Not from a chunk scan, so live.
+  expect(status.uncurated_digests).toBe(1);
+  expect(status.last_digest_at).toBe(iso(clock));
+
+  advance(1);
+  status = s.status();
+  expect(status.backfill).toEqual({ sessions_total: 2, sessions_done: 0 });
+  expect(status.waiting_sessions).toBe(1);
+});
+
+test('every tick drops the cached chunk counts, so the status after a tick is fresh', async () => {
+  addSession(A);
+  addChunk(A, BIG, { backfill: 1 });
+  // The machine's sessions are idle well past the debounce; a pausing failure keeps the tick from changing the counts itself.
+  const { runner } = fakeRunner(() => fail('rate_limit'));
+  const s = scheduler(runner);
+  expect(s.status().backfill.sessions_total).toBe(1);
+  addSession(B);
+  addChunk(B, BIG, { backfill: 1 });
+  expect(s.status().backfill.sessions_total).toBe(1);
+  await s.tick();
+  expect(s.status().backfill.sessions_total).toBe(2);
 });
 
 test('the disabled status has every field empty', () => {

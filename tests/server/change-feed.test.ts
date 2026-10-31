@@ -119,6 +119,24 @@ test('question created and answered each emit questions', () => {
   expect(types(diffFeed(db, s1, s2))).toContain('questions');
 });
 
+test('the same proposal again only adds evidence to the pending question, and that emits questions too', () => {
+  const p = createProject();
+  const propose = (evidence: string) =>
+    execute(db, deps, {
+      op: 'transition_stage',
+      args: { project: p.id, stage: 'done' },
+      actor: 'ai:curator',
+      reason: 'r',
+      evidence: [evidence],
+    }) as unknown as { status: string; question_ids: string[] };
+  const first = propose('chunk:1');
+  const s1 = read();
+  const second = propose('chunk:2');
+  expect(second.question_ids).toEqual(first.question_ids);
+  expect(db.prepare('SELECT COUNT(*) AS n FROM questions').get()).toEqual({ n: 1 });
+  expect(types(diffFeed(db, s1, read()))).toContain('questions');
+});
+
 test('session status change emits sessions', () => {
   snapshot('idle');
   const s0 = read();

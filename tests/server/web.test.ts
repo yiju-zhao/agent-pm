@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { ServerConfig } from '../../src/server/config.ts';
 import { openDb } from '../../src/server/db.ts';
 import { createApp } from '../../src/server/http.ts';
@@ -34,6 +34,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   db.close();
   rmSync(root, { recursive: true, force: true });
 });
@@ -67,6 +68,15 @@ test('missing assets and paths outside webDir/assets are 404', async () => {
     expect(res.status, path).toBe(404);
     expect(await res.text(), path).not.toContain('secret');
   }
+});
+
+test('an asset path the file system cannot read (a NUL byte, a name too long) is 404, not a 500 with a stack trace', async () => {
+  const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+  for (const path of ['/assets/%00', '/assets/app-abc.js%00.png', `/assets/${'a'.repeat(5000)}.js`]) {
+    const res = await app().request(path);
+    expect(res.status, path).toBe(404);
+  }
+  expect(logged).not.toHaveBeenCalled();
 });
 
 test('without a built web dir / is 503 with the build hint', async () => {

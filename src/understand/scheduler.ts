@@ -14,6 +14,11 @@ export type { SchedulerStatus } from './status.ts';
 
 /** How often the timer started by `start()` ticks. */
 export const TICK_MS = 30000;
+/**
+ * How long `status()` reuses the counts that scan `chunks` (seconds-to-minutes stale is fine for a status line, and
+ * the change feed asks every second). Every tick also drops them, since a tick is what changes them most.
+ */
+export const STATUS_CACHE_MS = 10000;
 /** A session is digested this long after it stopped working (went idle, done, blocked, ended or offline). */
 export const DEBOUNCE_MS = 120000;
 /** A session that keeps working is digested anyway once its oldest unprocessed chunk is this old. */
@@ -64,6 +69,8 @@ function nextBackoff(current: number): number {
 }
 
 type Candidate = { key: string; oldest: string };
+/** The part of the status that scans `chunks`, with the time (ms) it was read at. */
+type ChunkCounts = { at: number; waiting_sessions: number; backfill: SchedulerStatus['backfill'] };
 type SessionWithHeartbeat = SessionRow & { machine_heartbeat: string | null };
 type Picked = { window: DigestWindow; force: boolean };
 /** What the tick in flight is working on, so an exception can be counted against it. */
@@ -105,6 +112,8 @@ export class Scheduler {
   private curateWaitUntil: number | null = null;
   /** The session the last backfill window came from; the next one starts after it. */
   private backfillCursor: string | null = null;
+  /** See `STATUS_CACHE_MS`. */
+  private chunkCounts: ChunkCounts | null = null;
 
   constructor(db: DatabaseSync, deps: DomainDeps, runner: LlmRunner, models: { digest: string; curate: string }) {
     this.db = db;
@@ -152,6 +161,7 @@ export class Scheduler {
         this.running = null;
         this.work = null;
         this.inFlight = null;
+        this.chunkCounts = null;
       });
     this.inFlight = run;
     return run;
@@ -186,17 +196,35 @@ export class Scheduler {
     const paused = this.pausedUntil !== null && now < this.pausedUntil;
     const scalar = (sql: string): number => (this.db.prepare(sql).get() as { n: number }).n;
     const latest = (sql: string): string | null => (this.db.prepare(sql).get() as { at: string | null }).at;
+    const counts = this.readChunkCounts(now);
     return {
       enabled: true,
       paused_until: paused ? new Date(this.pausedUntil!).toISOString() : null,
       pause_reason: paused ? this.pauseReason : null,
       last_error: this.lastError,
       running: this.running,
+      waiting_sessions: counts.waiting_sessions,
+      uncurated_digests: scalar('SELECT count(*) AS n FROM digests WHERE curated = 0'),
+      backfill: { ...counts.backfill },
+      last_digest_at: latest('SELECT max(created_at) AS at FROM digests WHERE skipped = 0'),
+      last_curate_at: latest(`SELECT max(ts) AS at FROM llm_runs WHERE role = 'curate' AND ok = 1`),
+    };
+  }
+
+  /**
+   * The status counts that scan `chunks` (backfill ones have no index: hundreds of ms on a big history), reused for
+   * `STATUS_CACHE_MS` or until the next tick ends.
+   */
+  private readChunkCounts(now: number): ChunkCounts {
+    const cached = this.chunkCounts;
+    if (cached !== null && now >= cached.at && now - cached.at < STATUS_CACHE_MS) return cached;
+    const scalar = (sql: string): number => (this.db.prepare(sql).get() as { n: number }).n;
+    const counts: ChunkCounts = {
+      at: now,
       waiting_sessions: scalar(
         `SELECT count(DISTINCT c.session_key) AS n FROM chunks c LEFT JOIN sessions s ON s.key = c.session_key
          WHERE c.digested = 0 AND c.backfill = 0 AND coalesce(s.ignored, 0) = 0`,
       ),
-      uncurated_digests: scalar('SELECT count(*) AS n FROM digests WHERE curated = 0'),
       // Ignored sessions are never digested, so they are left out like in `waiting_sessions`.
       backfill: {
         sessions_total: scalar(
@@ -211,9 +239,9 @@ export class Scheduler {
            )`,
         ),
       },
-      last_digest_at: latest('SELECT max(created_at) AS at FROM digests WHERE skipped = 0'),
-      last_curate_at: latest(`SELECT max(ts) AS at FROM llm_runs WHERE role = 'curate' AND ok = 1`),
     };
+    this.chunkCounts = counts;
+    return counts;
   }
 
   // ---- one tick --------------------------------------------------------------------------------------------------

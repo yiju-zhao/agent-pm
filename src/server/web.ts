@@ -16,7 +16,7 @@ const ASSET_TYPES: Record<string, string> = {
 /**
  * `GET /` answers with `webDir/index.html` (never cached, so a rebuild shows up on reload), or 503 with a build hint when
  * `webDir` is null or holds no page yet. `GET /assets/*` answers with files under `webDir/assets` (cached for good: the
- * build puts a hash in every name); a path that resolves outside that directory is 404.
+ * build puts a hash in every name); a path that resolves outside that directory, or that cannot be read for any reason, is 404.
  */
 export function mountWeb(app: Hono, webDir: string | null): void {
   app.get('/', async (c) => {
@@ -35,10 +35,17 @@ export function mountWeb(app: Hono, webDir: string | null): void {
     } catch {
       return c.notFound();
     }
+    // A NUL byte never names a file (and makes readFile throw rather than miss).
+    if (rel.includes('\0')) return c.notFound();
     const file = resolve(assetsDir, rel);
     if (!file.startsWith(assetsDir + sep)) return c.notFound();
-    const data = await readFileOrNull(file);
-    if (data === null) return c.notFound();
+    let data: Uint8Array<ArrayBuffer>;
+    try {
+      data = new Uint8Array(await readFile(file));
+    } catch {
+      // Whatever the file system says (missing, a directory, a name too long, ...), the client asked for no asset we have.
+      return c.notFound();
+    }
     return c.body(data, 200, {
       'Content-Type': ASSET_TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream',
       'Cache-Control': 'public, max-age=31536000, immutable',
