@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import type { QuestionOptionView } from '../../src/domain/read.ts';
 import { OP_SCHEMAS } from '../../src/domain/ops.ts';
-import { OP_LABEL, STATUS_LABEL, actorLabel, describeOption, opLabel, relTime, shortDate, shortTime, statusClass } from '../../web/src/format.ts';
+import { OP_LABEL, STATUS_LABEL, actorLabel, describeOption, middleEllipsis, opLabel, relTime, shortDate, shortTime, statusClass } from '../../web/src/format.ts';
 
 test('STATUS_LABEL names every status in Chinese', () => {
   expect(STATUS_LABEL).toEqual({
@@ -143,4 +143,20 @@ test('describeOption: a text_arg says where the typed text goes', () => {
 test('describeOption: an operation without args and an unknown operation name still read', () => {
   expect(describeOption({ label: 'x', has_op: true, op: 'revert_event', args: null })).toBe('撤销');
   expect(describeOption({ label: 'x', has_op: true, op: 'future_op' as never, args: { a: 'b' } })).toBe('future_op a=b');
+});
+
+test('middleEllipsis leaves short text alone and cuts a long one in the middle, keeping the end', () => {
+  expect(middleEllipsis('/srv/app', 20)).toBe('/srv/app');
+  expect(middleEllipsis('a'.repeat(20), 20)).toBe('a'.repeat(20));
+  const cut = middleEllipsis('/Users/eason/Documents/nasa718/herdr-pm-web', 24);
+  expect(Array.from(cut)).toHaveLength(24);
+  expect(cut.startsWith('/Users/')).toBe(true);
+  expect(cut.endsWith('herdr-pm-web')).toBe(true);
+  expect(cut).toContain('…');
+});
+
+test('middleEllipsis counts characters, so an emoji or Chinese is not cut in half', () => {
+  const cut = middleEllipsis('/项目/😀😀😀😀😀😀😀😀😀😀/最后一层目录', 10);
+  expect(Array.from(cut)).toHaveLength(10);
+  expect(cut).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/);
 });

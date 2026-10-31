@@ -1073,3 +1073,81 @@ main {
   background: #f6f6f6;
   font-size: 12px;
 }
+
+/* ---- session page ------------------------------------------------------------------------------------------ */
+
+.machine-group {
+  margin-bottom: 14px;
+}
+
+.sess-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sess-row {
+  margin-bottom: 6px;
+  padding: 8px 12px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+/* A session that is not being tracked fades; its buttons stay readable. */
+.sess-row.ignored {
+  opacity: 0.55;
+}
+
+.sess-main,
+.sess-meta,
+.sess-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.sess-main .sess {
+  margin: 0;
+}
+
+.sess-title {
+  min-width: 0;
+  font-weight: 600;
+}
+
+.sess-main .tag {
+  margin-right: 0;
+}
+
+.sess-meta {
+  margin-top: 2px;
+}
+
+.cwd {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+}
+
+.sess-links {
+  margin-top: 6px;
+}
+
+/* A linked project: its name and the × that takes the link away. */
+.tag.linked {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 0;
+  padding-right: 2px;
+  background: var(--accent-soft);
+}
+
+.tag.linked a {
+  min-width: 0;
+}
+
+.tag.linked .danger {
+  padding: 0 5px;
+  font-size: 12px;
+}

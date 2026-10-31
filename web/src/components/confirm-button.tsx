@@ -9,7 +9,18 @@ export const CONFIRM_MS = 3000;
  * browser's confirm dialog. A refusal is `onConfirm`'s to show (it should not leave a rejection to us): here it only
  * ends the waiting.
  */
-export function ConfirmButton({ label, confirmLabel, onConfirm }: { label: string; confirmLabel: string; onConfirm(): Promise<void> }) {
+export function ConfirmButton({
+  label,
+  confirmLabel,
+  title,
+  onConfirm,
+}: {
+  label: string;
+  confirmLabel: string;
+  /** A hint on hover, for a button whose label (a `×`) does not say what it does. */
+  title?: string;
+  onConfirm(): Promise<void>;
+}) {
   const [asked, setAsked] = useState(false);
   const [busy, setBusy] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -37,7 +48,7 @@ export function ConfirmButton({ label, confirmLabel, onConfirm }: { label: strin
   };
 
   return (
-    <button type="button" className={asked ? 'danger asked' : 'danger'} disabled={busy} onClick={click}>
+    <button type="button" className={asked ? 'danger asked' : 'danger'} title={title} disabled={busy} onClick={click}>
       {asked ? confirmLabel : label}
     </button>
   );

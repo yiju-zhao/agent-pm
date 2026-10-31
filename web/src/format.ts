@@ -112,3 +112,16 @@ export function describeOption(o: QuestionOptionView): string {
   const text = [opLabel(o.op), ...args].join(' ');
   return o.text_arg === undefined ? text : `${text}（填入 ${o.text_arg}）`;
 }
+
+/**
+ * `text` cut to at most `max` characters by leaving out the middle (`/Users/eas…/herdr-pm-web`): the start says where
+ * it is and the end says what it is, and a path needs both. Counted in characters, so nothing is cut in half.
+ */
+export function middleEllipsis(text: string, max: number): string {
+  const chars = Array.from(text);
+  if (chars.length <= max) return text;
+  const room = Math.max(max - 1, 0);
+  const head = Math.ceil(room * 0.4);
+  const tail = room - head;
+  return `${chars.slice(0, head).join('')}…${tail === 0 ? '' : chars.slice(-tail).join('')}`;
+}

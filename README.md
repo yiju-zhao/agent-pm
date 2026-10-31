@@ -201,7 +201,7 @@ journalctl --user -u herdr-pm-collector -n 20     # 不应出现 "herdr api snap
 
 ### 升级
 
-改了代码后：笔记本上重新 `scripts/build-collector.sh`，把新二进制覆盖到各机器的 `~/.local/bin/herdr-pm`，然后重启服务（macOS：`launchctl kickstart -k "gui/$(id -u)/ai.herdr-pm.collector"`；Linux：`systemctl --user restart herdr-pm-collector`）。中心服务 `git pull` 后同样 `kickstart -k`。
+改了代码后：笔记本上重新 `scripts/build-collector.sh`，把新二进制覆盖到各机器的 `~/.local/bin/herdr-pm`，然后重启服务（macOS：`launchctl kickstart -k "gui/$(id -u)/ai.herdr-pm.collector"`；Linux：`systemctl --user restart herdr-pm-collector`）。中心服务 `git pull` 后同样 `kickstart -k`；网页有改动时先 `npm run build:web`（见「网页界面（计划 4）」）。
 
 ## 验证
 
@@ -378,6 +378,45 @@ curl -s http://<mac-mini>:7718/mcp -H "Authorization: Bearer <mcpToken>" \
   -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
+
+## 网页界面（计划 4）
+
+中心服务在 `/` 托管一个网页：首页按优先级列出项目（卡片上有进度条、在跑的 session、阻塞和待你回答的问题），右栏是"需要你"和"待归属的 session"；点项目进详情页（改字段、里程碑、todo、阻塞、决策、时间线、事件日志，改过的字段会被锁定，AI 之后只能提议）；`Session` 页按机器列出全部 session，可以关联到项目、取消关联、不追踪。页面里 AI 写的文字一律按纯文本显示。
+
+**构建**：网页是 `web/` 下的 React + Vite 项目，要先构建，服务才有页面可托管（没构建时 `/` 会提示怎么构建）：
+
+```bash
+npm ci
+npm run build:web      # 写到 dist/web，已在 .gitignore 里
+```
+
+部署到 mac-mini 之后、重启服务之前都要跑一次 `npm run build:web`（`git pull` 带来了网页的改动，`dist/web` 才会更新；只重启不构建，用户看到的还是旧页面）。构建完再 `launchctl kickstart -k "gui/$(id -u)/ai.herdr-pm.server"`。
+
+**使用**：
+
+- 浏览器打开 `http://<中心机器>:<port>/`（`<port>` 是配置里的 `port`，通过 Tailscale 访问就是 `http://<mac-mini 的 Tailscale 名或 IP>:<port>/`）。读页面不需要 token。
+- 第一次做写操作（改字段、回答问题、关联 session……）时页面会弹出输入框，填配置里的 `userToken`；它存在这个浏览器的 `localStorage` 里（`herdr-pm.userToken`），不会发给别的地方。也可以随时点顶栏的"设置 token"换掉或清除。token 填错了（服务返回 401），页面会再弹出输入框。
+- 页面通过 `WS /stream` 自动刷新：服务只推"哪里变了"的信号，页面收到后重新读对应的接口，所以别的地方（curator、`curl`、另一个浏览器）做的改动几秒内就会出现在页面上，不用手动刷新。顶栏的点表示这条连接的状态：绿色 `已连接`，黄色 `重连中`（服务重启或网络断了，会按 1、2、4、8、10 秒的间隔自动重连，连上后把所有数据重新读一遍）。
+- 页面是用 `http://` 打开的（Tailscale 下没有 HTTPS），浏览器不开放剪贴板接口时，点 session 标签复制短 ID 会退回到旧的复制方式；两种都不行时，提示条里会直接显示短 ID，手动选中复制。
+- 宽度小于 900px（手机）时右栏排到主列表下面，页面不会出现横向滚动。
+
+**开发**：
+
+```bash
+node src/cli.ts server --config config/server.local.json   # 先起一个监听 8787 的服务（配置里 "port": 8787）
+npm run dev:web                                            # Vite 开发服务器，热更新；API 和 /stream 转发到 127.0.0.1:8787
+```
+
+**演示数据**：想不接任何采集器和模型就看看页面，用 `seed:demo` 生成一个演示库（`<dbPath>` 已存在时报错退出，不会覆盖已有数据）：
+
+```bash
+npm run seed:demo /tmp/demo.db
+# 再写一份配置：{"port": 8787, "dbPath": "/tmp/demo.db", "userToken": "<至少 16 个字符>", "mcpToken": "<另一个至少 16 个字符>",
+#                "collectors": {}, "understanding": {"enabled": false}}
+node src/cli.ts server --config /tmp/demo-server.json
+```
+
+演示库里有 5 个项目（P0 构建中、AI 建的新 idea、休眠中、已完成、已搁置）、6 个 session（2 台机器，运行中 / 空闲 / 等你操作 / 已结束都有，其中 1 个只有屏幕）、3 个待回答的问题，以及一条被你撤销的 AI 改动。其中的 session 是静态数据，没有采集器在跟，3 分钟后会显示为离线。
 
 ## 部署验收（计划 1 完成的标志）
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import type { ProjectCard, ProjectDetail, QuestionView } from '../../../src/domain/read.ts';
 import { PRIORITIES } from '../../../src/shared/vocab.ts';
 import { apiSend, errorText } from '../api.ts';
@@ -13,6 +13,7 @@ import { StageControl } from '../components/stage-control.tsx';
 import { Timeline } from '../components/timeline.tsx';
 import { relTime, shortDate } from '../format.ts';
 import { useApi } from '../use-api.ts';
+import { useNow } from '../use-now.ts';
 import { useWrite } from '../use-write.ts';
 
 type ProjectField = 'summary' | 'why' | 'done_criteria';
@@ -23,19 +24,6 @@ const BIG_PICTURE: Array<{ field: ProjectField; label: string }> = [
   { field: 'why', label: '为什么' },
   { field: 'done_criteria', label: '做完的标准' },
 ];
-
-/** How often the timeline's idea of "now" moves on, so the bar of a session that is still going on keeps growing. */
-const CLOCK_MS = 60_000;
-
-/** The current time, read again every minute until the page goes away. */
-function useNow(): Date {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), CLOCK_MS);
-    return () => clearInterval(timer);
-  }, []);
-  return now;
-}
 
 type PageProps = { project: ProjectDetail; reload(): void };
 

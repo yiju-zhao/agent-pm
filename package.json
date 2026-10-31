@@ -4,6 +4,7 @@
   "scripts": {
     "build:web": "vite build",
     "dev:web": "vite",
+    "seed:demo": "node scripts/seed-demo.ts",
     "typecheck": "tsc && tsc -p web",
     "test": "vitest run"
   },

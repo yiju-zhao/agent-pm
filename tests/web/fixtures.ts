@@ -9,6 +9,7 @@ import type {
   SessionTag,
   TodoRow,
 } from '../../src/domain/read.ts';
+import type { SessionListItem } from '../../src/server/http.ts';
 
 // Read-model values for the page tests: a quiet, live, mid-build project unless a test says otherwise.
 
@@ -170,6 +171,37 @@ export function eventView(over: Partial<EventView> = {}): EventView {
     reverts: null,
     reverted_by: null,
     is_veto: false,
+    ...over,
+  };
+}
+
+/** One entry of `GET /sessions`: a live, full-fidelity Claude session on gx10-090e that no project claims. */
+export function sessionItem(over: Partial<SessionListItem> = {}): SessionListItem {
+  return {
+    key: 'claude:abc',
+    agent_kind: 'claude',
+    native_id: 'abc',
+    machine: 'gx10-090e',
+    pane_id: 'p1',
+    terminal_id: 't1',
+    workspace_id: 'w1',
+    tab_id: 'tab1',
+    cwd: '/home/eason/projects/herdr-pm',
+    title: '接入 cannbench 数据',
+    live_status: 'working',
+    lifecycle: 'live',
+    fidelity: 'full',
+    transcript_path: null,
+    predecessor_key: null,
+    merged_into: null,
+    ignored: 0,
+    first_seen: '2026-10-28T08:00:00.000Z',
+    last_seen: '2026-10-30T11:58:00.000Z',
+    status_changed_at: null,
+    short_id: '0d67da1f',
+    effective_status: 'working',
+    chunk_count: 2,
+    linked_projects: [],
     ...over,
   };
 }
