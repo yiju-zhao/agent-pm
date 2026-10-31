@@ -1,4 +1,14 @@
-import type { BlockerRow, DecisionRow, MilestoneRow, ProjectCard, ProjectDetail, QuestionView, SessionTag, TodoRow } from '../../src/domain/read.ts';
+import type {
+  BlockerRow,
+  DecisionRow,
+  EventView,
+  MilestoneRow,
+  ProjectCard,
+  ProjectDetail,
+  QuestionView,
+  SessionTag,
+  TodoRow,
+} from '../../src/domain/read.ts';
 
 // Read-model values for the page tests: a quiet, live, mid-build project unless a test says otherwise.
 
@@ -122,4 +132,44 @@ export function card(over: Partial<ProjectCard> = {}): ProjectCard {
 /** A project as the detail page reads it: the card plus nothing in any list unless a test fills it. */
 export function detail(over: Partial<ProjectDetail> = {}): ProjectDetail {
   return { ...card(), milestones: [], todos: [], decisions: [], blockers: [], contributions: [], events: [], tombstones: [], ...over };
+}
+
+/** A session's contribution to the project as the detail carries it: the session is `tag()` unless a test says `null` (purged). */
+export function contribution(over: Partial<ProjectDetail['contributions'][number]> = {}): ProjectDetail['contributions'][number] {
+  return {
+    id: 'c_1',
+    session_key: 'claude:abc',
+    project_id: 'p_1',
+    milestone_id: null,
+    summary: null,
+    ts_start: '2026-10-28T12:00:00.000Z',
+    ts_end: '2026-10-29T12:00:00.000Z',
+    confidence: null,
+    actor: 'ai:curator',
+    created_at: '2026-10-29T12:30:00.000Z',
+    session: tag(),
+    ...over,
+  };
+}
+
+/** One entry of the event log: a plain edit by the user that nothing has reverted. */
+export function eventView(over: Partial<EventView> = {}): EventView {
+  return {
+    id: 1,
+    occurred_at: '2026-10-29T08:00:00.000Z',
+    recorded_at: '2026-10-29T08:00:00.000Z',
+    actor: 'user',
+    op: 'update_project',
+    entity: 'project:p_1',
+    args: {},
+    before: null,
+    after: null,
+    reason: null,
+    evidence: [],
+    question_id: null,
+    reverts: null,
+    reverted_by: null,
+    is_veto: false,
+    ...over,
+  };
 }

@@ -1,14 +1,16 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ProjectCard, ProjectDetail, QuestionView } from '../../../src/domain/read.ts';
 import { PRIORITIES } from '../../../src/shared/vocab.ts';
 import { apiSend, errorText } from '../api.ts';
 import type { ApiError } from '../api.ts';
 import { Fold, Section } from '../components/blocks.tsx';
 import { EditableText, LockMark } from '../components/editable-text.tsx';
+import { EventLog } from '../components/event-log.tsx';
 import { BlockerList, DecisionList, MilestoneList, TodoList } from '../components/items.tsx';
 import { projectHref } from '../components/project-card.tsx';
 import { QuestionCard } from '../components/question-card.tsx';
 import { StageControl } from '../components/stage-control.tsx';
+import { Timeline } from '../components/timeline.tsx';
 import { relTime, shortDate } from '../format.ts';
 import { useApi } from '../use-api.ts';
 import { useWrite } from '../use-write.ts';
@@ -21,6 +23,19 @@ const BIG_PICTURE: Array<{ field: ProjectField; label: string }> = [
   { field: 'why', label: '为什么' },
   { field: 'done_criteria', label: '做完的标准' },
 ];
+
+/** How often the timeline's idea of "now" moves on, so the bar of a session that is still going on keeps growing. */
+const CLOCK_MS = 60_000;
+
+/** The current time, read again every minute until the page goes away. */
+function useNow(): Date {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), CLOCK_MS);
+    return () => clearInterval(timer);
+  }, []);
+  return now;
+}
 
 type PageProps = { project: ProjectDetail; reload(): void };
 
@@ -137,12 +152,13 @@ function Tombstones({ tombstones }: { tombstones: ProjectDetail['tombstones'] })
   );
 }
 
-/** The project page (spec 9.2): the big picture, the stage, and the milestones, todos, blockers and decisions, all editable. */
+/** The project page (spec 9.2): the big picture, the stage, the milestones, todos, blockers and decisions (all editable), then who took part and what happened. */
 export function ProjectPage({ id }: { id: string }) {
   const encoded = encodeURIComponent(id);
   const project = useApi<ProjectDetail>(`/projects/${encoded}`, [`project:${id}`]);
   const questions = useApi<QuestionView[]>(`/questions?status=pending&project_id=${encoded}`, ['questions']);
   const projects = useApi<ProjectCard[]>('/projects', ['projects']);
+  const now = useNow();
 
   const titles = useMemo(() => new Map((projects.data ?? []).map((p) => [p.id, p.title])), [projects.data]);
   const mergeTargets = useMemo(() => (projects.data ?? []).map((p) => ({ id: p.id, title: p.title })), [projects.data]);
@@ -185,11 +201,11 @@ export function ProjectPage({ id }: { id: string }) {
         <aside className="side">
           <BlockerList project={data} reload={reload} />
           <DecisionList project={data} reload={reload} />
-          <Tombstones tombstones={data.tombstones} />
         </aside>
       </div>
-      <section data-slot="timeline" />
-      <section data-slot="events" />
+      <Timeline project={data} now={now} />
+      <EventLog events={data.events} reload={reload} />
+      <Tombstones tombstones={data.tombstones} />
     </main>
   );
 }

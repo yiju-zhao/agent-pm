@@ -7,7 +7,8 @@ import { ToastProvider } from '../../web/src/components/toast.tsx';
 import { ProjectPage } from '../../web/src/pages/project.tsx';
 import type { Topic } from '../../web/src/stream.ts';
 import { StreamContext } from '../../web/src/use-api.ts';
-import { blocker, card, decision, detail, milestone, question, todo } from './fixtures.ts';
+import { shortTime } from '../../web/src/format.ts';
+import { blocker, card, contribution, decision, detail, eventView, milestone, question, tag, todo } from './fixtures.ts';
 
 const fetchMock = vi.fn<typeof fetch>();
 let listeners: Set<(topics: Topic[]) => void> = new Set();
@@ -87,6 +88,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -350,10 +352,94 @@ test('with nothing deleted there is no such fold', async () => {
   expect(screen.queryByRole('button', { name: /已删除的条目/ })).toBeNull();
 });
 
-test('the places for the timeline and the event log are there', async () => {
+test('the timeline of the sessions that took part is on the page', async () => {
+  project = detail({
+    created_at: '2026-10-26T12:00:00.000Z',
+    contributions: [contribution({ summary: '接入数据', session: tag({ effective_status: 'ended' }) })],
+  });
   await renderPage();
-  expect(document.querySelector('section[data-slot="timeline"]')).not.toBeNull();
-  expect(document.querySelector('section[data-slot="events"]')).not.toBeNull();
+  expect(within(region('参与过的 session · 1')).getByText('gx10-090e · claude · 接入数据（已结束）')).toBeTruthy();
+});
+
+test('a contribution of a session that was purged is a bar, not an error', async () => {
+  project = detail({ contributions: [contribution({ session_key: 'claude:0123456789', session: null })] });
+  await renderPage();
+  expect(within(region('参与过的 session · 1')).getByText('session 01234567（已清除）')).toBeTruthy();
+});
+
+test('the event log is on the page, newest first as the server sent them', async () => {
+  project = detail({ events: [eventView({ id: 9, op: 'transition_stage' }), eventView({ id: 8, op: 'update_project' })] });
+  await renderPage();
+  const log = region('事件日志');
+  expect(within(log).getByText('改阶段')).toBeTruthy();
+  expect(Array.from(log.querySelectorAll('li[id^="event-"]')).map((li) => li.id)).toEqual(['event-9', 'event-8']);
+});
+
+test('the timeline and the event log are below the two columns, and the deleted items fold is the last thing on the page', async () => {
+  project = detail({
+    contributions: [contribution()],
+    events: [eventView({ id: 1 })],
+    tombstones: [{ table: 'todos', id: 't_9', label: '重写调度器', deleted_at: '2026-10-25T12:00:00.000Z' }],
+  });
+  await renderPage();
+  const cols = document.querySelector('.cols') as HTMLElement;
+  const timeline = region('参与过的 session · 1');
+  const log = region('事件日志');
+  const fold = screen.getByRole('button', { name: /已删除的条目（1）/ }).closest('section') as HTMLElement;
+  const before = (a: Node, b: Node) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+  expect(before(cols, timeline)).toBe(true);
+  expect(before(timeline, log)).toBe(true);
+  expect(before(log, fold)).toBe(true);
+  expect(cols.contains(fold)).toBe(false);
+  expect(fold.parentElement?.lastElementChild).toBe(fold);
+});
+
+test('reverting an event posts it and reads the project again', async () => {
+  project = detail({ events: [eventView({ id: 7 })] });
+  await renderPage();
+  const before = reads('/projects/p_1');
+  fireEvent.click(within(region('事件日志')).getByRole('button', { name: '撤销' }));
+  fireEvent.click(within(region('事件日志')).getByRole('button', { name: '确定撤销？' }));
+  await waitFor(() => expect(reads('/projects/p_1')).toBe(before + 1));
+  expect(writesMade()).toEqual([{ url: '/events/7/revert', method: 'POST', body: undefined }]);
+});
+
+test('a refused revert is told in a toast', async () => {
+  project = detail({ events: [eventView({ id: 7 })] });
+  writes['POST /events/7/revert'] = () => json({ error: 'already_reverted', message: 'already' }, 409);
+  await renderPage();
+  fireEvent.click(within(region('事件日志')).getByRole('button', { name: '撤销' }));
+  fireEvent.click(within(region('事件日志')).getByRole('button', { name: '确定撤销？' }));
+  expect(await screen.findByText('已经撤销过了')).toBeTruthy();
+});
+
+test('the timeline clock moves on every 60 seconds and stops when the page goes away', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-30T12:00:00.000Z'));
+  const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+  const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
+  project = detail({
+    created_at: '2026-10-28T12:00:00.000Z',
+    contributions: [contribution({ ts_start: '2026-10-29T12:00:00.000Z', ts_end: null, summary: '在跑', session: tag({ effective_status: 'working' }) })],
+  });
+  const view = await renderPage();
+
+  const clock = setIntervalSpy.mock.calls.findIndex(([, delay]) => delay === 60_000);
+  expect(clock).toBeGreaterThanOrEqual(0);
+  const bar = () => screen.getByText('gx10-090e · claude · 在跑');
+  expect(bar().getAttribute('title')).toContain(`– ${shortTime('2026-10-30T12:00:00.000Z')}`);
+
+  vi.setSystemTime(new Date('2026-10-30T12:01:00.000Z'));
+  act(() => {
+    (setIntervalSpy.mock.calls[clock][0] as () => void)();
+  });
+  expect(bar().getAttribute('title')).toContain(`– ${shortTime('2026-10-30T12:01:00.000Z')}`);
+
+  const handle = setIntervalSpy.mock.results[clock].value;
+  expect(clearIntervalSpy).not.toHaveBeenCalledWith(handle);
+  view.unmount();
+  expect(clearIntervalSpy).toHaveBeenCalledWith(handle);
+  vi.useRealTimers();
 });
 
 test('a change announced for this project reads it again; one for another project does not', async () => {

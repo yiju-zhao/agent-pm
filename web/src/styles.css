@@ -905,3 +905,171 @@ main {
   background: var(--blocked);
   color: #fff;
 }
+
+/* ---- session timeline -------------------------------------------------------------------------------------- */
+
+.timeline {
+  position: relative;
+}
+
+/* The date marks. The first and the last are pulled inwards, so that they never reach past the edge of the page. */
+.tl-axis {
+  position: relative;
+  height: 16px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+  color: var(--dim);
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.tl-tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.tl-tick:first-child {
+  transform: none;
+}
+
+.tl-tick:last-child {
+  transform: translateX(-100%);
+}
+
+.tl-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tl-row {
+  position: relative;
+  height: 22px;
+  margin: 3px 0;
+  border-radius: 4px;
+  background: #f4f4f4;
+}
+
+.tl-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 22px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* statusClass() sets the dot colour on `color`; on a bar it is the background. Working is green, waiting and idle light, ended and purged grey. */
+.tl-bar.dot-working {
+  background: var(--running);
+  color: #fff;
+}
+
+.tl-bar.dot-blocked {
+  background: var(--ask-line);
+  color: #5a4500;
+}
+
+.tl-bar.dot-idle {
+  background: var(--accent-soft);
+  color: #234;
+}
+
+.tl-bar.dot-offline {
+  background: #eee;
+  color: #555;
+  -webkit-text-stroke: 0;
+}
+
+.tl-bar.st-ended,
+.tl-bar.st-purged {
+  background: #d4d4d4;
+  color: #555;
+}
+
+/* ---- event log --------------------------------------------------------------------------------------------- */
+
+.events {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.event-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  padding: 4px 0;
+  overflow-wrap: anywhere;
+}
+
+.event-row + .event-row {
+  border-top: 1px solid #f0f0f0;
+}
+
+/* Taken back by a later event: still there to read, but quieter. */
+.event-row.reverted {
+  opacity: 0.55;
+}
+
+.event-id {
+  color: var(--dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.event-op {
+  font-weight: 600;
+}
+
+.event-reason {
+  flex: 1 1 14em;
+  min-width: 0;
+}
+
+.tag.veto {
+  background: var(--p0-bg);
+  color: var(--p0-ink);
+  margin-right: 0;
+}
+
+/* A button that reads as a link, for the pointers between events and for 详情. */
+.link-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.link-btn:disabled {
+  color: var(--dim);
+}
+
+.event-detail {
+  display: flex;
+  flex: 1 0 100%;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 4px 8px;
+}
+
+.event-detail pre {
+  flex: 1 1 14em;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  padding: 6px 8px;
+  overflow-x: auto;
+  border-radius: 4px;
+  background: #f6f6f6;
+  font-size: 12px;
+}
