@@ -19,10 +19,16 @@ const TARGETS = [
   { id: 'p_3', title: 'herdr-pm' },
 ];
 
-function renderControl(over: Partial<ProjectDetail> = {}, targets = TARGETS) {
+/** `targets: null` stands for a project list that has not arrived (or, with `targetsFailed`, could not be read). */
+function renderControl(over: Partial<ProjectDetail> = {}, targets: typeof TARGETS | null = TARGETS, targetsFailed = false) {
   return render(
     <ToastProvider>
-      <StageControl project={detail({ id: 'p_1', stage: 'build', ...over })} mergeTargets={targets} reload={reload} />
+      <StageControl
+        project={detail({ id: 'p_1', stage: 'build', ...over })}
+        mergeTargets={targets ?? undefined}
+        mergeTargetsFailed={targetsFailed}
+        reload={reload}
+      />
     </ToastProvider>,
   );
 }
@@ -56,8 +62,21 @@ test('shows the current stage, and every other stage in the menu but not that on
   renderControl({ stage: 'build' });
   expect(screen.getByText('当前阶段：构建')).toBeTruthy();
   const labels = within(stageSelect()).getAllByRole('option').map((o) => o.textContent);
-  expect(labels).toEqual(['idea', '探索', '验证', '完成', '搁置', '放弃', '合并']);
+  expect(labels).toEqual(['选择阶段…', 'idea', '探索', '验证', '完成', '搁置', '放弃', '合并']);
   expect(within(stageSelect()).queryByRole('option', { name: '构建' })).toBeNull();
+});
+
+test('nothing is picked at first, so one stray click on 确定 moves nothing', () => {
+  renderControl();
+  expect(stageSelect().value).toBe('');
+  const ok = screen.getByRole('button', { name: '确定' }) as HTMLButtonElement;
+  expect(ok.disabled).toBe(true);
+  fireEvent.click(ok);
+  expect(fetchMock).not.toHaveBeenCalled();
+  choose('verify');
+  expect(ok.disabled).toBe(false);
+  choose('');
+  expect(ok.disabled).toBe(true);
 });
 
 test('选了 合并 但没选目标时 确定 不能点；选了目标后发出 {stage, merge_into}', async () => {
@@ -96,6 +115,21 @@ test('with no other project to merge into, 合并 cannot be confirmed and says w
   expect((screen.getByRole('button', { name: '确定' }) as HTMLButtonElement).disabled).toBe(true);
 });
 
+test('while the project list is on its way the merge menu says 加载中…; when it cannot be read it says so', () => {
+  const view = renderControl({}, null);
+  choose('merged');
+  expect(screen.getByText('加载中…')).toBeTruthy();
+  expect(screen.queryByText('没有可以合并进去的项目')).toBeNull();
+  expect((screen.getByRole('button', { name: '确定' }) as HTMLButtonElement).disabled).toBe(true);
+  view.unmount();
+
+  renderControl({}, null, true);
+  choose('merged');
+  expect(screen.getByText('读不到项目列表')).toBeTruthy();
+  expect(screen.queryByText('没有可以合并进去的项目')).toBeNull();
+  expect((screen.getByRole('button', { name: '确定' }) as HTMLButtonElement).disabled).toBe(true);
+});
+
 test('a parked project has a button back to the stage it was parked from', async () => {
   renderControl({ stage: 'parked', stage_before_park: 'build' });
   expect(within(stageSelect()).queryByRole('option', { name: '搁置' })).toBeNull();
@@ -121,7 +155,7 @@ test('a refusal is shown in Chinese and nothing is reloaded; the choice stays', 
   expect(stageSelect().value).toBe('done');
 });
 
-test('when the project moves to the chosen stage, the menu falls back to a stage that is still on offer', () => {
+test('when the project moves to the chosen stage, the menu goes back to 选择阶段…', () => {
   const view = renderControl({ stage: 'build' });
   choose('verify');
   view.rerender(
@@ -129,7 +163,8 @@ test('when the project moves to the chosen stage, the menu falls back to a stage
       <StageControl project={detail({ id: 'p_1', stage: 'verify' })} mergeTargets={TARGETS} reload={reload} />
     </ToastProvider>,
   );
-  expect(stageSelect().value).not.toBe('verify');
+  expect(stageSelect().value).toBe('');
+  expect((screen.getByRole('button', { name: '确定' }) as HTMLButtonElement).disabled).toBe(true);
   expect(within(stageSelect()).queryByRole('option', { name: '验证' })).toBeNull();
   expect(within(stageSelect()).getByRole('option', { name: '构建' })).toBeTruthy();
 });

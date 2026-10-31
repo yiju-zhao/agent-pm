@@ -122,7 +122,7 @@ function groupByMachine(sessions: SessionListItem[]): Array<{ machine: string; s
     .map(([machine, items]) => ({ machine, sessions: items }));
 }
 
-/** The session page (spec 9.3): every session the collectors know, by machine, with who it belongs to and a way to change that. */
+/** The session page (spec 10, the `GET /sessions` list "调试和管理用"; plan 4 Task 8): every session the collectors know, by machine, with who it belongs to and a way to change that. */
 export function SessionsPage() {
   const [filter, setFilter] = useState<Filter>('all');
   const path = FILTERS.find((f) => f.id === filter)!.path;

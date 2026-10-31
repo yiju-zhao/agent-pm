@@ -442,6 +442,52 @@ test('the timeline clock moves on every 60 seconds and stops when the page goes 
   vi.useRealTimers();
 });
 
+test('最近活动 is counted from the page clock, like the timeline, not from whenever the page last drew', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-30T12:00:00.000Z'));
+  const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+  project = detail({ created_at: '2026-10-02T12:00:00.000Z', last_activity_at: '2026-10-30T11:55:00.000Z' });
+  await renderPage();
+  expect(screen.getByText('创建于 10/02 · 最近活动 5 分钟前')).toBeTruthy();
+
+  // The page draws again (a change came in) before the clock has ticked: the text stays with the clock.
+  vi.setSystemTime(new Date('2026-10-30T12:01:00.000Z'));
+  emit('project:p_1');
+  await waitFor(() => expect(reads('/projects/p_1')).toBe(2));
+  await act(async () => {});
+  expect(screen.getByText('创建于 10/02 · 最近活动 5 分钟前')).toBeTruthy();
+
+  const clock = setIntervalSpy.mock.calls.findIndex(([, delay]) => delay === 60_000);
+  act(() => {
+    (setIntervalSpy.mock.calls[clock][0] as () => void)();
+  });
+  expect(screen.getByText('创建于 10/02 · 最近活动 6 分钟前')).toBeTruthy();
+});
+
+test('a pending-questions list that cannot be read is said on the page', async () => {
+  fetchMock.mockImplementation(async (input, init) => {
+    if (String(input) === '/questions?status=pending&project_id=p_1') return new Response('down', { status: 500 });
+    if (String(input) === '/projects/p_1') return json(project);
+    if (String(input) === '/projects') return json(projects);
+    return json({ error: 'not_found' }, 404);
+  });
+  await renderPage();
+  expect((await screen.findByText(/读不到待回答的问题/)).textContent).toBe('读不到待回答的问题：服务器返回了错误（HTTP 500）');
+});
+
+test('the merge menu says 读不到项目列表 when the project list cannot be read', async () => {
+  fetchMock.mockImplementation(async (input) => {
+    if (String(input) === '/projects') return new Response('down', { status: 500 });
+    if (String(input) === '/projects/p_1') return json(project);
+    return json([]);
+  });
+  await renderPage();
+  await waitFor(() => expect(reads('/projects')).toBe(1));
+  fireEvent.change(screen.getByRole('combobox', { name: '新阶段' }), { target: { value: 'merged' } });
+  expect(await screen.findByText('读不到项目列表')).toBeTruthy();
+  expect(screen.queryByText('没有可以合并进去的项目')).toBeNull();
+});
+
 test('a change announced for this project reads it again; one for another project does not', async () => {
   await renderPage();
   const before = reads('/projects/p_1');
@@ -452,6 +498,13 @@ test('a change announced for this project reads it again; one for another projec
   emit('project:p_1');
   expect(await screen.findByRole('button', { name: '别处改的标题' })).toBeTruthy();
   expect(reads('/projects/p_1')).toBe(before + 1);
+});
+
+test('a change on the sessions topic reads the project again (its active sessions and contributions show sessions)', async () => {
+  await renderPage();
+  const before = reads('/projects/p_1');
+  emit('sessions');
+  await waitFor(() => expect(reads('/projects/p_1')).toBe(before + 1));
 });
 
 test('questions and the project list are read again on their own topics', async () => {

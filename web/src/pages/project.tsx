@@ -82,7 +82,13 @@ function PriorityControl({ project, reload }: PageProps) {
   );
 }
 
-function Overview({ project, reload, mergeTargets }: PageProps & { mergeTargets: Array<{ id: string; title: string }> }) {
+type OverviewProps = PageProps & {
+  mergeTargets: Array<{ id: string; title: string }> | undefined;
+  mergeTargetsFailed: boolean;
+  now: Date;
+};
+
+function Overview({ project, reload, mergeTargets, mergeTargetsFailed, now }: OverviewProps) {
   const { write } = useWrite(reload);
   const path = projectPath(project);
   return (
@@ -98,8 +104,8 @@ function Overview({ project, reload, mergeTargets }: PageProps & { mergeTargets:
           />
         </h2>
       </div>
-      <StageControl project={project} mergeTargets={mergeTargets} reload={reload} />
-      <div className="dim">{`创建于 ${shortDate(project.created_at)} · 最近活动 ${relTime(project.last_activity_at, new Date())}`}</div>
+      <StageControl project={project} mergeTargets={mergeTargets} mergeTargetsFailed={mergeTargetsFailed} reload={reload} />
+      <div className="dim">{`创建于 ${shortDate(project.created_at)} · 最近活动 ${relTime(project.last_activity_at, now)}`}</div>
     </section>
   );
 }
@@ -143,13 +149,14 @@ function Tombstones({ tombstones }: { tombstones: ProjectDetail['tombstones'] })
 /** The project page (spec 9.2): the big picture, the stage, the milestones, todos, blockers and decisions (all editable), then who took part and what happened. */
 export function ProjectPage({ id }: { id: string }) {
   const encoded = encodeURIComponent(id);
-  const project = useApi<ProjectDetail>(`/projects/${encoded}`, [`project:${id}`]);
+  const project = useApi<ProjectDetail>(`/projects/${encoded}`, [`project:${id}`, 'sessions']);
   const questions = useApi<QuestionView[]>(`/questions?status=pending&project_id=${encoded}`, ['questions']);
   const projects = useApi<ProjectCard[]>('/projects', ['projects']);
   const now = useNow();
 
   const titles = useMemo(() => new Map((projects.data ?? []).map((p) => [p.id, p.title])), [projects.data]);
-  const mergeTargets = useMemo(() => (projects.data ?? []).map((p) => ({ id: p.id, title: p.title })), [projects.data]);
+  // Undefined until the list has arrived, so the merge menu can tell "still loading" (or "could not read") from "none".
+  const mergeTargets = useMemo(() => projects.data?.map((p) => ({ id: p.id, title: p.title })), [projects.data]);
 
   const { data, error, reload } = project;
   if (error?.status === 404) return <Missing id={id} />;
@@ -172,9 +179,12 @@ export function ProjectPage({ id }: { id: string }) {
     <main data-page="project" data-project-id={id}>
       {data.merged_into !== null ? <MergedBanner into={data.merged_into} titles={titles} /> : null}
       {error !== null ? <ErrorBar error={error} onRetry={reload} /> : null}
-      <Overview project={data} reload={reload} mergeTargets={mergeTargets} />
+      <Overview project={data} reload={reload} mergeTargets={mergeTargets} mergeTargetsFailed={projects.error !== null} now={now} />
       <div className="cols">
         <div className="main">
+          {questions.error !== null ? (
+            <div className="dim" role="status">{`读不到待回答的问题：${errorText(questions.error)}`}</div>
+          ) : null}
           {pending.length > 0 ? (
             <Section title={`待你回答 · ${pending.length}`}>
               {pending.map((q) => (
