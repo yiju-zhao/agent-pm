@@ -61,3 +61,14 @@ test('it is not clickable while the action is on its way, and a refusal does not
   });
   expect((screen.getByRole('button', { name: '删除' }) as HTMLButtonElement).disabled).toBe(false);
 });
+
+test('a title is a hover hint only: it does not change the name of the button', () => {
+  cleanup();
+  render(<ConfirmButton label="×" confirmLabel="确认取消关联" title="取消与「loopwm」的关联" onConfirm={onConfirm} />);
+  const button = screen.getByRole('button', { name: '×' });
+  expect(button.getAttribute('title')).toBe('取消与「loopwm」的关联');
+});
+
+test('without a title the button has none', () => {
+  expect(screen.getByRole('button', { name: '删除' }).hasAttribute('title')).toBe(false);
+});
