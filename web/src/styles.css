@@ -83,6 +83,13 @@ textarea {
   background: var(--card);
 }
 
+/* A select is as wide as its longest option; with a long project or milestone title that is wider than a phone. */
+select {
+  max-width: 100%;
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+
 h1,
 h2 {
   margin: 0;
