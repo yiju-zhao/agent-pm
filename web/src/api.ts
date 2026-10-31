@@ -30,12 +30,14 @@ export function getToken(): string | null {
   }
 }
 
-export function setToken(token: string | null): void {
+/** Stores (or with null, removes) the token; false when the browser refused, so the caller can say so. */
+export function setToken(token: string | null): boolean {
   try {
     if (token === null) localStorage.removeItem(TOKEN_KEY);
     else localStorage.setItem(TOKEN_KEY, token);
+    return true;
   } catch {
-    // Nothing to do: the next write will ask for the token again.
+    return false;
   }
 }
 
@@ -120,6 +122,8 @@ const CODE_TEXT: Record<string, string> = {
   not_revertible: '这条记录不能撤销',
   understanding_disabled: '理解层没有开启',
   too_large: '内容太长',
+  // app.onError answers an unexpected exception with this code and no message.
+  internal: '服务器内部错误',
 };
 
 // For these the server's own words say what exactly is wrong, so they follow a Chinese prefix.

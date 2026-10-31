@@ -30,9 +30,17 @@ function MilestoneBar({ done, doing, todo }: ProjectCard['milestones_progress'])
 /**
  * A project on the home page (spec 9.1): where it stands, what its sessions are doing, what is next, what is in the
  * way, and the questions about it, which can be answered right here. `projectTitles` names the project of a question
- * that is about some other project.
+ * that is about some other project. `onAnswered` runs once the server took an answer to one of them.
  */
-export function ProjectCardView({ card, projectTitles }: { card: ProjectCard; projectTitles: Map<string, string> }) {
+export function ProjectCardView({
+  card,
+  projectTitles,
+  onAnswered,
+}: {
+  card: ProjectCard;
+  projectTitles: Map<string, string>;
+  onAnswered?: () => void;
+}) {
   const { done, doing, todo } = card.milestones_progress;
   const milestones = done + doing + todo;
   const dormant = isDormant(card);
@@ -97,6 +105,7 @@ export function ProjectCardView({ card, projectTitles }: { card: ProjectCard; pr
           key={q.id}
           question={q}
           projectTitle={q.project_id !== null && q.project_id !== card.id ? projectTitles.get(q.project_id) : undefined}
+          onDone={onAnswered}
         />
       ))}
     </article>

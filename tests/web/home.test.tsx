@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 import type { ProjectCard, QuestionView } from '../../src/domain/read.ts';
 import type { SessionListItem } from '../../src/server/http.ts';
+import { setToken } from '../../web/src/api.ts';
 import { HomePage } from '../../web/src/pages/home.tsx';
 import type { Topic } from '../../web/src/stream.ts';
 import { StreamContext } from '../../web/src/use-api.ts';
@@ -31,9 +32,10 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 type Data = { projects: ProjectCard[]; questions: QuestionView[]; sessions: Array<Partial<SessionListItem>> };
 let data: Data;
 
-/** The server, as far as the home page sees it: three reads, answered from `data`. */
+/** The server, as far as the home page sees it: three reads, answered from `data`, and answers to questions. */
 function serve(): void {
-  fetchMock.mockImplementation(async (input) => {
+  fetchMock.mockImplementation(async (input, init) => {
+    if (init?.method === 'POST') return json({ status: 'applied', event_id: 7, question_ids: [], warnings: [] });
     switch (String(input)) {
       case '/projects':
         return json(data.projects);
@@ -271,6 +273,19 @@ test('the kanban shows every project, including new ideas and closed ones, witho
   expect(screen.queryByRole('button', { name: /已关闭/ })).toBeNull();
 });
 
+test('each kanban column keeps the server’s priority order, new ideas among the others', async () => {
+  // The server sends the projects by priority; the list groups them, the kanban must not.
+  data.projects = [
+    card({ id: 'a', title: '高优先 idea（新）', stage: 'idea', priority: 'P0', inbox: true }),
+    card({ id: 'b', title: '中优先 idea', stage: 'idea', priority: 'P1' }),
+    card({ id: 'c', title: '低优先 idea（新）', stage: 'idea', priority: 'P3', inbox: true }),
+  ];
+  localStorage.setItem('herdr-pm.homeView', 'kanban');
+  await renderHome();
+  const links = within(region('idea · 3')).getAllByRole('link').map((a) => a.textContent);
+  expect(links).toEqual(['高优先 idea（新）', '中优先 idea', '低优先 idea（新）']);
+});
+
 test('the chosen view is restored on the next visit', async () => {
   localStorage.setItem('herdr-pm.homeView', 'kanban');
   await renderHome();
@@ -296,6 +311,42 @@ test('an unknown stored view falls back to the list', async () => {
   localStorage.setItem('herdr-pm.homeView', 'gantt');
   await renderHome();
   expect(screen.getByRole('button', { name: '列表' }).getAttribute('aria-pressed')).toBe('true');
+});
+
+test('an answered question in 需要你 clears without the stream: the questions and projects are read again', async () => {
+  setToken('tok-1');
+  data.projects = [card({ id: 'p_1', title: 'dLLM 评测框架' })];
+  data.questions = [question({ id: 'q_1', prompt: '评测集用哪个？' })];
+  await renderHome();
+  const before = { questions: requests('/questions?status=pending'), projects: requests('/projects') };
+  data.questions = [];
+  fireEvent.click(within(region('需要你 · 1')).getByRole('button', { name: '公开 v2' }));
+  expect(await screen.findByText('没有需要你决定的事')).toBeTruthy();
+  expect(requests('/questions?status=pending')).toBe(before.questions + 1);
+  expect(requests('/projects')).toBe(before.projects + 1);
+});
+
+test('a question answered on a project card clears from the card and from 需要你 without the stream', async () => {
+  setToken('tok-1');
+  const q = question({ id: 'q_1', prompt: '评测集用哪个？' });
+  data.projects = [card({ id: 'p_1', pending_questions: [q] })];
+  data.questions = [q];
+  await renderHome();
+  data.projects = [card({ id: 'p_1', pending_questions: [] })];
+  data.questions = [];
+  const article = document.querySelector('article[data-project-id="p_1"]') as HTMLElement;
+  fireEvent.click(within(article).getByRole('button', { name: '公开 v2' }));
+  await waitFor(() => expect(screen.queryByText('评测集用哪个？')).toBeNull());
+});
+
+test('a session question answered in the tray clears without the stream', async () => {
+  setToken('tok-1');
+  data.questions = [question({ id: 'q_2', project_id: null, session_key: 'claude:abc', prompt: '归到哪里？' })];
+  data.sessions = [session({ key: 'claude:abc' })];
+  await renderHome();
+  data.questions = [];
+  fireEvent.click(within(region('待归属的 session · 1')).getByRole('button', { name: '公开 v2' }));
+  expect(await screen.findByText('没有待归属的 session')).toBeTruthy();
 });
 
 test('a questions change makes the page read the questions again, and only those', async () => {

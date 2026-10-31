@@ -232,6 +232,21 @@ test('AUTH_EVENT opens the token dialog and saving stores the token', async () =
   expect(screen.queryByRole('dialog')).toBeNull();
 });
 
+test('a token the browser will not store keeps the dialog open and says so', async () => {
+  serve(understanding());
+  renderApp();
+  await screen.findByText('空闲');
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    throw new Error('blocked');
+  });
+  fireEvent.click(screen.getByRole('button', { name: '设置 token' }));
+  const dialog = await screen.findByRole('dialog');
+  fireEvent.change(within(dialog).getByLabelText('token'), { target: { value: 'my-secret-token' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: '保存' }));
+  expect(await screen.findByText('无法保存 token（浏览器禁止了本地存储）')).toBeTruthy();
+  expect(screen.getByRole('dialog')).toBeTruthy();
+});
+
 test('the 设置 token button opens the dialog; 清除 removes the stored token', async () => {
   serve(understanding());
   setToken('old-token');

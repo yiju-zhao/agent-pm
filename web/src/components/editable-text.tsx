@@ -7,12 +7,24 @@ const UNLOCK_TEXT = '解锁后 AI 可以修改这个字段';
 
 /**
  * 🔒 beside a field the user has edited (the AI will not change it any more) and, when `onUnlock` is given, the button
- * that gives it back. `field` names the field when the mark does not stand right beside it. A refused unlock goes to `onError`.
+ * that gives it back. `field` names the field when the mark does not stand right beside it. A refused unlock goes to
+ * `onError`; `onStart` runs as each try begins (to clear what the last refusal left on screen).
  */
-export function LockMark({ field, onUnlock, onError }: { field?: string; onUnlock?: () => Promise<unknown>; onError?: (err: unknown) => void }) {
+export function LockMark({
+  field,
+  onUnlock,
+  onError,
+  onStart,
+}: {
+  field?: string;
+  onUnlock?: () => Promise<unknown>;
+  onError?: (err: unknown) => void;
+  onStart?: () => void;
+}) {
   const [busy, setBusy] = useState(false);
   const unlock = async () => {
     if (onUnlock === undefined) return;
+    onStart?.();
     setBusy(true);
     try {
       await onUnlock();
@@ -167,7 +179,7 @@ export function EditableText({ value, locked, multiline = false, placeholder, on
           {value ? value : <span className="placeholder">{placeholder ?? '（空）'}</span>}
         </button>
       )}
-      {locked ? <LockMark onUnlock={onUnlock} onError={(err) => setError(errorText(err))} /> : null}
+      {locked ? <LockMark onUnlock={onUnlock} onStart={() => setError(null)} onError={(err) => setError(errorText(err))} /> : null}
       {error !== null ? (
         <span className="field-error" role="alert">
           {error}

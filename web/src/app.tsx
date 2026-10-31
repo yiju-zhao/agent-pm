@@ -85,6 +85,7 @@ function ConnectionDot() {
 }
 
 function TokenDialog({ onClose }: { onClose: () => void }) {
+  const toast = useToast();
   const [value, setValue] = useState('');
   const titleId = useId();
   const inputId = useId();
@@ -101,7 +102,11 @@ function TokenDialog({ onClose }: { onClose: () => void }) {
   const save = (e: FormEvent) => {
     e.preventDefault();
     if (token === '') return;
-    setToken(token);
+    // Blocked site data: closing as if saved would leave the person wondering why the next write asks again.
+    if (!setToken(token)) {
+      toast('无法保存 token（浏览器禁止了本地存储）');
+      return;
+    }
     onClose();
   };
   const clear = () => {

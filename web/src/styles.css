@@ -1158,3 +1158,12 @@ main {
   padding: 0 5px;
   font-size: 12px;
 }
+
+/* iOS Safari zooms the page into any field whose text is under 16px when it is focused; on a phone keep them at 16px. */
+@media (max-width: 899.98px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}

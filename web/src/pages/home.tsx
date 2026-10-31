@@ -59,7 +59,7 @@ function SideSection({ title, children }: { title: string; children: ReactNode }
 type Read<T> = ReturnType<typeof useApi<T>>;
 type Reads = { questions: Read<QuestionView[]>; sessions: Read<SessionListItem[]> };
 
-function NeedYou({ questions, titles }: { questions: Reads['questions']; titles: Map<string, string> }) {
+function NeedYou({ questions, titles, onAnswered }: { questions: Reads['questions']; titles: Map<string, string>; onAnswered(): void }) {
   const needYou = splitQuestions(questions.data ?? []).needYou;
   const ready = questions.data !== undefined;
   return (
@@ -69,13 +69,20 @@ function NeedYou({ questions, titles }: { questions: Reads['questions']; titles:
       ) : needYou.length === 0 ? (
         <div className="dim">没有需要你决定的事</div>
       ) : (
-        needYou.map((q) => <QuestionCard key={q.id} question={q} projectTitle={q.project_id === null ? undefined : titles.get(q.project_id)} />)
+        needYou.map((q) => (
+          <QuestionCard
+            key={q.id}
+            question={q}
+            projectTitle={q.project_id === null ? undefined : titles.get(q.project_id)}
+            onDone={onAnswered}
+          />
+        ))
       )}
     </SideSection>
   );
 }
 
-function Attribution({ questions, sessions }: Reads) {
+function Attribution({ questions, sessions, onAnswered }: Reads & { onAnswered(): void }) {
   const attribution = splitQuestions(questions.data ?? []).attribution;
   const byKey = useMemo(() => new Map((sessions.data ?? []).map((s) => [s.key, s])), [sessions.data]);
   // A session list that cannot be read is no reason to hide the questions: they show the key instead of the session.
@@ -94,7 +101,7 @@ function Attribution({ questions, sessions }: Reads) {
               <div key={q.id} className="todo attrib">
                 {session ? <SessionTag session={session} /> : null}
                 <div>{session ? session.title : q.session_key}</div>
-                <QuestionCard question={q} />
+                <QuestionCard question={q} onDone={onAnswered} />
               </div>
             );
           })
@@ -122,7 +129,14 @@ export function HomePage() {
   const heading =
     cards === undefined ? '项目 · 按优先级' : `项目 · 按优先级 · ${groups.main.length - asleep} 个推进中 · ${asleep} 个休眠`;
 
-  const list = (items: ProjectCard[]) => items.map((card) => <ProjectCardView key={card.id} card={card} projectTitles={titles} />);
+  // The same question can be on a project card and under 需要你, and an answer can change the project too: both lists are
+  // read again, so the card clears even while the stream is down.
+  const answered = () => {
+    questions.reload();
+    projects.reload();
+  };
+  const list = (items: ProjectCard[]) =>
+    items.map((card) => <ProjectCardView key={card.id} card={card} projectTitles={titles} onAnswered={answered} />);
 
   return (
     <main data-page="home">
@@ -145,7 +159,8 @@ export function HomePage() {
               <div className="dim">加载中…</div>
             ) : null
           ) : view === 'kanban' ? (
-            <Kanban cards={[...groups.main, ...groups.inbox, ...groups.closed]} />
+            // The server's order is by priority; the kanban columns keep it (the list's groups are only for the list).
+            <Kanban cards={cards} />
           ) : (
             <>
               {cards.length === 0 ? <div className="dim">还没有项目</div> : null}
@@ -156,8 +171,8 @@ export function HomePage() {
           )}
         </div>
         <aside className="side">
-          <NeedYou questions={questions} titles={titles} />
-          <Attribution questions={questions} sessions={sessions} />
+          <NeedYou questions={questions} titles={titles} onAnswered={answered} />
+          <Attribution questions={questions} sessions={sessions} onAnswered={answered} />
         </aside>
       </div>
     </main>

@@ -180,6 +180,16 @@ test('a refused unlock shows the reason', async () => {
   expect((await screen.findByRole('alert')).textContent).toBe('找不到对象，可能已被删除');
 });
 
+test('the reason of a refused unlock goes away when 解锁 is tried again', async () => {
+  setup({ locked: true });
+  onUnlock.mockRejectedValueOnce(new ApiError(404, 'not_found', 'gone'));
+  fireEvent.click(screen.getByRole('button', { name: '解锁' }));
+  await screen.findByRole('alert');
+  fireEvent.click(screen.getByRole('button', { name: '解锁' }));
+  await waitFor(() => expect(onUnlock).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+});
+
 test('a new value from the server does not overwrite what is being typed', () => {
   const view = setup();
   edit();

@@ -174,8 +174,13 @@ test('setToken survives a throwing localStorage', () => {
   vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
     throw new Error('blocked');
   });
-  expect(() => setToken('abc')).not.toThrow();
-  expect(() => setToken(null)).not.toThrow();
+  expect(setToken('abc')).toBe(false);
+  expect(setToken(null)).toBe(false);
+});
+
+test('setToken says whether the token was stored', () => {
+  expect(setToken('abc')).toBe(true);
+  expect(setToken(null)).toBe(true);
 });
 
 test('sessionPath encodes the colons in a session key', () => {
@@ -195,6 +200,7 @@ test('errorText maps the known codes to Chinese and passes other server messages
     [409, 'not_revertible', '这条记录不能撤销'],
     [409, 'understanding_disabled', '理解层没有开启'],
     [413, 'too_large', '内容太长'],
+    [500, 'internal', '服务器内部错误'],
   ];
   for (const [status, code, text] of table) expect(errorText(new ApiError(status, code, 'server words'))).toBe(text);
   expect(errorText(new ApiError(400, 'some_future_code', 'server words'))).toBe('server words');
