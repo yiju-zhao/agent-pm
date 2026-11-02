@@ -148,6 +148,42 @@ test('no command and unknown options print usage and exit 2; --help prints usage
   expect(help.stderr).toBe('');
 });
 
+test('help lists open', async () => {
+  const help = await run(['help']);
+  expect(help.code).toBe(0);
+  expect(help.stdout).toContain('herdr-pm open [<短ID>] [--remote split|inline] [--dry-run]');
+  expect(help.stdout).toContain('open an agent by short id in herdr');
+});
+
+/** Runs `fn` with no terminal on stdin or stdout, whatever runs the tests, so `open` never waits for a key. */
+async function withoutTerminal<T>(fn: () => Promise<T>): Promise<T> {
+  const saved = [process.stdin, process.stdout].map((stream) => [stream, Object.getOwnPropertyDescriptor(stream, 'isTTY')] as const);
+  for (const [stream] of saved) Object.defineProperty(stream, 'isTTY', { value: false, configurable: true, writable: true });
+  try {
+    return await fn();
+  } finally {
+    for (const [stream, descriptor] of saved) {
+      if (descriptor) Object.defineProperty(stream, 'isTTY', descriptor);
+      else delete (stream as { isTTY?: boolean }).isTTY;
+    }
+  }
+}
+
+test('open without a short id outside a terminal is a usage error', async () => {
+  const { code, stdout, stderr, urls } = await withoutTerminal(() => run(['open']));
+  expect(code).toBe(2);
+  expect(stdout).toBe('');
+  expect(stderr).toContain('缺少短 ID');
+  expect(stderr).toContain('herdr-pm open');
+  expect(urls).toEqual([]);
+});
+
+test('open with a malformed short id exits 2 before it runs herdr', async () => {
+  const { code, stderr } = await withoutTerminal(() => run(['open', 'no good!']));
+  expect(code).toBe(2);
+  expect(stderr).toBe('短 ID 格式不对：no good!\n');
+});
+
 test('server and collect require --config', async () => {
   for (const command of ['server', 'collect']) {
     const { code, stderr } = await run([command]);

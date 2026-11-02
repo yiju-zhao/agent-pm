@@ -6,11 +6,13 @@ import { parseArgs } from 'node:util';
 import { z } from 'zod';
 import { loadCollectorConfig } from './collector/config.ts';
 import { runCollector } from './collector/loop.ts';
+import { defaultOpenDeps, runOpen } from './lookup/command.ts';
 import type { Scheduler } from './understand/scheduler.ts';
 
 // Server modules (node:sqlite, hono) are loaded only inside the `server` command, with a dynamic
 // import: the single-file collector binary is built with bun, which has no node:sqlite, so the
-// `collect` and `sessions` paths must never evaluate them.
+// `collect`, `sessions` and `open` paths must never evaluate them (src/lookup, which `open` runs,
+// imports only node built-ins, src/shared and zod).
 
 /** The process-facing side of the CLI, injectable so tests need no network, terminal or exit. */
 export type Io = {
@@ -27,6 +29,7 @@ const USAGE = `Usage:
   herdr-pm server --config <path>                      run the central server
   herdr-pm collect --config <path>                     run the collector on this machine
   herdr-pm sessions [--server <url>] [--machine <m>]   list sessions known to the central server
+  herdr-pm open [<短ID>] [--remote split|inline] [--dry-run]   open an agent by short id in herdr
 `;
 
 class UsageError extends Error {}
@@ -42,6 +45,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
         return await runCollect(args, io);
       case 'sessions':
         return await runSessions(args, io);
+      case 'open':
+        return await runOpen(args, io, defaultOpenDeps);
       case '-h':
       case '--help':
       case 'help':

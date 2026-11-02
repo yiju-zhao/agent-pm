@@ -418,6 +418,69 @@ node src/cli.ts server --config /tmp/demo-server.json
 
 演示库里有 5 个项目（P0 构建中、AI 建的新 idea、休眠中、已完成、已搁置）、6 个 session（2 台机器，运行中 / 空闲 / 等你操作 / 已结束都有，其中 1 个只有屏幕）、3 个待回答的问题，以及一条被你撤销的 AI 改动。其中的 session 是静态数据，没有采集器在跟，3 分钟后会显示为离线。
 
+## 在 herdr 里按短 ID 打开（计划 5）
+
+`herdr-pm sessions`、网页和 herdr 侧边栏里看到的都是 8 位短 ID。`herdr-pm open <短ID>` 把它变成一个动作：本机的 agent 直接切过去，其他机器上的 agent 在当前终端里 attach 上去。
+
+查找**不依赖中心服务**（mac-mini 没开也能用）：它向本机 herdr 和 `herdr machine list` 里每台已启用的机器各问一次 `agent list`，所有机器同时问，每台最多等 8 秒，所以某台机器关机或网络不通只会多等 8 秒，并提示 `连不上：<机器>（<原因>）`，其他机器上的 agent 照样找得到。中心只在**一个都没找到**时用来补一句说明（"这个 session 已结束""那台机器的采集器离线"），连不上中心就直接说没找到。
+
+**命令行**：
+
+```bash
+herdr-pm open 0d67da1f                  # 找到并打开
+herdr-pm open                           # 在终端里不带参数：会问"短 ID："
+herdr-pm open 0d67da1f --dry-run        # 只打印"将执行：…"，什么都不动，用来排查
+herdr-pm open 0d67da1f --remote inline  # 远程 agent 就在当前终端里 attach，不分屏
+```
+
+| 选项 | 默认 | 说明 |
+| --- | --- | --- |
+| `<短ID>` | 交互时询问 | 粘贴也行：前后的空白、换行、引号会去掉，大写会转成小写，整串 key（`claude:0d67da1f-…`）会取冒号后面的部分 |
+| `--remote split\|inline` | `split` | 远程 agent 的打开方式，见下。不在 herdr 里运行（环境变量 `HERDR_ENV` 不是 `1`）时一律 `inline` |
+| `--server <url>` | `$HERDR_PM_SERVER`，再默认 `http://localhost:7718` | 只用于一个都没找到时向中心要说明 |
+| `--herdr <path>` | `herdr` | herdr 可执行文件 |
+| `--dry-run` | | 只打印计划，不执行 |
+
+短 ID 匹配到多个 pane（同一个 session 在两处 resume，或者粘贴得太短）时，列出候选 `[1] 机器 · agent · 状态 · 标题 · pane`：在终端里输入编号选一个，回车取消；非交互（比如管道里）只列出来并退出 1，绝不随便打开一个。在终端里运行时，失败的结果（没找到 / 取消 / 出错）会先等你按回车再退出，免得弹窗一闪就没。
+
+退出码：`0` 已打开（`inline` 时是 ssh 的退出码）；`1` 没找到、有歧义、取消或打开失败；`2` 用法错误（短 ID 格式不对、选项不对、非交互又没给短 ID）。输出都是中文。
+
+**安装**：`open` 是同一个 `herdr-pm` 二进制里的一个命令（`scripts/build-collector.sh` 打出来的那个，见「2. 每台机器上的采集器」），只需要放在你**按快捷键的那台机器**上（一般是笔记本）。升级到带 `open` 的版本后，重新构建并覆盖 `~/.local/bin/herdr-pm`；被 attach 的远程机器上不用装它，只要有 herdr。
+
+**快捷键**：herdr 的 `[[keys.command]]` 支持 `type = "popup"`（弹出一个会话内的终端），所以直接弹出终端运行 `herdr-pm open`，不用写插件。写进 `~/.config/herdr/config.toml`，然后 `herdr server reload-config`：
+
+```toml
+[[keys.command]]
+key = "prefix+g"
+type = "popup"
+command = "/Users/<你>/.local/bin/herdr-pm open"
+width = "80%"
+height = "60%"
+description = "herdr-pm: 按短 ID 打开 agent"
+```
+
+按 `prefix+g`，弹窗里输入（或粘贴）短 ID，回车。
+
+**侧边栏显示**：采集器把每个 session 的短 ID 和所属项目写到本机 herdr 的 pane 元数据里（`$pm_sid`、`$pm`；内容有变化时写，每 5 分钟刷新一次）。在 `~/.config/herdr/config.toml` 的 `[ui.sidebar.agents]` 里把它们加进 `rows` 才会显示，例如：
+
+```toml
+[ui.sidebar.agents]
+rows = [["state_icon", "machine", "workspace", "tab"], ["agent", "$pm_sid", "$pm"]]
+```
+
+不想写侧边栏就在采集器配置里加 `"sidebar": false`。写入失败（herdr 版本旧、pane 刚关、中心是旧版本）不影响采集，同一个错误只记一次日志。
+
+**远程 agent 的两种打开方式**：
+
+- `split`（默认，在 herdr 里时）：在当前获得焦点的 pane 右边分出一个新 pane（`herdr pane split <焦点 pane> --direction right --focus`），在里面运行 `ssh -t <机器> …attach`，attach 结束新 pane 自动关闭。远程机器上非交互 ssh 的 `PATH` 里没有 herdr，所以远程命令自己找：`h=$(command -v herdr || echo "$HOME/.local/bin/herdr"); exec "$h" agent attach <pane>`。退出 attach 按 `ctrl+b q`。
+- `inline`：就在当前终端（或弹窗）里运行同一条 ssh，退出码用 ssh 的。不在 herdr 里、或者找不到有焦点的 pane 时自动用它。
+
+拼进 shell 命令的 pane ID 和 ssh 地址先用白名单校验（pane ID `[A-Za-z0-9:_-]`，ssh 地址 `[A-Za-z0-9@._-]`），不合格直接拒绝，不做转义。
+
+**手动检查结论（Task 5 填写）**：
+
+> TODO（Task 5，真实环境手动检查后由使用者填写）：弹窗里 `HERDR_ENV` 是否为 `1`；本机 agent 的 focus 在弹窗关闭后是否停在目标 pane；herdr 正切到远程机器（TUI 在看远程）时 `split` 的表现；`split` 和 `inline` 各自适合的场景，以及最终推荐的默认值。
+
 ## 部署验收（计划 1 完成的标志）
 
 - [ ] 四台机器上本地执行 `herdr integration status`，claude 和 codex integration 都已安装。
@@ -436,4 +499,4 @@ npx tsc            # 类型检查（不产出文件）
 
 Node 26 直接运行 `.ts`：`node src/cli.ts <command> ...`；`npm link` 之后 `herdr-pm` 命令可直接用（`package.json` 的 `bin` 指向 `src/cli.ts`）。本地配置写成 `config/*.local.json`（已在 `.gitignore` 里）。
 
-`src/cli.ts` 只在 `server` 命令里动态 `import()` 服务端模块（`node:sqlite`、hono）：采集器二进制是 bun 编译的，bun 没有 `node:sqlite`，所以 `collect` 和 `sessions` 路径不能加载它们。
+`src/cli.ts` 只在 `server` 命令里动态 `import()` 服务端模块（`node:sqlite`、hono）：采集器二进制是 bun 编译的，bun 没有 `node:sqlite`，所以 `collect`、`sessions` 和 `open` 路径不能加载它们（`open` 的代码在 `src/lookup/`，只能 import node 内置模块、`src/shared/` 和 zod）。
