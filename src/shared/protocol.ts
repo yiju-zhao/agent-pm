@@ -39,6 +39,14 @@ export const SnapshotPush = z.object({
 });
 export type SnapshotPush = z.infer<typeof SnapshotPush>;
 
+/** What the herdr sidebar shows for one pushed session: its short id (as the web UI shows it) and its project. */
+export const SidebarLabel = z.object({ key: z.string(), short_id: z.string(), project: z.string().nullable() });
+export type SidebarLabel = z.infer<typeof SidebarLabel>;
+
+/** The reply to a snapshot push; `labels` is missing from servers that predate the sidebar, hence the default. */
+export const SnapshotResponse = z.object({ ok: z.literal(true), labels: z.array(SidebarLabel).default([]) });
+export type SnapshotResponse = z.infer<typeof SnapshotResponse>;
+
 export const ChunkPush = z.object({
   machine: z.string(),
   chunks: z.array(

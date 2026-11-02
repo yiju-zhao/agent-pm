@@ -1,5 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { execute } from '../../src/domain/execute.ts';
+import type { DomainDeps } from '../../src/domain/types.ts';
 import { openDb } from '../../src/server/db.ts';
 import { createApp } from '../../src/server/http.ts';
 import type { ServerConfig } from '../../src/server/config.ts';
@@ -180,7 +182,7 @@ test('rejects a pending key that belongs to another machine (400)', async () => 
 test('snapshot then GET /sessions returns the session with short_id', async () => {
   const res = await post('/ingest/snapshot', snapshot(GX10, [session(CLAUDE_KEY)]));
   expect(res.status).toBe(200);
-  expect(await res.json()).toEqual({ ok: true });
+  expect(await res.json()).toEqual({ ok: true, labels: [{ key: CLAUDE_KEY, short_id: '5d27595b', project: null }] });
 
   const sessions = await sessionsBody();
   expect(sessions).toHaveLength(1);
@@ -191,6 +193,26 @@ test('snapshot then GET /sessions returns the session with short_id', async () =
     lifecycle: 'live',
     effective_status: 'working',
     chunk_count: 0,
+  });
+});
+
+test('POST /ingest/snapshot returns labels for the pushed sessions', async () => {
+  const other = 'codex:019a0000-aaaa-bbbb-cccc-111122223333';
+  await post('/ingest/snapshot', snapshot(GX10, [session(CLAUDE_KEY), session(other, { terminal_id: 't2' })]));
+  let n = 0;
+  const deps: DomainDeps = { now: () => now, newId: (prefix) => `${prefix}_${++n}` };
+  const created = execute(db, deps, { op: 'create_project', args: { title: 'Herdr PM' }, actor: 'user' }) as unknown as { id: string };
+  execute(db, deps, { op: 'link_session', args: { session: CLAUDE_KEY, project: created.id }, actor: 'user' });
+
+  const res = await post('/ingest/snapshot', snapshot(GX10, [session(CLAUDE_KEY), session(other, { terminal_id: 't2' })]));
+
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({
+    ok: true,
+    labels: [
+      { key: CLAUDE_KEY, short_id: '5d27595b', project: 'Herdr PM' },
+      { key: other, short_id: '019a0000', project: null },
+    ],
   });
 });
 

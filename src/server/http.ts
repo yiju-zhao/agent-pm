@@ -8,7 +8,7 @@ import { defaultDeps } from '../domain/types.ts';
 import type { DomainDeps } from '../domain/types.ts';
 import { mountMcp } from '../mcp/server.ts';
 import { ChunkPush, SnapshotPush } from '../shared/protocol.ts';
-import type { OffsetResponse } from '../shared/protocol.ts';
+import type { OffsetResponse, SnapshotResponse } from '../shared/protocol.ts';
 import { parseSessionKey } from '../shared/session-key.ts';
 import type { Scheduler } from '../understand/scheduler.ts';
 import { disabledStatus } from '../understand/status.ts';
@@ -17,6 +17,7 @@ import type { ServerConfig } from './config.ts';
 import { mountDomainRoutes, userAuth } from './domain-routes.ts';
 import { applySnapshot, findByShortId, insertChunks, listSessions, maxOffset } from './sessions-repo.ts';
 import type { SessionView } from './sessions-repo.ts';
+import { sidebarLabels } from './sidebar.ts';
 import { mountWeb } from './web.ts';
 
 /**
@@ -53,7 +54,11 @@ export function createApp(
     ]);
     if (push instanceof Response) return push;
     applySnapshot(db, push, clock());
-    return c.json({ ok: true });
+    const response: SnapshotResponse = {
+      ok: true,
+      labels: sidebarLabels(db, push.sessions.map((s) => s.key)),
+    };
+    return c.json(response);
   });
 
   app.post('/ingest/chunks', async (c) => {
