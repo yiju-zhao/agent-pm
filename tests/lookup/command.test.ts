@@ -214,6 +214,124 @@ test('not found without a center hint says so, and a dead center changes nothing
   expect(r.stderr).toBe(`没有找到短 ID 为 ${SID} 的 agent\n`);
 });
 
+/** A trimmed SessionView as the center returns it. */
+const centerView = (overrides: Record<string, unknown> = {}) => ({
+  machine: 'gx10-090e',
+  agent_kind: 'codex',
+  effective_status: 'working',
+  title: '重构采集器',
+  terminal_id: 'term_abc',
+  ...overrides,
+});
+// A codex pane herdr reports without a session id: the center knows its rollout's native id, herdr only the terminal.
+const idlessCodex = (overrides: Record<string, unknown> = {}) =>
+  agentEntry({ agent: 'codex', agent_session: null, terminal_id: 'term_abc', ...overrides });
+
+test('a live local session the center knows by terminal id is focused although herdr lists no session id for it', async () => {
+  const r = await open([SID], {
+    lists: { '': agentList(idlessCodex({ pane_id: 'w3:p1' }), agentEntry({ terminal_id: 'term_other', pane_id: 'w4:p1', agent_session: { kind: 'id', value: 'ffffffff-0000' } })) },
+    center: () => Response.json([centerView({ machine: 'laptop' })]),
+  });
+  expect(r.code).toBe(0);
+  expect(r.stdout).toBe(`正在查找 ${SID}…\n找到：本机 · codex · 空闲 · 重构采集器\n已切换到 w3:p1\n`);
+  expect(r.stderr).toBe('');
+  expect(stateChanging(r.calls)).toEqual([['agent', 'focus', 'w3:p1']]);
+  // The center is asked once, and only for the pasted id.
+  expect(r.urls).toEqual([`http://localhost:7718/sessions/by-short-id/${SID}`]);
+});
+
+test('a live remote session found by terminal id is opened like any remote agent', async () => {
+  const r = await open([SID], {
+    lists: { 'gx10-090e': agentList(idlessCodex({ pane_id: 'w1:pJ' })) },
+    center: () => Response.json([centerView()]),
+  });
+  expect(r.code).toBe(0);
+  expect(r.stdout).toContain('找到：gx10-090e · codex · 空闲 · 重构采集器');
+  // outside herdr a remote agent is attached right here
+  expect(r.spawned).toEqual([['ssh', '-t', '100.90.216.102', expect.stringContaining('agent attach w1:pJ')]]);
+
+  const inHerdr = await open([SID], {
+    lists: { 'gx10-090e': agentList(idlessCodex({ pane_id: 'w1:pJ' })) },
+    center: () => Response.json([centerView()]),
+    env: { HERDR_ENV: '1' },
+  });
+  expect(stateChanging(inHerdr.calls).map((c) => c.slice(0, 2))).toEqual([['pane', 'split'], ['pane', 'run']]);
+});
+
+test('an offline session is looked up by terminal id too: its collector is down, its pane may be fine', async () => {
+  const r = await open([SID], {
+    lists: { '': agentList(idlessCodex({ pane_id: 'w3:p1' })) },
+    center: () => Response.json([centerView({ effective_status: 'offline' })]),
+  });
+  expect(r.code).toBe(0);
+  expect(stateChanging(r.calls)).toEqual([['agent', 'focus', 'w3:p1']]);
+});
+
+test('an ended session in a pane herdr still lists is not opened: the hint is printed', async () => {
+  for (const effective_status of ['ended', 'purged']) {
+    const r = await open([SID], {
+      lists: { '': agentList(idlessCodex({ pane_id: 'w3:p1' })) },
+      center: () => Response.json([centerView({ effective_status })]),
+    });
+    expect(r.code).toBe(1);
+    expect(r.stderr).toBe('这个 session 已结束（gx10-090e · 重构采集器）\n');
+    expect(stateChanging(r.calls)).toEqual([]);
+    expect(r.spawned).toEqual([]);
+  }
+});
+
+test('a live session whose terminal herdr does not list, or whose center row has no terminal, prints the hint', async () => {
+  const gone = await open([SID], {
+    lists: { '': agentList(idlessCodex({ terminal_id: 'term_else' })) },
+    center: () => Response.json([centerView()]),
+  });
+  expect(gone.code).toBe(1);
+  expect(gone.stderr).toBe('中心记录：gx10-090e · codex · 重构采集器，但 herdr 里没找到\n');
+  const unknown = await open([SID], {
+    lists: { '': agentList(idlessCodex()) },
+    center: () => Response.json([centerView({ terminal_id: null })]),
+  });
+  expect(unknown.code).toBe(1);
+  expect(unknown.stderr).toBe('中心记录：gx10-090e · codex · 重构采集器，但 herdr 里没找到\n');
+  expect(stateChanging(unknown.calls)).toEqual([]);
+});
+
+test('only the live sessions of the center are matched by terminal id', async () => {
+  const r = await open([SID], {
+    lists: { '': agentList(idlessCodex({ pane_id: 'w3:p1' }), idlessCodex({ pane_id: 'w5:p1', terminal_id: 'term_old' })) },
+    center: () => Response.json([centerView({ effective_status: 'ended', terminal_id: 'term_old' }), centerView()]),
+  });
+  expect(r.code).toBe(0);
+  expect(stateChanging(r.calls)).toEqual([['agent', 'focus', 'w3:p1']]);
+});
+
+test('several live sessions of the center in several panes ask which one is meant', async () => {
+  const lists = {
+    '': agentList(idlessCodex({ pane_id: 'w3:p1' }), idlessCodex({ pane_id: 'w5:p1', terminal_id: 'term_def' })),
+  };
+  const center = () => Response.json([centerView(), centerView({ terminal_id: 'term_def' }), centerView()]);
+  const listed = await open([SID], { lists, center });
+  expect(listed.code).toBe(1);
+  expect(listed.stdout).toContain('[1] 本机 · codex');
+  expect(listed.stdout).toContain('[2] 本机 · codex');
+  expect(listed.stdout).toContain('w3:p1\n');
+  expect(listed.stdout).toContain('w5:p1\n');
+  expect(listed.stderr).toContain('匹配到多个，请用更长的短 ID');
+  expect(stateChanging(listed.calls)).toEqual([]);
+
+  const picked = await open([SID], { lists, center, interactive: true, answers: ['2'] });
+  expect(picked.code).toBe(0);
+  expect(stateChanging(picked.calls)).toEqual([['agent', 'focus', 'w5:p1']]);
+});
+
+test('with the center down an id-less pane is simply not found', async () => {
+  const r = await open([SID], { lists: { '': agentList(idlessCodex()) } });
+  expect(r.code).toBe(1);
+  expect(r.stderr).toBe(`没有找到短 ID 为 ${SID} 的 agent\n`);
+  expect(stateChanging(r.calls)).toEqual([]);
+  expect(r.spawned).toEqual([]);
+});
+
 test('--server and HERDR_PM_SERVER choose the center', async () => {
   const viaFlag = await open([SID, '--server', 'http://pm.test:9000']);
   expect(viaFlag.urls).toEqual([`http://pm.test:9000/sessions/by-short-id/${SID}`]);

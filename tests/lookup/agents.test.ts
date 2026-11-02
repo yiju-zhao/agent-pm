@@ -3,6 +3,7 @@ import {
   MACHINE_TIMEOUT_MS,
   listAllAgents,
   matchShortId,
+  matchTerminalIds,
   normalizeShortId,
   parseAgentList,
   parseMachineList,
@@ -324,4 +325,21 @@ test('matchShortId keeps one entry per pane id on the same machine, not across m
 
 test('matchShortId matches nothing for an empty id', () => {
   expect(matchShortId([agent()], '')).toEqual([]);
+});
+
+test('matchTerminalIds matches the exact terminal id only', () => {
+  const a = agent({ terminal_id: 'term_abc' });
+  const prefixOnly = agent({ pane_id: 'w1:p2', terminal_id: 'term_abcdef' });
+  const other = agent({ pane_id: 'w1:p3', terminal_id: 'term_zzz' });
+  expect(matchTerminalIds([a, prefixOnly, other], ['term_abc'])).toEqual([a]);
+  expect(matchTerminalIds([a, prefixOnly, other], ['term_abc', 'term_zzz'])).toEqual([a, other]);
+  expect(matchTerminalIds([a], ['TERM_ABC'])).toEqual([]);
+  expect(matchTerminalIds([a], [])).toEqual([]);
+});
+
+test('matchTerminalIds keeps one entry per pane id on the same machine, not across machines', () => {
+  const a = agent({ machine: 'gx10-090e', target: 't', pane_id: 'w1:p1', terminal_id: 'term_abc' });
+  const dup = agent({ machine: 'gx10-090e', target: 't', pane_id: 'w1:p1', terminal_id: 'term_abc' });
+  const elsewhere = agent({ machine: 'mac-mini', target: 'u', pane_id: 'w1:p1', terminal_id: 'term_abc' });
+  expect(matchTerminalIds([a, dup, elsewhere], ['term_abc'])).toEqual([a, elsewhere]);
 });

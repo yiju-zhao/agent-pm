@@ -4,9 +4,9 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline/promises';
 import { parseArgs } from 'node:util';
-import { listAllAgents, matchShortId, normalizeShortId } from './agents.ts';
+import { listAllAgents, matchShortId, matchTerminalIds, normalizeShortId } from './agents.ts';
 import type { LookupAgent, RunHerdr } from './agents.ts';
-import { centerHint } from './center.ts';
+import { centerSessions, formatCenterHint } from './center.ts';
 import { describePlan, executePlan, findFocusedPane, planOpen } from './open.ts';
 import type { OpenDeps, OpenPlan, RemoteMode } from './open.ts';
 
@@ -112,10 +112,20 @@ export async function runOpen(
   const { agents, unreachable } = await listAllAgents(deps.run);
   for (const { machine, error } of unreachable) io.stderr(`连不上：${machine}（${reasonOf(machine, error)}）\n`);
 
-  const matches = matchShortId(agents, sid);
+  let matches = matchShortId(agents, sid);
   if (matches.length === 0) {
+    // Not by a session id herdr knows. The center may still say where the session runs: the collector reads the
+    // native id of a codex pane that herdr reports without one from its rollout, so the pane is found by terminal.
+    // The center only names the terminal; the pane that is opened comes from herdr's own listing.
     const server = parsed.args.server || deps.env.HERDR_PM_SERVER || DEFAULT_SERVER;
-    return fail(1, (await centerHint(deps.fetch, server, sid)) ?? `没有找到短 ID 为 ${sid} 的 agent`);
+    const sessions = await centerSessions(deps.fetch, server, sid);
+    const terminals = (sessions ?? []).flatMap((s) =>
+      s.effective_status !== 'ended' && s.effective_status !== 'purged' && s.terminal_id !== null ? [s.terminal_id] : [],
+    );
+    matches = matchTerminalIds(agents, terminals);
+    if (matches.length === 0) {
+      return fail(1, (sessions === null ? null : formatCenterHint(sessions)) ?? `没有找到短 ID 为 ${sid} 的 agent`);
+    }
   }
 
   let agent: LookupAgent;

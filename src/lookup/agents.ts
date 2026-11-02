@@ -155,6 +155,20 @@ export async function listAllAgents(
   return { agents, unreachable };
 }
 
+/** The agents `wanted` accepts, one per pane id on a machine, in input order. */
+function distinctPanes(agents: LookupAgent[], wanted: (a: LookupAgent) => boolean): LookupAgent[] {
+  const seen = new Set<string>();
+  const matches: LookupAgent[] = [];
+  for (const a of agents) {
+    if (!wanted(a)) continue;
+    const key = `${a.machine ?? ''}\u0000${a.pane_id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    matches.push(a);
+  }
+  return matches;
+}
+
 /**
  * Agents whose native id or terminal id starts with `sid`. Both are tried because the web shows
  * the terminal-based short id of a session until the collector reports its native id, which can be
@@ -164,14 +178,18 @@ export async function listAllAgents(
 export function matchShortId(agents: LookupAgent[], sid: string): LookupAgent[] {
   const prefix = sid.toLowerCase();
   if (prefix === '') return [];
-  const seen = new Set<string>();
-  const matches: LookupAgent[] = [];
-  for (const a of agents) {
-    if (!(a.native_id?.toLowerCase().startsWith(prefix) || a.terminal_id.toLowerCase().startsWith(prefix))) continue;
-    const key = `${a.machine ?? ''}\u0000${a.pane_id}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    matches.push(a);
-  }
-  return matches;
+  return distinctPanes(
+    agents,
+    (a) => a.native_id?.toLowerCase().startsWith(prefix) === true || a.terminal_id.toLowerCase().startsWith(prefix),
+  );
+}
+
+/**
+ * Agents running in exactly one of the given terminals. For sessions the center knows by a native
+ * id that herdr does not report for the pane (a codex pane whose id the collector read from its
+ * rollout): herdr still lists the pane under its terminal id. Same one-per-pane rule as above.
+ */
+export function matchTerminalIds(agents: LookupAgent[], terminalIds: string[]): LookupAgent[] {
+  const wanted = new Set(terminalIds);
+  return distinctPanes(agents, (a) => wanted.has(a.terminal_id));
 }
