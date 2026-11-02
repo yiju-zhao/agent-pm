@@ -597,6 +597,57 @@ test('a failing window that cannot shrink below the newest screen plus one chunk
   ]);
 });
 
+test('a digest failure stops being the last error once that session digests, but not when another one does', async () => {
+  addSession(A);
+  addSession(B);
+  addChunk(A, `${BIG} flaky`, { receivedAt: iso(clock - 60_000) });
+  let healthy = false;
+  const { runner } = fakeRunner((call) =>
+    call.prompt.includes('flaky') && !healthy ? fail('other', 'Reached maximum number of turns (3)') : ok(),
+  );
+  const s = scheduler(runner);
+
+  expect(await s.tick()).toBe('skipped');
+  expect(s.status().last_error).toContain('Reached maximum number of turns');
+  // Another session's success says nothing about A.
+  addChunk(B, BIG);
+  expect(await s.tick()).toBe('digested');
+  expect(s.status().last_error).toContain(A);
+
+  healthy = true;
+  expect(await s.tick()).toBe('digested');
+  expect(s.status().last_error).toBeNull();
+});
+
+test('a skipped chunk stays the last error after its session recovers', async () => {
+  addSession(A);
+  const only = addChunk(A, `${BIG} poison`, { receivedAt: iso(clock - 60_000) });
+  const { runner } = fakeRunner((call) => (call.prompt.includes('poison') ? fail('other', 'always') : ok()));
+  const s = scheduler(runner);
+  for (let n = 0; n < 3; n++) {
+    for (let i = 0; i < 3; i++) expect(await s.tick()).toBe('skipped');
+    if (n < 2) advance(SESSION_COOLDOWN_MS);
+  }
+  expect(digested(only)).toBe(1);
+  addChunk(A, BIG);
+  expect(await s.tick()).toBe('digested');
+  // Something was dropped without a digest; that is still worth showing.
+  expect(s.status().last_error).toContain(`chunk ${only}`);
+});
+
+test('a curate failure stops being the last error once a curate run succeeds', async () => {
+  for (let i = 0; i < CURATE_BATCH; i++) addDigest();
+  let healthy = false;
+  const { runner } = fakeRunner((call) => (call.role === 'curate' && !healthy ? fail('other', 'curator hiccup') : ok(null)));
+  const s = scheduler(runner);
+  expect(await s.tick()).toBe('skipped');
+  expect(s.status().last_error).toContain('curator hiccup');
+  healthy = true;
+  advance(BACKOFF_START_MS);
+  expect(await s.tick()).toBe('curated');
+  expect(s.status().last_error).toBeNull();
+});
+
 test('a success resets a failing window\'s cycle count', async () => {
   addSession(A);
   const first = addChunk(A, `${BIG} poison`, { receivedAt: iso(clock - 60_000) });

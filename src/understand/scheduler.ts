@@ -80,6 +80,11 @@ type Work = { kind: 'curate'; ids: number[]; now: number } | { kind: 'digest'; w
  * windows are cut to once those pass `STALL_GRACE_CYCLES` (unset until then).
  */
 type Stall = { firstChunk: number; cycles: number; cap?: number };
+/**
+ * The success that makes `lastError` stale: a digest of that session, or a curate run. Unset when the error recorded
+ * something that a later success does not undo (a skipped chunk, a given-up batch, a half-finished curate run).
+ */
+type Recovery = { kind: 'digest'; key: string } | { kind: 'curate' };
 /** Realtime chunks with ids up to `chunk` existed when the sync was requested; only they get the sync treatment. */
 type SyncMarks = { chunk: number };
 
@@ -104,6 +109,7 @@ export class Scheduler {
   private pauseReason: string | null = null;
   private backoffMs = BACKOFF_START_MS;
   private lastError: string | null = null;
+  private lastErrorRecovery: Recovery | null = null;
 
   private readonly sessionFailures = new Map<string, number>();
   private readonly cooldownUntil = new Map<string, number>();
@@ -143,7 +149,7 @@ export class Scheduler {
         try {
           const message = `exception: ${describeError(err)}`;
           const work = this.work;
-          this.lastError = `调度出错：${message}`;
+          this.setLastError(`调度出错：${message}`, null);
           if (work === null) return 'idle';
           if (work.kind === 'curate') this.curateFailed(work.now, work.ids, 'other', message);
           else this.digestFailed(work.now, work.window, 'other', message);
@@ -287,10 +293,14 @@ export class Scheduler {
       const partial = outcome.partialError;
       if (partial === undefined) {
         this.backoffMs = BACKOFF_START_MS;
+        this.recovered({ kind: 'curate' });
         return 'curated';
       }
       // The batch was marked curated because writes had landed; the failure itself still counts.
-      this.lastError = `整理中途失败（${partial.kind}）：${partial.message}；已写入的部分保留，摘要 ${ids.join(', ')} 不再重试`;
+      this.setLastError(
+        `整理中途失败（${partial.kind}）：${partial.message}；已写入的部分保留，摘要 ${ids.join(', ')} 不再重试`,
+        null,
+      );
       return isPausing(partial.kind) ? this.pause(now, partial.kind) : 'curated';
     }
     if (isPausing(outcome.kind)) return this.pause(now, outcome.kind);
@@ -301,11 +311,11 @@ export class Scheduler {
   /** A curate failure that does not pause: a curate-only wait, and after `MAX_SESSION_FAILURES` the batch is given up. */
   private curateFailed(now: number, ids: number[], kind: LlmErrorKind, message: string): void {
     this.curateFailures += 1;
-    this.lastError = `整理失败（${kind}）：${message}`;
+    this.setLastError(`整理失败（${kind}）：${message}`, { kind: 'curate' });
     if (this.curateFailures >= MAX_SESSION_FAILURES) {
       // Give up on this batch so the digests behind it are not stuck forever.
       this.db.prepare(`UPDATE digests SET curated = 1 WHERE id IN (${ids.map(() => '?').join(', ')})`).run(...ids);
-      this.lastError += `；连续 ${this.curateFailures} 次失败，已放弃摘要 ${ids.join(', ')}`;
+      this.setLastError(`${this.lastError}；连续 ${this.curateFailures} 次失败，已放弃摘要 ${ids.join(', ')}`, null);
       this.curateFailures = 0;
       this.curateWaitUntil = null;
     } else {
@@ -324,7 +334,10 @@ export class Scheduler {
       force: picked.force,
     });
     if (outcome.status !== 'failed') {
-      if (outcome.status === 'digested') this.backoffMs = BACKOFF_START_MS;
+      if (outcome.status === 'digested') {
+        this.backoffMs = BACKOFF_START_MS;
+        this.recovered({ kind: 'digest', key });
+      }
       this.sessionFailures.delete(key);
       this.stalls.delete(key);
       return outcome.status;
@@ -340,7 +353,7 @@ export class Scheduler {
    */
   private digestFailed(now: number, window: DigestWindow, kind: LlmErrorKind, message: string): void {
     const key = window.sessionKey;
-    this.lastError = `摘要失败（${key}，${kind}）：${message}`;
+    this.setLastError(`摘要失败（${key}，${kind}）：${message}`, { kind: 'digest', key });
     const failures = (this.sessionFailures.get(key) ?? 0) + 1;
     if (failures >= MAX_SESSION_FAILURES) {
       this.sessionFailures.delete(key);
@@ -379,7 +392,26 @@ export class Scheduler {
     skipWindow(this.db, this.deps, window);
     this.stalls.delete(key);
     this.cooldownUntil.delete(key);
-    this.lastError += `；session ${key} 的 chunk ${window.chunkIds.join(', ')} 单独摘要仍然失败 ${stall.cycles} 轮，已跳过`;
+    // The chunk is gone without a digest; a later success of the session does not undo that.
+    this.setLastError(
+      `${this.lastError}；session ${key} 的 chunk ${window.chunkIds.join(', ')} 单独摘要仍然失败 ${stall.cycles} 轮，已跳过`,
+      null,
+    );
+  }
+
+  /** Records `message` as the last error; `recovery` is the success that clears it again (`null`: none does). */
+  private setLastError(message: string, recovery: Recovery | null): void {
+    this.lastError = message;
+    this.lastErrorRecovery = recovery;
+  }
+
+  /** A success of this kind happened: the last error goes away if it was waiting for exactly that. */
+  private recovered(success: Recovery): void {
+    const pending = this.lastErrorRecovery;
+    if (pending === null || pending.kind !== success.kind) return;
+    if (pending.kind === 'digest' && success.kind === 'digest' && pending.key !== success.key) return;
+    this.lastError = null;
+    this.lastErrorRecovery = null;
   }
 
   private pause(now: number, kind: LlmErrorKind): TickResult {

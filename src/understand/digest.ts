@@ -4,6 +4,7 @@ import { getProject, listProjects } from '../domain/read.ts';
 import type { DomainDeps } from '../domain/types.ts';
 import { transaction } from '../server/db.ts';
 import type { SessionRow } from '../server/sessions-repo.ts';
+import { SDK_STRUCTURED_OUTPUT_RETRIES } from './agent-sdk.ts';
 import { recordRun } from './llm.ts';
 import type { LlmCall, LlmErrorKind, LlmRunner } from './llm.ts';
 import { renderBrief, renderProjectIndex } from './render.ts';
@@ -17,7 +18,12 @@ export const MIN_DIGEST_CHARS = 400;
 export const REALTIME_WINDOW_CHARS = 60000;
 /** Most characters of chunk text in one backfill digest call. */
 export const BACKFILL_WINDOW_CHARS = 150000;
-export const DIGEST_MAX_TURNS = 3;
+/**
+ * Each StructuredOutput attempt is a turn, and on a big window the model fairly often sends one that does not parse
+ * and needs a retry or two. Room for every retry the SDK allows (plus slack), so a run that keeps failing ends as
+ * `bad_output` from the SDK's retry cap rather than as an "other" turn-limit error after only a couple of tries.
+ */
+export const DIGEST_MAX_TURNS = SDK_STRUCTURED_OUTPUT_RETRIES + 3;
 
 // ---- output ------------------------------------------------------------------------------------------------------
 

@@ -4,6 +4,14 @@ import type { LlmCall, LlmErrorKind, LlmOutcome, LlmRunner } from './llm.ts';
 /** How long one call may run before the runner aborts it, unless `LlmCall.timeoutMs` says otherwise. */
 export const DEFAULT_LLM_TIMEOUT_MS = 600_000;
 
+/**
+ * How often Claude Code lets the model retry a StructuredOutput call that failed validation (its
+ * `MAX_STRUCTURED_OUTPUT_RETRIES` default) before it ends the run as `error_max_structured_output_retries`. Each attempt
+ * is a turn, so a call with an output schema needs `maxTurns` of at least one more than this for that limit, not the
+ * turn cap, to be what ends a run that keeps producing bad output.
+ */
+export const SDK_STRUCTURED_OUTPUT_RETRIES = 5;
+
 /** Name of the in-process MCP server that carries a call's tools; the model sees them as `mcp__pm__<name>`. */
 export const TOOL_SERVER_NAME = 'pm';
 
@@ -48,7 +56,8 @@ function kindFromAssistantError(error: unknown): LlmErrorKind | undefined {
 /**
  * Turns the SDK messages of one `query()` run into a result (everything but `durationMs`, which the runner measures).
  * Kept free of SDK imports so it can be unit tested with hand-written messages.
- * With `expectStructured` (the call carried an output schema) a success without `structured_output` is `bad_output`.
+ * With `expectStructured` (the call carried an output schema) a success without `structured_output` is `bad_output`, and
+ * so is running out of turns.
  */
 export function mapSdkMessages(messages: unknown[], opts: { expectStructured?: boolean } = {}): LlmOutcome {
   let result: Record<string, unknown> | undefined;
@@ -78,16 +87,19 @@ export function mapSdkMessages(messages: unknown[], opts: { expectStructured?: b
   }
 
   const errors = Array.isArray(result.errors) ? result.errors.filter((e): e is string => typeof e === 'string') : [];
-  const message =
+  let message =
     errors.length > 0
       ? errors.join('; ')
       : typeof result.result === 'string' && result.result !== ''
         ? result.result
         : `model run failed (${String(result.subtype)})`;
+  // With an output schema the turns go to StructuredOutput attempts, so running out of them means none was valid.
+  const structuredTurnsOut = opts.expectStructured === true && result.subtype === 'error_max_turns';
+  if (structuredTurnsOut) message += ' (no valid structured output within the turn limit)';
   const kind: LlmErrorKind =
     kindFromStatus(result.api_error_status) ??
     assistantKind ??
-    (result.subtype === 'error_max_structured_output_retries' ? 'bad_output' : 'other');
+    (result.subtype === 'error_max_structured_output_retries' || structuredTurnsOut ? 'bad_output' : 'other');
   return { ok: false, kind, message };
 }
 

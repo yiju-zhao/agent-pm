@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'vitest';
+import { SDK_STRUCTURED_OUTPUT_RETRIES } from '../../src/understand/agent-sdk.ts';
 import {
   BACKFILL_WINDOW_CHARS,
   buildDigestPrompt,
@@ -372,6 +373,12 @@ test('a successful digest stores the row with the window time range and marks ch
   expect(calls).toHaveLength(1);
   expect(calls[0]).toMatchObject({ role: 'digest', model: MODEL, maxTurns: DIGEST_MAX_TURNS, outputSchema: DIGEST_JSON_SCHEMA });
   expect(runRows()).toEqual([{ role: 'digest', model: MODEL, ok: 1, error_kind: null }]);
+});
+
+test('the digest call has turns enough for the SDK to retry invalid structured output before giving up', () => {
+  // Every StructuredOutput attempt is a turn; the model regularly needs a retry or two on a big window. The SDK's own
+  // retry cap (which reports bad_output) has to run out before the turn cap does.
+  expect(DIGEST_MAX_TURNS).toBeGreaterThanOrEqual(1 + SDK_STRUCTURED_OUTPUT_RETRIES);
 });
 
 test('a backfill window stores backfill = 1', async () => {
