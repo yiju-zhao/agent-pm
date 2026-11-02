@@ -910,6 +910,31 @@ test('sidebar failures do not fail the tick', async () => {
   ]);
 });
 
+test('a snapshot reply with malformed labels neither fails the tick nor reaches the sidebar', async () => {
+  await writeLines(transcript, [claudeUser(NEW_TS, 'hello')]);
+  const deps = fakeDeps(() => [claudePane()]);
+  // A real server's answer to the snapshot, except that `labels` is garbage (e.g. a newer server).
+  const garbled = createPmClient({
+    server: cfg.server,
+    machine: MACHINE,
+    token: TOKEN,
+    fetch: async (input, init) => {
+      const res = await app.request(String(input), init);
+      return String(input).endsWith('/ingest/snapshot')
+        ? new Response(JSON.stringify({ ok: true, labels: [{ key: 1 }] }), { status: res.status })
+        : res;
+    },
+  });
+  deps.client = { pushSnapshot: (p) => garbled.pushSnapshot(p), pushChunks: (p) => client.pushChunks(p), getOffset: (key) => client.getOffset(key) };
+
+  const result = await collectOnce(cfg, await CursorStore.load(cfg.stateFile), deps, new SidebarReporter(deps.reportMetadata, deps.log!));
+
+  expect(result).toEqual({ sessions: 1, chunksPushed: 1, errors: 0 });
+  expect(chunks()).toHaveLength(1);
+  expect(sessionRow(CLAUDE_KEY)).toMatchObject({ lifecycle: 'live' });
+  expect(deps.calls.reportMetadata).toEqual([]);
+});
+
 test('the heartbeat re-push does not touch the sidebar', async () => {
   await writeLines(transcript, [claudeUser(NEW_TS, 'hello')]);
   const { deps, snapshots } = slowPushDeps(() => [claudePane()], 70_000);

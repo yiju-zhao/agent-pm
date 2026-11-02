@@ -70,7 +70,11 @@ export function createPmClient(opts: PmClientOptions): PmClient {
 
   return {
     async pushSnapshot(p) {
-      return (await call('POST', '/ingest/snapshot', SnapshotResponse, p)).labels;
+      // The snapshot is stored once the server answered 2xx. Labels are only decoration for the sidebar, so a
+      // reply this client cannot read (an older or newer server) must not fail the push: it gives no labels.
+      const body = await call('POST', '/ingest/snapshot', z.unknown(), p);
+      const parsed = SnapshotResponse.safeParse(body);
+      return parsed.success ? parsed.data.labels : [];
     },
     pushChunks(p) {
       return call('POST', '/ingest/chunks', PushResultBody, p);

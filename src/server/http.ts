@@ -54,10 +54,15 @@ export function createApp(
     ]);
     if (push instanceof Response) return push;
     applySnapshot(db, push, clock());
-    const response: SnapshotResponse = {
-      ok: true,
-      labels: sidebarLabels(db, push.sessions.map((s) => s.key)),
-    };
+    // The sidebar is decoration: whatever goes wrong computing it must not fail the snapshot push the
+    // collector is waiting on (it would back off and retry a push that was already stored).
+    let labels: SnapshotResponse['labels'] = [];
+    try {
+      labels = sidebarLabels(db, push.sessions.map((s) => s.key));
+    } catch (err) {
+      console.error(`herdr-pm server: sidebar labels failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    const response: SnapshotResponse = { ok: true, labels };
     return c.json(response);
   });
 

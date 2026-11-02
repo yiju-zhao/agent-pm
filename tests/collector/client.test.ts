@@ -80,3 +80,30 @@ test('an old server answering {ok:true} gives no labels', async () => {
   const { client } = clientWith(() => json({ ok: true }));
   await expect(client.pushSnapshot(emptyPush)).resolves.toEqual([]);
 });
+
+test('a malformed labels field is no reason to fail the push: pushSnapshot gives no labels', async () => {
+  for (const body of [
+    { ok: true, labels: 'garbage' },
+    { ok: true, labels: [{ key: 1 }] },
+    { ok: false },
+    ['not', 'an', 'object'],
+    null,
+  ]) {
+    const { client } = clientWith(() => json(body));
+    await expect(client.pushSnapshot(emptyPush)).resolves.toEqual([]);
+  }
+});
+
+test('pushSnapshot still fails on HTTP errors and non-JSON bodies, as before', async () => {
+  const rejected = clientWith(() => json({ error: 'nope' }, 403));
+  const err = await rejected.client.pushSnapshot(emptyPush).catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(Error);
+  expect(err).not.toBeInstanceOf(RetryableError);
+  expect((err as Error).message).toContain('403');
+
+  const broken = clientWith(() => new Response('boom', { status: 503 }));
+  await expect(broken.client.pushSnapshot(emptyPush)).rejects.toBeInstanceOf(RetryableError);
+
+  const notJson = clientWith(() => new Response('<html>', { status: 200 }));
+  await expect(notJson.client.pushSnapshot(emptyPush)).rejects.toBeInstanceOf(RetryableError);
+});

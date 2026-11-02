@@ -216,6 +216,24 @@ test('POST /ingest/snapshot returns labels for the pushed sessions', async () =>
   });
 });
 
+test('a sidebar label failure does not fail the snapshot push: it is stored and the labels are empty', async () => {
+  // A stored row with a key that does not parse makes the short-id computation over all rows throw.
+  db.prepare("INSERT INTO sessions (key, machine, lifecycle) VALUES ('garbage', ?, 'ended')").run(GX10);
+  const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    const res = await post('/ingest/snapshot', snapshot(GX10, [session(CLAUDE_KEY)]));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, labels: [] });
+    expect(logged).toHaveBeenCalledTimes(1);
+    expect(String(logged.mock.calls[0]![0])).toContain('herdr-pm server: sidebar labels failed');
+  } finally {
+    logged.mockRestore();
+  }
+  const stored = db.prepare('SELECT key FROM sessions WHERE key = ?').all(CLAUDE_KEY);
+  expect(stored).toHaveLength(1);
+});
+
 test('GET /sessions filters by machine and lifecycle; empty filters mean no filter', async () => {
   const laptopKey = 'codex:019a0000-aaaa-bbbb-cccc-111122223333';
   await post('/ingest/snapshot', snapshot(GX10, [session(CLAUDE_KEY)]));
