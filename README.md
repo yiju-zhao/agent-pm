@@ -420,9 +420,9 @@ node src/cli.ts server --config /tmp/demo-server.json
 
 ## 在 herdr 里按短 ID 打开（计划 5）
 
-`herdr-pm sessions`、网页和 herdr 侧边栏里看到的都是 8 位短 ID。`herdr-pm open <短ID>` 把它变成一个动作：本机的 agent 直接切过去，其他机器上的 agent 在当前终端里 attach 上去。
+`herdr-pm sessions`、网页和 herdr 侧边栏里看到的都是 8 位短 ID。`herdr-pm open <短ID>` 把它变成一个动作：本机的 agent 直接切过去；其他机器上的 agent 通过 ssh attach 上去：在 herdr 里默认在当前 pane 右边分屏打开，不在 herdr 里（或加 `--remote inline`）就直接在当前终端里 attach。
 
-查找**不依赖中心服务**（mac-mini 没开也能用）：它向本机 herdr 和 `herdr machine list` 里每台已启用的机器各问一次 `agent list`，所有机器同时问，每台最多等 8 秒，所以某台机器关机或网络不通只会多等 8 秒，并提示 `连不上：<机器>（<原因>）`，其他机器上的 agent 照样找得到。中心只在**一个都没找到**时用来补一句说明（"这个 session 已结束""那台机器的采集器离线"），连不上中心就直接说没找到。
+查找**不依赖中心服务**（mac-mini 没开也能用）：它向本机 herdr 和 `herdr machine list` 里每台已启用的机器各问一次 `agent list`，所有机器同时问，每台最多等 8 秒，所以某台机器关机或网络不通只会多等 8 秒，并提示 `连不上：<机器>（<原因>）`，其他机器上的 agent 照样找得到。中心只在**一个都没找到**时用来补一句说明（"这个 session 已结束""那台机器的采集器离线"），连不上中心就直接说没找到。一个例外：herdr 有时不给 codex pane 报 session ID，而采集器会从 rollout 里读出来，所以网页上的短 ID 在 herdr 里查不到；这时如果中心知道这个 session 还在、并且记着它的 terminal，就用 terminal 在 herdr 自己的列表里找到那个 pane（打开的仍是 herdr 列出的 pane，不是中心的数据）。
 
 **命令行**：
 
@@ -437,7 +437,7 @@ herdr-pm open 0d67da1f --remote inline  # 远程 agent 就在当前终端里 att
 | --- | --- | --- |
 | `<短ID>` | 交互时询问 | 粘贴也行：前后的空白、换行、引号会去掉，大写会转成小写，整串 key（`claude:0d67da1f-…`）会取冒号后面的部分 |
 | `--remote split\|inline` | `split` | 远程 agent 的打开方式，见下。不在 herdr 里运行（环境变量 `HERDR_ENV` 不是 `1`）时一律 `inline` |
-| `--server <url>` | `$HERDR_PM_SERVER`，再默认 `http://localhost:7718` | 只用于一个都没找到时向中心要说明 |
+| `--server <url>` | `$HERDR_PM_SERVER`，再默认 `http://localhost:7718` | 只用于一个都没找到时向中心要说明（或找 herdr 没报 session ID 的 pane） |
 | `--herdr <path>` | `herdr` | herdr 可执行文件 |
 | `--dry-run` | | 只打印计划，不执行 |
 
@@ -453,11 +453,13 @@ herdr-pm open 0d67da1f --remote inline  # 远程 agent 就在当前终端里 att
 [[keys.command]]
 key = "prefix+g"
 type = "popup"
-command = "/Users/<你>/.local/bin/herdr-pm open"
+command = "/Users/<你>/.local/bin/herdr-pm open --server http://<mac-mini 地址>:7718"
 width = "80%"
 height = "60%"
 description = "herdr-pm: 按短 ID 打开 agent"
 ```
+
+命令里要把中心服务显式带上：不带 `--server`（或环境变量 `HERDR_PM_SERVER`）时默认连 `http://localhost:7718`，笔记本上没有中心服务，"已结束 / 采集器离线"这类说明就不会出现。
 
 按 `prefix+g`，弹窗里输入（或粘贴）短 ID，回车。
 
@@ -475,7 +477,7 @@ rows = [["state_icon", "machine", "workspace", "tab"], ["agent", "$pm_sid", "$pm
 - `split`（默认，在 herdr 里时）：在当前获得焦点的 pane 右边分出一个新 pane（`herdr pane split <焦点 pane> --direction right --focus`），在里面运行 `ssh -t <机器> …attach`，attach 结束新 pane 自动关闭。远程机器上非交互 ssh 的 `PATH` 里没有 herdr，所以远程命令自己找：`h=$(command -v herdr || echo "$HOME/.local/bin/herdr"); exec "$h" agent attach <pane>`。退出 attach 按 `ctrl+b q`。
 - `inline`：就在当前终端（或弹窗）里运行同一条 ssh，退出码用 ssh 的。不在 herdr 里、或者找不到有焦点的 pane 时自动用它。
 
-拼进 shell 命令的 pane ID 和 ssh 地址先用白名单校验（pane ID `[A-Za-z0-9:_-]`，ssh 地址 `[A-Za-z0-9@._-]`），不合格直接拒绝，不做转义。
+拼进 shell 命令的 pane ID 和 ssh 地址先用白名单校验（pane ID `[A-Za-z0-9:_-]`，ssh 地址 `[A-Za-z0-9@._-]`，都不能以 `-` 开头，免得 ssh 把它当成选项），不合格直接拒绝，不做转义。
 
 **手动检查结论（Task 5 填写）**：
 
