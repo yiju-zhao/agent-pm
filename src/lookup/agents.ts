@@ -156,10 +156,10 @@ export async function listAllAgents(
 }
 
 /**
- * Agents whose session id starts with `sid`: the native id when herdr has one, else the terminal
- * id (a session that has not been given its native id yet). Case-insensitive. Panes with the same
- * pane id on the same machine count once. Two panes resuming one session both match, so the
- * caller can ask which one is meant.
+ * Agents whose native id or terminal id starts with `sid`. Both are tried because the web shows
+ * the terminal-based short id of a session until the collector reports its native id, which can be
+ * a tick after herdr learned it. Case-insensitive. Panes with the same pane id on the same machine
+ * count once. Two panes resuming one session both match, so the caller can ask which one is meant.
  */
 export function matchShortId(agents: LookupAgent[], sid: string): LookupAgent[] {
   const prefix = sid.toLowerCase();
@@ -167,7 +167,7 @@ export function matchShortId(agents: LookupAgent[], sid: string): LookupAgent[] 
   const seen = new Set<string>();
   const matches: LookupAgent[] = [];
   for (const a of agents) {
-    if (!(a.native_id ?? a.terminal_id).toLowerCase().startsWith(prefix)) continue;
+    if (!(a.native_id?.toLowerCase().startsWith(prefix) || a.terminal_id.toLowerCase().startsWith(prefix))) continue;
     const key = `${a.machine ?? ''}\u0000${a.pane_id}`;
     if (seen.has(key)) continue;
     seen.add(key);

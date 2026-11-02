@@ -27,9 +27,12 @@ export type OpenDeps = {
 /** How long one local herdr call that changes the UI may take. */
 const ACTION_TIMEOUT_MS = 10_000;
 
-// Values that end up inside a shell command are checked against these, never escaped.
+// Values that end up inside a shell command are checked against these, never escaped. `-` is allowed inside a
+// value but not at its start: ssh (and herdr) would read such a value as an option.
 const PANE_ID = /^[A-Za-z0-9:_-]+$/;
 const SSH_TARGET = /^[A-Za-z0-9@._-]+$/;
+
+const isSafe = (pattern: RegExp, value: string) => pattern.test(value) && !value.startsWith('-');
 
 /**
  * The ssh command that attaches to `paneId` on `target`. Non-interactive ssh has no herdr on its
@@ -51,11 +54,11 @@ function sshShellForm(argv: string[]): string {
 /**
  * Local agent: focus its pane. Remote agent: attach over ssh, in a new split beside `focusedPane`
  * when the mode is `split` and there is such a pane, else right here (`inline`). Throws, without
- * building anything, when a remote pane id or ssh target has characters outside the whitelist.
+ * building anything, when a remote pane id or ssh target has characters outside the whitelist or starts with `-`.
  */
 export function planOpen(agent: LookupAgent, ctx: { mode: RemoteMode; focusedPane: string | null }): OpenPlan {
   if (agent.machine === null) return { kind: 'focus', pane_id: agent.pane_id };
-  if (agent.target === null || !PANE_ID.test(agent.pane_id) || !SSH_TARGET.test(agent.target)) {
+  if (agent.target === null || !isSafe(PANE_ID, agent.pane_id) || !isSafe(SSH_TARGET, agent.target)) {
     throw new Error('pane 或机器地址里有意外字符，拒绝执行');
   }
   const argv = remoteAttachArgv(agent.target, agent.pane_id);

@@ -285,16 +285,24 @@ test('matchShortId matches a native id by prefix', () => {
 
 test('matchShortId matches the terminal id when there is no native id yet', () => {
   const pending = agent({ native_id: null, terminal_id: 'term_65e0abc' });
-  expect(matchShortId([agent(), pending], 'term_65e')).toEqual([pending]);
+  expect(matchShortId([agent({ terminal_id: 'term_aaa0001' }), pending], 'term_65e')).toEqual([pending]);
 });
 
-test('matchShortId does not fall back to the terminal id when a native id exists', () => {
+test('matchShortId matches the terminal id too when a native id exists', () => {
+  // Between herdr learning the session id and the next collector tick the web still shows the terminal-based short id.
   const a = agent({ terminal_id: 'term_65e0001' });
-  expect(matchShortId([a], 'term_65e')).toEqual([]);
+  expect(matchShortId([a], 'term_65e')).toEqual([a]);
+  expect(matchShortId([a], '0d67da1f')).toEqual([a]);
+  expect(matchShortId([a], 'term_66')).toEqual([]);
+});
+
+test('matchShortId returns an agent matching on both ids once', () => {
+  const a = agent({ native_id: 'term_65e0001-x', terminal_id: 'term_65e0001' });
+  expect(matchShortId([a], 'term_65e')).toEqual([a]);
 });
 
 test('matchShortId is case insensitive', () => {
-  const a = agent({ native_id: 'ABCDEF12-0000' });
+  const a = agent({ native_id: 'ABCDEF12-0000', terminal_id: 'term_aaa0001' });
   const t = agent({ pane_id: 'w2:p2', native_id: null, terminal_id: 'TERM_65E0002' });
   expect(matchShortId([a, t], 'abcdef12')).toEqual([a]);
   expect(matchShortId([a, t], 'TERM_65e')).toEqual([t]);

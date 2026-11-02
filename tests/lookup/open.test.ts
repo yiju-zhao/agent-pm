@@ -70,6 +70,10 @@ test('unsafe pane id or target is refused', () => {
   expect(() => planOpen(remote({ target: 'host; reboot' }), ctx)).toThrow('pane 或机器地址里有意外字符，拒绝执行');
   expect(() => planOpen(remote({ target: "h'$(id)'" }), { mode: 'inline', focusedPane: null })).toThrow('拒绝执行');
   expect(() => planOpen(remote({ target: null }), ctx)).toThrow('拒绝执行');
+  // a leading dash would be read by ssh as an option (-oProxyCommand=…), though the whitelist allows the characters
+  expect(() => planOpen(remote({ target: '-Fx' }), ctx)).toThrow('pane 或机器地址里有意外字符，拒绝执行');
+  expect(() => planOpen(remote({ target: '-oProxyCommand=id' }), { mode: 'inline', focusedPane: null })).toThrow('拒绝执行');
+  expect(() => planOpen(remote({ pane_id: '-x' }), ctx)).toThrow('pane 或机器地址里有意外字符，拒绝执行');
   // a user@host target with dots and dashes is fine
   expect(() => planOpen(remote({ target: 'bz@100.87.40.81' }), ctx)).not.toThrow();
 });
