@@ -31,6 +31,7 @@ test('fills defaults and expands ~ in paths', async () => {
     codexDir: join(homedir(), '.codex'),
     stateFile: join(homedir(), '.local/state/herdr-pm/collector.json'),
     pollMs: 10_000,
+    sidebar: true,
   });
 });
 
@@ -44,6 +45,7 @@ test('keeps explicit settings', async () => {
     codexDir: '/data/codex',
     stateFile: '/var/lib/pm.json',
     pollMs: 5000,
+    sidebar: false,
   });
   expect(loadCollectorConfig(path)).toMatchObject({
     herdrBin: '/opt/herdr',
@@ -51,6 +53,7 @@ test('keeps explicit settings', async () => {
     codexDir: '/data/codex',
     stateFile: '/var/lib/pm.json',
     pollMs: 5000,
+    sidebar: false,
   });
 });
 

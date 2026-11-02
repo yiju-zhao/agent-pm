@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { OffsetResponse } from '../shared/protocol.ts';
-import type { ChunkPush, SnapshotPush } from '../shared/protocol.ts';
+import { OffsetResponse, SnapshotResponse } from '../shared/protocol.ts';
+import type { ChunkPush, SidebarLabel, SnapshotPush } from '../shared/protocol.ts';
 
 /** A failure worth retrying later unchanged: the server was unreachable, timed out or answered 5xx. */
 export class RetryableError extends Error {
@@ -10,7 +10,8 @@ export class RetryableError extends Error {
 export type PushResult = { inserted: number; duplicates: number };
 
 export type PmClient = {
-  pushSnapshot(p: SnapshotPush): Promise<void>;
+  /** The sidebar labels (short id, project) the server answers with; none from a server that predates them. */
+  pushSnapshot(p: SnapshotPush): Promise<SidebarLabel[]>;
   pushChunks(p: ChunkPush): Promise<PushResult>;
   /** The server's resume position for a transcript (a byte offset), or null when it has none. */
   getOffset(key: string): Promise<number | null>;
@@ -69,7 +70,7 @@ export function createPmClient(opts: PmClientOptions): PmClient {
 
   return {
     async pushSnapshot(p) {
-      await call('POST', '/ingest/snapshot', z.unknown(), p);
+      return (await call('POST', '/ingest/snapshot', SnapshotResponse, p)).labels;
     },
     pushChunks(p) {
       return call('POST', '/ingest/chunks', PushResultBody, p);

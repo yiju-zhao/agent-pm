@@ -10,9 +10,11 @@ import { CursorStore } from '../../src/collector/cursor-store.ts';
 import { backoffDelay, collectOnce, MAX_BACKOFF_MS, READ_MAX_BYTES } from '../../src/collector/loop.ts';
 import type { Deps } from '../../src/collector/loop.ts';
 import { MAX_CHUNK_CHARS } from '../../src/collector/normalize.ts';
+import { SIDEBAR_REFRESH_MS, SIDEBAR_TTL_MS, SidebarReporter } from '../../src/collector/sidebar.ts';
 import { openDb } from '../../src/server/db.ts';
 import { createApp } from '../../src/server/http.ts';
 import { OFFLINE_AFTER_MS } from '../../src/server/sessions-repo.ts';
+import type { SidebarLabel } from '../../src/shared/protocol.ts';
 
 const MACHINE = 'laptop';
 const TOKEN = 'laptop-token';
@@ -54,6 +56,7 @@ beforeEach(async () => {
     codexDir: join(dir, 'codex'),
     stateFile: join(dir, 'state', 'collector.json'),
     pollMs: 10_000,
+    sidebar: true,
   };
   now = new Date('2026-10-29T10:10:00.000Z');
   freshServer();
@@ -119,7 +122,14 @@ function snapshotOf(panes: Pane[]): unknown {
   };
 }
 
-type Calls = { readScreen: string[]; paneProcess: string[]; processStartTime: number[]; log: string[] };
+type Reported = { paneId: string; tokens: { pm_sid: string; pm: string | null }; ttlMs: number };
+type Calls = {
+  readScreen: string[];
+  paneProcess: string[];
+  processStartTime: number[];
+  log: string[];
+  reportMetadata: Reported[];
+};
 
 function fakeDeps(
   panes: () => Pane[],
@@ -128,9 +138,10 @@ function fakeDeps(
     process?: { pid: number; cwd: string } | null | (() => { pid: number; cwd: string } | null);
     processStart?: Date | null;
     readSnapshot?: () => Promise<unknown>;
+    reportMetadata?: () => Promise<void>;
   } = {},
 ): Deps & { calls: Calls } {
-  const calls: Calls = { readScreen: [], paneProcess: [], processStartTime: [], log: [] };
+  const calls: Calls = { readScreen: [], paneProcess: [], processStartTime: [], log: [], reportMetadata: [] };
   return {
     calls,
     readSnapshot: opts.readSnapshot ?? (async () => snapshotOf(panes())),
@@ -145,6 +156,10 @@ function fakeDeps(
     processStartTime: async (pid) => {
       calls.processStartTime.push(pid);
       return opts.processStart ?? null;
+    },
+    reportMetadata: async (paneId, tokens, ttlMs) => {
+      calls.reportMetadata.push({ paneId, tokens, ttlMs });
+      await opts.reportMetadata?.();
     },
     client,
     now: () => now,
@@ -804,4 +819,111 @@ test('a resolved id-less codex keeps its native key when the process lookup fail
   expect(sessionRow(key)).toMatchObject({ fidelity: 'full', lifecycle: 'live', transcript_path: rollout });
   expect(sessionRow(`pending:${MACHINE}:term_2`)).toBeUndefined();
   expect(deps.calls.readScreen).toEqual([]);
+});
+
+/** Deps whose snapshot push answers with `labels` (what a real server computes is covered by the server tests). */
+function labelledDeps(labels: SidebarLabel[], opts: Parameters<typeof fakeDeps>[1] = {}, order: string[] = []) {
+  const deps = fakeDeps(() => [claudePane()], opts);
+  const reportMetadata = deps.reportMetadata;
+  deps.reportMetadata = (paneId, tokens, ttlMs) => {
+    order.push('sidebar');
+    return reportMetadata(paneId, tokens, ttlMs);
+  };
+  deps.client = {
+    pushSnapshot: async (p) => {
+      order.push('snapshot');
+      await client.pushSnapshot(p);
+      return labels;
+    },
+    pushChunks: async (p) => {
+      order.push('chunks');
+      return client.pushChunks(p);
+    },
+    getOffset: (key) => client.getOffset(key),
+  };
+  return deps;
+}
+
+test('collectOnce hands the pushed labels to the sidebar reporter', async () => {
+  await writeLines(transcript, [claudeUser(NEW_TS, 'hello')]);
+  const order: string[] = [];
+  const deps = labelledDeps([{ key: CLAUDE_KEY, short_id: '5d27595b', project: 'dLLM评测' }], {}, order);
+
+  await collectOnce(cfg, await CursorStore.load(cfg.stateFile), deps, new SidebarReporter(deps.reportMetadata, deps.log!));
+
+  expect(deps.calls.reportMetadata).toEqual([
+    { paneId: 'w1:p1', tokens: { pm_sid: '5d27595b', pm: 'dLLM评测' }, ttlMs: SIDEBAR_TTL_MS },
+  ]);
+  expect(order).toEqual(['snapshot', 'sidebar', 'chunks']);
+});
+
+test('the labels a real server answers with reach the sidebar', async () => {
+  await writeLines(transcript, [claudeUser(NEW_TS, 'hello')]);
+  const deps = fakeDeps(() => [claudePane()]);
+
+  await collectOnce(cfg, await CursorStore.load(cfg.stateFile), deps, new SidebarReporter(deps.reportMetadata, deps.log!));
+
+  expect(deps.calls.reportMetadata).toEqual([
+    { paneId: 'w1:p1', tokens: { pm_sid: '5d27595b', pm: null }, ttlMs: SIDEBAR_TTL_MS },
+  ]);
+});
+
+test('a reporter reused across ticks writes only what changed', async () => {
+  await writeLines(transcript, [claudeUser(NEW_TS, 'hello')]);
+  const deps = fakeDeps(() => [claudePane()]);
+  const store = await CursorStore.load(cfg.stateFile);
+  const sidebar = new SidebarReporter(deps.reportMetadata, deps.log!);
+
+  await collectOnce(cfg, store, deps, sidebar);
+  await collectOnce(cfg, store, deps, sidebar);
+  expect(deps.calls.reportMetadata).toHaveLength(1);
+
+  now = new Date(now.getTime() + SIDEBAR_REFRESH_MS);
+  await collectOnce(cfg, store, deps, sidebar);
+  expect(deps.calls.reportMetadata).toHaveLength(2);
+});
+
+test('without a sidebar reporter nothing is written to herdr', async () => {
+  await writeLines(transcript, [claudeUser(NEW_TS, 'hello')]);
+  const deps = fakeDeps(() => [claudePane()]);
+  await collectOnce(cfg, await CursorStore.load(cfg.stateFile), deps);
+  expect(deps.calls.reportMetadata).toEqual([]);
+});
+
+test('sidebar failures do not fail the tick', async () => {
+  await writeLines(transcript, [claudeUser(NEW_TS, 'hello')]);
+  const deps = fakeDeps(() => [claudePane()], {
+    reportMetadata: async () => {
+      throw new Error('herdr pane report-metadata failed: pane not found');
+    },
+  });
+  const store = await CursorStore.load(cfg.stateFile);
+  const sidebar = new SidebarReporter(deps.reportMetadata, deps.log!);
+
+  await expect(collectOnce(cfg, store, deps, sidebar)).resolves.toEqual({ sessions: 1, chunksPushed: 1, errors: 0 });
+  expect(chunks()).toHaveLength(1);
+  // Retried on the next tick, but the same error is logged only once.
+  await collectOnce(cfg, store, deps, sidebar);
+  expect(deps.calls.reportMetadata).toHaveLength(2);
+  expect(deps.calls.log).toEqual([
+    'herdr-pm collect: sidebar metadata for w1:p1 failed: herdr pane report-metadata failed: pane not found',
+  ]);
+});
+
+test('the heartbeat re-push does not touch the sidebar', async () => {
+  await writeLines(transcript, [claudeUser(NEW_TS, 'hello')]);
+  const { deps, snapshots } = slowPushDeps(() => [claudePane()], 70_000);
+  const pushSnapshot = deps.client.pushSnapshot;
+  // The second answer (to the heartbeat) carries a different project; it must not be written.
+  deps.client.pushSnapshot = async (p) => {
+    const labels = await pushSnapshot(p);
+    return labels.map((l) => ({ ...l, project: `project-${snapshots.length}` }));
+  };
+
+  await collectOnce(cfg, await CursorStore.load(cfg.stateFile), deps, new SidebarReporter(deps.reportMetadata, deps.log!));
+
+  expect(snapshots).toHaveLength(2);
+  expect(deps.calls.reportMetadata).toEqual([
+    { paneId: 'w1:p1', tokens: { pm_sid: '5d27595b', pm: 'project-1' }, ttlMs: SIDEBAR_TTL_MS },
+  ]);
 });

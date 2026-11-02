@@ -7,12 +7,20 @@ import { createPmClient, RetryableError } from './client.ts';
 import type { PmClient } from './client.ts';
 import type { CollectorConfig } from './config.ts';
 import { CursorStore } from './cursor-store.ts';
-import { parseHerdrSnapshot, readHerdrScreen, readHerdrSnapshot, readPaneProcess } from './herdr.ts';
+import {
+  parseHerdrSnapshot,
+  readHerdrScreen,
+  readHerdrSnapshot,
+  readPaneProcess,
+  reportPaneMetadata,
+} from './herdr.ts';
+import type { SidebarTokens } from './herdr.ts';
 import { locateTranscript } from './locate.ts';
 import { buildChunks, MAX_CHUNK_CHARS, normalizeClaude, normalizeCodex } from './normalize.ts';
 import { listRecentRollouts, matchRollout, processStartTime } from './pending.ts';
 import type { RolloutCandidate } from './pending.ts';
 import { readDelta } from './read-delta.ts';
+import { SidebarReporter } from './sidebar.ts';
 
 export const COLLECTOR_VERSION = '0.1.0';
 
@@ -31,6 +39,8 @@ export type Deps = {
   readScreen(paneId: string): Promise<string>;
   paneProcess(paneId: string): Promise<{ pid: number; cwd: string } | null>;
   processStartTime(pid: number): Promise<Date | null>;
+  /** Writes sidebar tokens to a pane of the local herdr (`herdr pane report-metadata`). */
+  reportMetadata(paneId: string, tokens: SidebarTokens, ttlMs: number): Promise<void>;
   client: PmClient;
   now(): Date;
   startedAt: Date;
@@ -241,18 +251,21 @@ async function pushScreen(s: SnapshotSession, t: Tick): Promise<number> {
 
 /**
  * One collection tick: reads the herdr snapshot, resolves every agent's transcript, pushes the
- * snapshot (with purged sessions, checked hourly), then pushes new transcript chunks and changed
- * screens. While that takes long (initial import), the same snapshot is re-pushed whenever
- * HEARTBEAT_MS passed since the last push (checked between sessions and read windows), so the
- * machine does not look offline mid-tick.
+ * snapshot (with purged sessions, checked hourly), hands the labels the server answered with to the
+ * `sidebar` reporter (if any), then pushes new transcript chunks and changed screens. While that takes
+ * long (initial import), the same snapshot is re-pushed whenever HEARTBEAT_MS passed since the last
+ * push (checked between sessions and read windows), so the machine does not look offline mid-tick;
+ * that re-push does not touch the sidebar.
  * Throws on any failure that should make the caller back off (herdr, snapshot push, server
  * unavailable). Any other failure in one session's push is logged, counted in `errors` and skipped,
- * so one bad transcript cannot stop the machine's heartbeat or the other sessions.
+ * so one bad transcript cannot stop the machine's heartbeat or the other sessions. Sidebar failures
+ * are the reporter's to log and never fail the tick.
  */
 export async function collectOnce(
   cfg: CollectorConfig,
   store: CursorStore,
   deps: Deps,
+  sidebar?: SidebarReporter,
 ): Promise<{ sessions: number; chunksPushed: number; errors: number }> {
   const now = deps.now();
   const parsed = parseHerdrSnapshot(await deps.readSnapshot(), cfg.machine);
@@ -260,8 +273,9 @@ export async function collectOnce(
   let snapshot: SnapshotPush | undefined;
   let snapshotPushedAt = 0;
   const pushSnapshot = async (p: SnapshotPush) => {
-    await deps.client.pushSnapshot(p);
+    const labels = await deps.client.pushSnapshot(p);
     snapshotPushedAt = deps.now().getTime();
+    return labels;
   };
   const t: Tick = {
     cfg,
@@ -287,7 +301,8 @@ export async function collectOnce(
   const { purged, dropped } = purgeDue ? await purgeCheck(sessions, store) : { purged: [], dropped: [] };
 
   snapshot = { machine: cfg.machine, collector_version: COLLECTOR_VERSION, sessions, purged };
-  await pushSnapshot(snapshot);
+  const labels = await pushSnapshot(snapshot);
+  await sidebar?.update(sessions, labels, now);
   if (purgeDue) {
     for (const key of [...purged, ...dropped]) store.delete(key);
     store.lastPurgeCheck = now;
@@ -323,15 +338,18 @@ export async function runCollector(cfg: CollectorConfig): Promise<never> {
     readScreen: (paneId) => readHerdrScreen(cfg.herdrBin, paneId),
     paneProcess: (paneId) => readPaneProcess(cfg.herdrBin, paneId),
     processStartTime,
+    reportMetadata: (paneId, tokens, ttlMs) => reportPaneMetadata(cfg.herdrBin, paneId, tokens, ttlMs),
     client: createPmClient(cfg),
     now: () => new Date(),
     startedAt: new Date(),
   };
+  // One reporter for the whole run: it remembers what each pane shows, so unchanged labels are not rewritten.
+  const sidebar = cfg.sidebar ? new SidebarReporter(deps.reportMetadata, (line) => console.error(line)) : undefined;
   let failures = 0;
   for (;;) {
     let error: unknown = null;
     try {
-      const { errors } = await collectOnce(cfg, store, deps);
+      const { errors } = await collectOnce(cfg, store, deps, sidebar);
       if (errors > 0) console.error(`${new Date().toISOString()} herdr-pm collector: tick finished with ${errors} failed session(s)`);
       failures = 0;
     } catch (err) {

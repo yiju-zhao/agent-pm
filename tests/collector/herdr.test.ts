@@ -8,6 +8,8 @@ import {
   readHerdrScreen,
   readHerdrSnapshot,
   readPaneProcess,
+  reportMetadataArgs,
+  reportPaneMetadata,
 } from '../../src/collector/herdr.ts';
 
 const fixture: unknown = JSON.parse(
@@ -242,4 +244,41 @@ test('readHerdrScreen runs `<bin> agent read <pane> --source recent-unwrapped --
   );
   await expect(readHerdrScreen(bin, 'w1:p1')).resolves.toBe('line 1\nline 2\n');
   await expect(readHerdrScreen(bin, 'w1:p2')).rejects.toThrow(/bad args/);
+});
+
+test('reportMetadataArgs sets pm_sid and pm with the ttl', () => {
+  expect(reportMetadataArgs('w1:p1', { pm_sid: '0d67da1f', pm: 'dLLM评测' }, 600_000)).toEqual([
+    'pane',
+    'report-metadata',
+    'w1:p1',
+    '--source',
+    'herdr-pm',
+    '--token',
+    'pm_sid=0d67da1f',
+    '--token',
+    'pm=dLLM评测',
+    '--ttl-ms',
+    '600000',
+  ]);
+});
+
+test('reportMetadataArgs clears the pm token when the session has no project', () => {
+  const args = reportMetadataArgs('w1:p1', { pm_sid: '0d67da1f', pm: null }, 600_000);
+  expect(args).toContain('--clear-token');
+  expect(args[args.indexOf('--clear-token') + 1]).toBe('pm');
+  expect(args.some((a) => a.startsWith('pm='))).toBe(false);
+  expect(args).toContain('pm_sid=0d67da1f');
+  expect(args.slice(-2)).toEqual(['--ttl-ms', '600000']);
+});
+
+test('reportPaneMetadata runs `<bin> pane report-metadata ...`; rejects with stderr on failure', async () => {
+  const bin = await fakeHerdr(
+    'report',
+    `[ "$*" = "pane report-metadata w1:p1 --source herdr-pm --token pm_sid=0d67da1f --clear-token pm --ttl-ms 600000" ] || { echo "bad args: $*" >&2; exit 2; }`,
+  );
+  await expect(reportPaneMetadata(bin, 'w1:p1', { pm_sid: '0d67da1f', pm: null }, 600_000)).resolves.toBeUndefined();
+  await expect(reportPaneMetadata(bin, 'w1:p2', { pm_sid: '0d67da1f', pm: null }, 600_000)).rejects.toThrow(/bad args/);
+  await expect(reportPaneMetadata(join(binDir, 'missing'), 'w1:p1', { pm_sid: 'x', pm: null }, 1)).rejects.toThrow(
+    /report-metadata/,
+  );
 });

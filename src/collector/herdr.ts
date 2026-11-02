@@ -144,3 +144,34 @@ export async function readPaneProcess(herdrBin: string, paneId: string): Promise
     return null;
   }
 }
+
+/** What the herdr sidebar shows for a pane: the session's short id and, when it has one, its project. */
+export type SidebarTokens = { pm_sid: string; pm: string | null };
+
+/**
+ * Arguments of `herdr pane report-metadata` for one pane. The tokens expire after `ttlMs`, so a stopped
+ * collector leaves no stale labels; a session without a project clears `pm` instead of leaving an old one.
+ */
+export function reportMetadataArgs(paneId: string, tokens: SidebarTokens, ttlMs: number): string[] {
+  return [
+    'pane',
+    'report-metadata',
+    paneId,
+    '--source',
+    'herdr-pm',
+    '--token',
+    `pm_sid=${tokens.pm_sid}`,
+    ...(tokens.pm === null ? ['--clear-token', 'pm'] : ['--token', `pm=${tokens.pm}`]),
+    '--ttl-ms',
+    String(ttlMs),
+  ];
+}
+
+/** Runs `<herdrBin> pane report-metadata ...` for the pane. Rejects on failure, with stderr in the message. */
+export async function reportPaneMetadata(herdrBin: string, paneId: string, tokens: SidebarTokens, ttlMs: number): Promise<void> {
+  try {
+    await execFileAsync(herdrBin, reportMetadataArgs(paneId, tokens, ttlMs), { timeout: SNAPSHOT_TIMEOUT_MS });
+  } catch (e) {
+    throw new Error(`herdr pane report-metadata ${paneId} failed: ${describeExecError(e)}`, { cause: e });
+  }
+}

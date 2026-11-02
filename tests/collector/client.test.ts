@@ -62,3 +62,21 @@ test('auth and validation failures are not retryable', async () => {
     expect((err as Error).message).toContain(String(status));
   }
 });
+
+const emptyPush = { machine: 'laptop', collector_version: '0', sessions: [], purged: [] };
+
+test('pushSnapshot returns the sidebar labels the server answers with', async () => {
+  const labels = [
+    { key: 'claude:a', short_id: '0d67da1f', project: 'dLLM评测' },
+    { key: 'pending:laptop:term_1', short_id: 'term_1', project: null },
+  ];
+  const { client, calls } = clientWith(() => json({ ok: true, labels }));
+  await expect(client.pushSnapshot(emptyPush)).resolves.toEqual(labels);
+  expect(calls[0]!.url).toBe('http://pm.test:7718/ingest/snapshot');
+  expect(JSON.parse(calls[0]!.init.body as string)).toEqual(emptyPush);
+});
+
+test('an old server answering {ok:true} gives no labels', async () => {
+  const { client } = clientWith(() => json({ ok: true }));
+  await expect(client.pushSnapshot(emptyPush)).resolves.toEqual([]);
+});

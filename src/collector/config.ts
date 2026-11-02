@@ -15,7 +15,8 @@ const PathSetting = (fallback: string) => z.string().min(1).default(fallback).tr
 
 /**
  * One machine's collector: where the central server is, the machine label and bearer token it
- * pushes as, the herdr binary, the transcript roots and the local cursor state file.
+ * pushes as, the herdr binary, the transcript roots, the local cursor state file and whether to label
+ * herdr's sidebar.
  */
 export const CollectorConfig = z.object({
   server: z.url({ protocol: /^https?$/ }),
@@ -26,6 +27,8 @@ export const CollectorConfig = z.object({
   codexDir: PathSetting('~/.codex'),
   stateFile: PathSetting('~/.local/state/herdr-pm/collector.json'),
   pollMs: z.number().int().positive().default(10_000),
+  /** Write each session's short id and project to the local herdr's sidebar (`herdr pane report-metadata`). */
+  sidebar: z.boolean().default(true),
 });
 export type CollectorConfig = z.infer<typeof CollectorConfig>;
 
