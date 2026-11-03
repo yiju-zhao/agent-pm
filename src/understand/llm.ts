@@ -2,7 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { DomainDeps } from '../domain/types.ts';
 import type { ToolDef } from './tool-def.ts';
 
-export type LlmRole = 'digest' | 'curate';
+export type LlmRole = 'digest' | 'curate' | 'restage';
 
 export type LlmCall = {
   role: LlmRole;

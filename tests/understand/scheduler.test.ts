@@ -987,3 +987,69 @@ test('the disabled status has every field empty', () => {
     last_curate_at: null,
   });
 });
+
+// ---- stage review ------------------------------------------------------------------------------------------------
+
+/** A project made before the stage rules, linked to session A, with one curated digest to cite. */
+function unreviewedProject(): string {
+  addSession(A);
+  const id = t.user('create_project', { title: 'old project' }).id;
+  t.db.prepare('UPDATE projects SET stage_rules_seen = 0 WHERE id = ?').run(id);
+  t.user('link_session', { session: A, project: id });
+  const digest = addDigest();
+  t.db.prepare('UPDATE digests SET curated = 1 WHERE id = ?').run(digest);
+  return id;
+}
+
+function stageSeen(id: string): number {
+  return (t.db.prepare('SELECT stage_rules_seen FROM projects WHERE id = ?').get(id) as { stage_rules_seen: number }).stage_rules_seen;
+}
+
+test('with nothing else to do, the scheduler reviews unreviewed projects once, then idles', async () => {
+  const p = unreviewedProject();
+  const { calls, runner } = fakeRunner();
+  const s = scheduler(runner);
+
+  expect(await s.tick()).toBe('restaged');
+  expect(calls.map((c) => c.role)).toEqual(['restage']);
+  expect(stageSeen(p)).toBe(1);
+  expect(await s.tick()).toBe('idle');
+  expect(calls).toHaveLength(1);
+});
+
+test('a stage review waits behind digests to curate', async () => {
+  unreviewedProject();
+  for (let i = 0; i < CURATE_BATCH; i++) addDigest();
+  const { calls, runner } = fakeRunner();
+  const s = scheduler(runner);
+
+  expect(await s.tick()).toBe('curated');
+  expect(await s.tick()).toBe('restaged');
+  expect(calls.map((c) => c.role)).toEqual(['curate', 'restage']);
+});
+
+test('a failed stage review backs off, and is given up after repeated failures', async () => {
+  const p = unreviewedProject();
+  const { calls, runner } = fakeRunner(() => fail('other'));
+  const s = scheduler(runner);
+
+  expect(await s.tick()).toBe('skipped');
+  expect(await s.tick()).toBe('idle');
+  expect(s.status().last_error).toContain('复核阶段失败');
+  advance(BACKOFF_START_MS);
+  expect(await s.tick()).toBe('skipped');
+  advance(BACKOFF_START_MS * 2);
+  expect(await s.tick()).toBe('skipped');
+  expect(calls).toHaveLength(3);
+  expect(stageSeen(p)).toBe(1);
+  expect(await s.tick()).toBe('idle');
+});
+
+test('a rate-limited stage review pauses the scheduler', async () => {
+  unreviewedProject();
+  const { runner } = fakeRunner(() => fail('rate_limit'));
+  const s = scheduler(runner);
+
+  expect(await s.tick()).toBe('paused');
+  expect(s.status().paused_until).not.toBeNull();
+});

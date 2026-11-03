@@ -6,7 +6,7 @@ export type SchedulerStatus = {
   paused_until: string | null;
   pause_reason: string | null;
   last_error: string | null;
-  running: 'digest' | 'curate' | null;
+  running: 'digest' | 'curate' | 'restage' | null;
   waiting_sessions: number;
   uncurated_digests: number;
   backfill: { sessions_total: number; sessions_done: number };

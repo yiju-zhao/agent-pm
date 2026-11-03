@@ -32,6 +32,7 @@ function understandingText(s: SchedulerStatus): string {
   }
   if (s.running === 'digest') return '摘要中…';
   if (s.running === 'curate') return '整理中…';
+  if (s.running === 'restage') return '复核阶段中…';
   let text = '空闲';
   if (s.waiting_sessions > 0) text += ` · 待摘要 ${s.waiting_sessions} 个 session`;
   if (s.uncurated_digests > 0) text += ` · 待整理 ${s.uncurated_digests} 条`;

@@ -203,6 +203,12 @@ export const MIGRATIONS: string[] = [
   CREATE INDEX idx_chunks_digested ON chunks(digested, session_key);
   CREATE INDEX idx_digests_curated ON digests(curated);
   `,
+  // v4: the version of the stage rules each project was last judged under (see understand/stage-guide.ts). Projects
+  // that existed before the rules were written were never judged, so they start at 0; new ones start at 1.
+  `
+  ALTER TABLE projects ADD COLUMN stage_rules_seen INTEGER DEFAULT 1;
+  UPDATE projects SET stage_rules_seen = 0;
+  `,
 ];
 
 /** Opens (creating if needed) the central database in WAL mode and applies pending migrations. */

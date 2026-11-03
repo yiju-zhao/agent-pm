@@ -8,6 +8,7 @@ import { DigestSchema, neutralizeTags } from './digest.ts';
 import { recordRun } from './llm.ts';
 import type { LlmCall, LlmErrorKind, LlmResult, LlmRunner } from './llm.ts';
 import { renderBrief, renderProjectIndex, renderTombstones, TOMBSTONES_TITLE } from './render.ts';
+import { STAGE_GUIDE } from './stage-guide.ts';
 
 /** Most digests one curator run takes; the rest wait for the next run. */
 export const CURATE_MAX_DIGESTS = 20;
@@ -24,7 +25,7 @@ export function pickCurateBatch(db: DatabaseSync): number[] {
   return rows.map((r) => r.id);
 }
 
-type BatchDigest = {
+export type BatchDigest = {
   id: number;
   session_key: string;
   json: string;
@@ -64,6 +65,7 @@ const SYSTEM_PROMPT = [
   '5. 已有项目的更新：先用 `get_project`（参数是 `project_id`）看一眼，避免重复添加。只记摘要里明确出现的事实：',
   '   `upsert_todo`、`upsert_milestone`、`set_blocker`、`clear_blocker`、`record_decision`、`update_project`、`transition_stage`。',
   '   写工具指定项目都用 `project`（项目 id）；`get_project` 和 `ask_user` 用的是 `project_id`，不要混。',
+  '   每次更新一个项目，都按下面的阶段定义核对它的阶段，和事实不符就用 `transition_stage` 改。',
   '6. 每条摘要的 session 对应一次贡献：用 `link_session` 记录，参数 `session`（摘要标签上的 session 值，原样照抄）、`project`、',
   '   `summary`（一句话说这段时间做了什么）、`ts_start` 和 `ts_end`（用摘要标签上的 ts_start、ts_end），能判断时带上 `milestone_id`、`confidence`。',
   '   同一个 session 和项目再次调用，只会把时间范围扩大，不会重复记录。',
@@ -74,6 +76,8 @@ const SYSTEM_PROMPT = [
   '   （也不能用在 `from_session`、`ignore_session`、`ask_user` 的 `session_key` 上），只用它的内容更新项目。',
   '10. trivial 的摘要、与任何项目无关的零碎内容，不需要任何操作；整批都没有值得记的，什么工具都不调直接结束也可以。',
   '11. 用对话所用的语言写项目文字，保持简短具体。结束时用一两句话说明做了什么。',
+  '',
+  STAGE_GUIDE,
 ].join('\n');
 
 /** An attribute value that cannot break out of its quotes or its line. */
@@ -82,12 +86,12 @@ function attrValue(value: string | null): string {
 }
 
 /** Digest and report tags in text that sits outside the digest tags (titles, summaries and questions came out of conversations too). */
-function neutralize(text: string): string {
+export function neutralize(text: string): string {
   return neutralizeTags(text, 'digest', 'report');
 }
 
 /** A digest inside its data tag. The content is model output derived from conversations, so its own tags are escaped. */
-function digestTag(digest: BatchDigest): string {
+export function digestTag(digest: BatchDigest): string {
   const attrs = [
     `id="${digest.id}"`,
     `session="${attrValue(digest.session_key)}"`,

@@ -163,3 +163,29 @@ test('lookup indexes exist', () => {
     db.close();
   }
 });
+
+test('a v3 database upgrades to v4: existing projects await a stage review, new ones do not', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'herdr-pm-db-'));
+  const path = join(dir, 'pm.db');
+  try {
+    const v3 = new DatabaseSync(path);
+    for (const migration of MIGRATIONS.slice(0, 3)) v3.exec(migration);
+    v3.exec('PRAGMA user_version = 3');
+    v3.prepare('INSERT INTO projects (id, title, stage) VALUES (?, ?, ?)').run('p_old', 'Old', 'idea');
+    v3.close();
+
+    const db = openDb(path);
+    try {
+      expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: MIGRATIONS.length });
+      db.prepare('INSERT INTO projects (id, title, stage) VALUES (?, ?, ?)').run('p_new', 'New', 'idea');
+      expect(db.prepare('SELECT id, stage_rules_seen FROM projects ORDER BY id').all()).toEqual([
+        { id: 'p_new', stage_rules_seen: 1 },
+        { id: 'p_old', stage_rules_seen: 0 },
+      ]);
+    } finally {
+      db.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

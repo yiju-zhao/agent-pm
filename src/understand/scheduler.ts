@@ -7,6 +7,7 @@ import { MIN_DIGEST_CHARS, nextWindow, runDigest, skipWindow } from './digest.ts
 import type { DigestWindow } from './digest.ts';
 import { isPausing } from './llm.ts';
 import type { LlmErrorKind, LlmRunner } from './llm.ts';
+import { markStageReviewed, pickRestageBatch, runRestage } from './restage.ts';
 import type { SchedulerStatus } from './status.ts';
 
 export { disabledStatus } from './status.ts';
@@ -36,7 +37,7 @@ export const SESSION_COOLDOWN_MS = 3600000;
 /** Cooldowns the same window may cause at its full size; after that each further one halves the session's window. */
 export const STALL_GRACE_CYCLES = 2;
 
-export type TickResult = 'curated' | 'digested' | 'skipped' | 'idle' | 'paused' | 'busy';
+export type TickResult = 'curated' | 'digested' | 'restaged' | 'skipped' | 'idle' | 'paused' | 'busy';
 
 const PAUSE_LABELS: Record<string, string> = {
   rate_limit: '限流（429）',
@@ -74,7 +75,10 @@ type ChunkCounts = { at: number; waiting_sessions: number; backfill: SchedulerSt
 type SessionWithHeartbeat = SessionRow & { machine_heartbeat: string | null };
 type Picked = { window: DigestWindow; force: boolean };
 /** What the tick in flight is working on, so an exception can be counted against it. */
-type Work = { kind: 'curate'; ids: number[]; now: number } | { kind: 'digest'; window: DigestWindow; now: number };
+type Work =
+  | { kind: 'curate'; ids: number[]; now: number }
+  | { kind: 'digest'; window: DigestWindow; now: number }
+  | { kind: 'restage'; ids: string[]; now: number };
 /**
  * A session whose window keeps failing: the window's first chunk, how many cooldowns it has caused, and the cap its
  * windows are cut to once those pass `STALL_GRACE_CYCLES` (unset until then).
@@ -85,7 +89,8 @@ type SyncMarks = { chunk: number };
 
 /**
  * Decides what the understanding layer does next and does it, one model call at a time: curate a batch of digests,
- * digest a session that is ready (realtime), or digest a slice of imported history (backfill), in that order. Pauses,
+ * digest a session that is ready (realtime), digest a slice of imported history (backfill), or review the stage of
+ * projects not yet judged under the current stage rules, in that order. Pauses,
  * backoff, failure counts and cooldowns live in memory and start over when the server restarts.
  */
 export class Scheduler {
@@ -95,7 +100,7 @@ export class Scheduler {
   private readonly models: { digest: string; curate: string };
 
   private inFlight: Promise<TickResult> | null = null;
-  private running: 'digest' | 'curate' | null = null;
+  private running: 'digest' | 'curate' | 'restage' | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private work: Work | null = null;
   private sync: SyncMarks | null = null;
@@ -110,6 +115,8 @@ export class Scheduler {
   private readonly stalls = new Map<string, Stall>();
   private curateFailures = 0;
   private curateWaitUntil: number | null = null;
+  private restageFailures = 0;
+  private restageWaitUntil: number | null = null;
   /** The session the last backfill window came from; the next one starts after it. */
   private backfillCursor: string | null = null;
   /** See `STATUS_CACHE_MS`. */
@@ -146,6 +153,7 @@ export class Scheduler {
           this.lastError = `调度出错：${message}`;
           if (work === null) return 'idle';
           if (work.kind === 'curate') this.curateFailed(work.now, work.ids, 'other', message);
+          else if (work.kind === 'restage') this.restageFailed(work.now, work.ids, 'other', message);
           else this.digestFailed(work.now, work.window, 'other', message);
           return 'skipped';
         } catch (accountingErr) {
@@ -273,7 +281,46 @@ export class Scheduler {
 
     const backfill = this.pickBackfill(now);
     if (backfill !== null) return this.digest(now, backfill);
+
+    if (this.restageWaitUntil === null || now >= this.restageWaitUntil) {
+      const projects = pickRestageBatch(this.db);
+      if (projects.length > 0) return this.restage(now, projects);
+    }
     return 'idle';
+  }
+
+  private async restage(now: number, ids: string[]): Promise<TickResult> {
+    this.work = { kind: 'restage', ids, now };
+    this.running = 'restage';
+    const outcome = await runRestage(this.db, this.deps, this.runner, ids, { model: this.models.curate });
+    if (outcome.status === 'reviewed') {
+      this.restageFailures = 0;
+      this.restageWaitUntil = null;
+      const partial = outcome.partialError;
+      if (partial === undefined) {
+        this.backoffMs = BACKOFF_START_MS;
+        return 'restaged';
+      }
+      this.lastError = `复核阶段中途失败（${partial.kind}）：${partial.message}；已改的阶段保留，项目 ${ids.join(', ')} 不再重试`;
+      return isPausing(partial.kind) ? this.pause(now, partial.kind) : 'restaged';
+    }
+    if (isPausing(outcome.kind)) return this.pause(now, outcome.kind);
+    this.restageFailed(now, ids, outcome.kind, outcome.message);
+    return 'skipped';
+  }
+
+  /** Like `curateFailed`: a restage-only wait, and after `MAX_SESSION_FAILURES` the batch is given up (marked reviewed). */
+  private restageFailed(now: number, ids: string[], kind: LlmErrorKind, message: string): void {
+    this.restageFailures += 1;
+    this.lastError = `复核阶段失败（${kind}）：${message}`;
+    if (this.restageFailures >= MAX_SESSION_FAILURES) {
+      markStageReviewed(this.db, ids);
+      this.lastError += `；连续 ${this.restageFailures} 次失败，已跳过项目 ${ids.join(', ')}`;
+      this.restageFailures = 0;
+      this.restageWaitUntil = null;
+    } else {
+      this.restageWaitUntil = now + Math.min(BACKOFF_START_MS * 2 ** (this.restageFailures - 1), BACKOFF_MAX_MS);
+    }
   }
 
   private async curate(now: number): Promise<TickResult> {

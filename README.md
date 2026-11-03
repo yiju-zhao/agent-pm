@@ -288,6 +288,8 @@ curl -s -XPOST $S/events/2/revert -H "Authorization: Bearer $T"
 
 计划 3 让中心自己读对话：**摘要员**把每个 session 新增的对话片段（chunk）压成结构化摘要，**整理员**再根据摘要建项目、更新里程碑和 todo、提问题。整理员以 `ai:curator` 身份走和网页一样的操作层（`execute()` / `askUser()`），每个写操作都带理由（reason）和证据（evidence，引用的摘要和 chunk），事件日志里能看到；标完成、合并这类操作会变成待你确认的问题。外部 agent 通过 `/mcp` 只能读项目和上报进展，不能直接写。
 
+**阶段**：8 个阶段的定义写在 `src/understand/stage-guide.ts`，整理员每次更新项目都对照它核对阶段。往前推进（idea→探索→构建→验证）直接生效，一次一步，可以连续推几步；回退、完成、搁置、放弃、合并只会变成待你确认的问题。整理员只在有新摘要时才会看一个项目，所以调度器空闲时还会做**阶段复核**：把还没按当前规则判过的项目（idea 到验证），连同关联 session 最近的摘要，一批最多 8 个交给整理员判断一次。改了阶段定义就把 `STAGE_RULES_VERSION` 加一，所有项目会重新复核一遍。
+
 ### 模型和费用
 
 - 摘要用 `claude-haiku-5-5`，整理用 `claude-sonnet-5-5`，可以在 `understanding.digestModel` / `understanding.curateModel` 里换。
