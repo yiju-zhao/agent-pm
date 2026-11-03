@@ -336,7 +336,7 @@ curl -s http://<mac-mini>:7718/status
 | `enabled` | 理解层是否开启 |
 | `running` | 正在跑的调用：`digest`、`curate` 或 `null`（空闲） |
 | `paused_until`、`pause_reason` | 限流 / 额度用完时暂停到什么时候、为什么；没暂停时是 `null` |
-| `last_error` | 最近一次失败的说明 |
+| `last_error` | 最近一次失败的说明；之后同一个 session 摘要成功（摘要失败）或整理成功（整理失败）就清空，跳过了 chunk、放弃了整理批次的那种会一直留着 |
 | `waiting_sessions` | 有未摘要 chunk 的 session 数 |
 | `uncurated_digests` | 还没整理的摘要数 |
 | `backfill.sessions_done` / `backfill.sessions_total` | 历史导入进度（按 session 算） |

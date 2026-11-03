@@ -117,6 +117,16 @@ test('mapSdkMessages maps error_max_turns to other and joins the errors', () => 
   expect(r).toEqual({ ok: false, kind: 'other', message: 'too many turns; gave up' });
 });
 
+test('mapSdkMessages maps error_max_turns to bad_output when structured output was expected, and says why', () => {
+  // With an output schema every turn is a StructuredOutput attempt, so running out of turns means no valid output.
+  const r = mapSdkMessages([resultMsg({ subtype: 'error_max_turns', is_error: true, errors: ['Reached maximum number of turns (3)'] })], {
+    expectStructured: true,
+  });
+  expect(r).toMatchObject({ ok: false, kind: 'bad_output' });
+  expect(r.ok ? '' : r.message).toContain('Reached maximum number of turns (3)');
+  expect(r.ok ? '' : r.message).toContain('structured output');
+});
+
 test('mapSdkMessages maps the other error subtypes to other', () => {
   for (const subtype of ['error_during_execution', 'error_max_budget_usd']) {
     const r = mapSdkMessages([resultMsg({ subtype, is_error: true, errors: ['boom'] })]);
