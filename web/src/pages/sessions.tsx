@@ -5,6 +5,7 @@ import { apiSend, errorText, sessionPath } from '../api.ts';
 import { ConfirmButton } from '../components/confirm-button.tsx';
 import { projectHref } from '../components/project-card.tsx';
 import { SessionTag } from '../components/session-tag.tsx';
+import { SourceBadges } from '../components/source-badges.tsx';
 import { middleEllipsis, relTime } from '../format.ts';
 import { useApi } from '../use-api.ts';
 import { useNow } from '../use-now.ts';
@@ -50,6 +51,7 @@ function SessionRow({ session, projects, now, reload }: RowProps) {
         <SessionTag session={session} />
         <span className="sess-title">{session.title}</span>
         {session.fidelity === 'screen' ? <span className="tag">仅屏幕</span> : null}
+        <SourceBadges sources={session.sources ?? []} />
       </div>
       <div className="sess-meta dim">
         {session.cwd === '' ? null : (

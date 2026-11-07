@@ -1,10 +1,11 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { main } from '../src/cli.ts';
 import { loadCollectorConfig } from '../src/collector/config.ts';
+import { PaseoCollectorConfig } from '../src/paseo-collector/config.ts';
 import { loadServerConfig } from '../src/server/config.ts';
 
 type Run = { code: number; stdout: string; stderr: string; urls: string[] };
@@ -393,6 +394,31 @@ test('cli.ts imports server modules only dynamically, so the collect path never 
 test('the example configs load with the real config loaders', () => {
   const root = new URL('../config/', import.meta.url);
   expect(loadServerConfig(new URL('server.example.json', root).pathname).port).toBe(7718);
+  expect(Object.keys(loadServerConfig(new URL('server.example.json', root).pathname).paseoCollectors ?? {})).toEqual(['paseo-mac-mini']);
+  const paseo = PaseoCollectorConfig.parse(JSON.parse(readFileSync(new URL('paseo-collector.example.json', root), 'utf8')));
+  expect(paseo).toMatchObject({ sourceId: 'paseo-mac-mini', machine: 'mac-mini' });
+  expect(JSON.stringify(paseo)).not.toMatch(/token":|password":/); // secrets only by file
   const collector = loadCollectorConfig(new URL('collector.example.json', root).pathname);
   expect(collector.server).toMatch(/^http:\/\/.+:7718\/?$/);
+});
+
+test('the Paseo collector and its SDK are loaded only by collect-paseo, so the herdr build and paths never need them', () => {
+  const statics = (file: string) =>
+    [...readFileSync(new URL(file, import.meta.url), 'utf8').matchAll(/^import\s(?!type\b)[^;]*?from\s+'([^']+)'/gm)].map((m) => m[1]!);
+  // cli.ts: nothing under src/paseo-collector and no Paseo package statically.
+  expect(statics('../src/cli.ts').filter((s) => s.includes('paseo'))).toEqual([]);
+  // The herdr collector, the lookup and the shared modules never import the Paseo collector or SDK at all.
+  for (const dirName of ['collector', 'lookup', 'shared']) {
+    const base = new URL(`../src/${dirName}/`, import.meta.url);
+    for (const name of readdirSync(base)) {
+      const text = readFileSync(new URL(name, base), 'utf8');
+      expect(text, `${dirName}/${name}`).not.toMatch(/@getpaseo|paseo-collector/);
+    }
+  }
+  // Inside the Paseo collector the SDK is imported at runtime only by sdk.ts, and dynamically.
+  const sdk = readFileSync(new URL('../src/paseo-collector/sdk.ts', import.meta.url), 'utf8');
+  expect(statics('../src/paseo-collector/sdk.ts').filter((s) => s.startsWith('@getpaseo'))).toEqual([]);
+  expect(sdk).toMatch(/await import\('@getpaseo\/client'\)/);
+  // The build keeps it out of the single-file binary.
+  expect(readFileSync(new URL('../scripts/build-collector.sh', import.meta.url), 'utf8')).toMatch(/--external @getpaseo\/client/);
 });

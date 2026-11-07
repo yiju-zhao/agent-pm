@@ -8,8 +8,13 @@ import { MachineLabel } from '../shared/protocol.ts';
  * token the user's own tools present on the write routes; it must not be one a collector holds, or that collector's
  * token (which lives on a coding agent's machine) would also let it act as the user. `mcpToken` is the bearer token
  * coding agents present on `/mcp`; it lives on every agent machine too, so it must differ from both of the others.
+ * `paseoCollectors` maps a Paseo source id (one per observed daemon) to that collector's own token, the machine the daemon
+ * runs on and the daemon's server id; such a token may write that source only (see server/ingest-v2.ts), and it must
+ * differ from every other token here.
  */
 const Token = z.string().min(16, 'must be at least 16 characters').regex(/^\S+$/, 'must not contain whitespace');
+/** A Paseo source id; no `:`, so it can never collide with a herdr source (`herdr:<machine>`). */
+const SourceLabel = z.string().regex(/^[A-Za-z0-9._-]+$/, 'source id must contain only letters, digits, ".", "_" and "-"');
 
 export const ServerConfig = z
   .object({
@@ -18,6 +23,18 @@ export const ServerConfig = z
     userToken: Token,
     mcpToken: Token,
     collectors: z.record(MachineLabel, z.string().min(1)),
+    paseoCollectors: z
+      .record(
+        SourceLabel,
+        z.object({
+          token: Token,
+          /** The machine the observed daemon runs on (not where the collector runs). */
+          machine: MachineLabel,
+          /** The daemon's server id (`paseo status --json`); a collector connected to another daemon is refused. */
+          serverId: z.string().min(1),
+        }),
+      )
+      .optional(),
     /** The digester, curator and scheduler; every field is optional (see `understandingSettings` for the defaults). */
     understanding: z
       .object({
@@ -39,6 +56,22 @@ export const ServerConfig = z
           path: [field],
           message: `must differ from every collector token (it equals the token of collector ${JSON.stringify(clash[0])})`,
         });
+      }
+    }
+    const paseo = Object.entries(config.paseoCollectors ?? {});
+    for (const [sourceId, entry] of paseo) {
+      const clash =
+        Object.entries(config.collectors).find(([, token]) => token === entry.token)?.[0] !== undefined
+          ? 'a herdr collector token'
+          : entry.token === config.userToken
+            ? 'userToken'
+            : entry.token === config.mcpToken
+              ? 'mcpToken'
+              : paseo.some(([other, e]) => other !== sourceId && e.token === entry.token)
+                ? 'another Paseo collector token'
+                : null;
+      if (clash !== null) {
+        ctx.addIssue({ code: 'custom', path: ['paseoCollectors', sourceId, 'token'], message: `must differ from ${clash}` });
       }
     }
     if (config.mcpToken === config.userToken) {

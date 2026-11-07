@@ -37,9 +37,26 @@ function centerSession(overrides: Partial<CenterSession> = {}): CenterSession {
     effective_status: 'idle',
     title: '重构采集器',
     terminal_id: 'term_65efc937b197a27',
+    sources: [],
     ...overrides,
   };
 }
+
+test('a session only Paseo sees is named as such: open it in Paseo, no herdr pane is made up', () => {
+  const paseoOnly = centerSession({
+    terminal_id: null,
+    sources: [{ kind: 'paseo', lifecycle: 'live', external_id: 'agent-7', machine: 'mac-mini' }],
+  });
+  expect(formatCenterHint([paseoOnly])).toBe('这个 session 只由 Paseo 采集（mac-mini · agent agent-7 · 重构采集器），不在 herdr 里，请在 Paseo 中打开');
+  // Also seen by a live herdr source: the usual hint.
+  const both = centerSession({ sources: [...paseoOnly.sources, { kind: 'herdr', lifecycle: 'live', external_id: 'claude:x', machine: 'gx10-090e' }] });
+  expect(formatCenterHint([both])).toBe('中心记录：gx10-090e · claude · 重构采集器，但 herdr 里没找到');
+});
+
+test('a center that predates sources still parses (no sources means none known)', async () => {
+  const { impl } = fakeFetch(() => new Response(JSON.stringify([view()])));
+  expect((await centerSessions(impl, 'http://c', '0d67da1f'))![0]!.sources).toEqual([]);
+});
 
 test('ended session gives 已结束 with machine and title', () => {
   expect(formatCenterHint([centerSession({ effective_status: 'ended' })])).toBe('这个 session 已结束（gx10-090e · 重构采集器）');
@@ -77,15 +94,15 @@ test('no sessions give no hint', () => {
 test('centerSessions returns the sessions with their terminal ids', async () => {
   const { impl } = fakeFetch(() => json([view({ effective_status: 'working', terminal_id: 'term_abc' }), view({ terminal_id: null })]));
   expect(await centerSessions(impl, 'http://localhost:7718', '0d67da1f')).toEqual([
-    { machine: 'gx10-090e', agent_kind: 'claude', effective_status: 'working', title: '重构采集器', terminal_id: 'term_abc' },
-    { machine: 'gx10-090e', agent_kind: 'claude', effective_status: 'idle', title: '重构采集器', terminal_id: null },
+    { machine: 'gx10-090e', agent_kind: 'claude', effective_status: 'working', title: '重构采集器', terminal_id: 'term_abc', sources: [] },
+    { machine: 'gx10-090e', agent_kind: 'claude', effective_status: 'idle', title: '重构采集器', terminal_id: null, sources: [] },
   ]);
 });
 
 test('a session without a terminal id field has none', async () => {
   const { impl } = fakeFetch(() => json([{ machine: 'm', agent_kind: 'claude', effective_status: 'idle', title: 't' }]));
   expect(await centerSessions(impl, 'http://localhost:7718', '0d67da1f')).toEqual([
-    { machine: 'm', agent_kind: 'claude', effective_status: 'idle', title: 't', terminal_id: null },
+    { machine: 'm', agent_kind: 'claude', effective_status: 'idle', title: 't', terminal_id: null, sources: [] },
   ]);
 });
 

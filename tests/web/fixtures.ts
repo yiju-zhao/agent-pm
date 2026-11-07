@@ -198,9 +198,11 @@ export function sessionItem(over: Partial<SessionListItem> = {}): SessionListIte
     first_seen: '2026-10-28T08:00:00.000Z',
     last_seen: '2026-10-30T11:58:00.000Z',
     status_changed_at: null,
+    content_owner: null,
     short_id: '0d67da1f',
     effective_status: 'working',
     chunk_count: 2,
+    sources: [],
     linked_projects: [],
     ...over,
   };

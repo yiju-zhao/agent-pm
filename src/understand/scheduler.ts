@@ -1,7 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { DomainDeps } from '../domain/types.ts';
-import { effectiveStatus } from '../server/sessions-repo.ts';
 import type { SessionRow } from '../server/sessions-repo.ts';
+import { sessionEffectiveStatus } from '../server/sources-repo.ts';
 import { pickCurateBatch, runCurate } from './curate.ts';
 import { MIN_DIGEST_CHARS, nextWindow, runDigest, skipWindow } from './digest.ts';
 import type { DigestWindow } from './digest.ts';
@@ -72,7 +72,6 @@ function nextBackoff(current: number): number {
 type Candidate = { key: string; oldest: string };
 /** The part of the status that scans `chunks`, with the time (ms) it was read at. */
 type ChunkCounts = { at: number; waiting_sessions: number; backfill: SchedulerStatus['backfill'] };
-type SessionWithHeartbeat = SessionRow & { machine_heartbeat: string | null };
 type Picked = { window: DigestWindow; force: boolean };
 /** What the tick in flight is working on, so an exception can be counted against it. */
 type Work =
@@ -509,22 +508,21 @@ export class Scheduler {
   private pickRealtime(now: number): Picked | null {
     const failures = (key: string) => this.sessionFailures.get(key) ?? 0;
     const ordered = this.candidates(false, now).sort((a, b) => failures(a.key) - failures(b.key));
-    const loadSession = this.db.prepare(
-      `SELECT s.*, m.last_heartbeat AS machine_heartbeat FROM sessions s LEFT JOIN machines m ON m.label = s.machine
-       WHERE s.key = ?`,
-    );
+    const loadSession = this.db.prepare('SELECT * FROM sessions WHERE key = ?');
     for (const { key, oldest } of ordered) {
       const overdue = age(now, oldest) >= FALLBACK_MS;
-      const session = loadSession.get(key) as SessionWithHeartbeat | undefined;
+      const session = loadSession.get(key) as SessionRow | undefined;
       let ready: boolean;
       let finished = false;
       if (session === undefined) {
         // `report:` keys, and chunks that arrived before their session's first snapshot.
         ready = age(now, oldest) >= DEBOUNCE_MS;
       } else {
-        const { machine_heartbeat, ...row } = session;
+        const row = session;
+        // The same status rule as `/sessions` and the change feed: every source of the session counts, so one
+        // source's heartbeat cannot hide another's silence.
         const settled =
-          effectiveStatus(row, machine_heartbeat, new Date(now)) !== 'working' &&
+          sessionEffectiveStatus(this.db, key, new Date(now)) !== 'working' &&
           age(now, row.status_changed_at) >= DEBOUNCE_MS;
         ready = settled || overdue;
         finished = row.lifecycle !== 'live';

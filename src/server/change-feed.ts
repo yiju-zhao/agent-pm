@@ -1,17 +1,20 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { STREAM_MAX_EVENTS } from '../shared/stream-protocol.ts';
 import type { StreamEvent, StreamMessage } from '../shared/stream-protocol.ts';
+import type { LiveStatus } from '../shared/protocol.ts';
 import type { SchedulerStatus } from '../understand/status.ts';
-import { OFFLINE_AFTER_MS } from './sessions-repo.ts';
+import { loadStatusContext, sourceHealth, statusIn } from './sources-repo.ts';
+import type { SourceRow } from './sources-repo.ts';
 
 // Change detection for `WS /stream` by polling the database. The writes come from many paths (operations, questions,
-// answers, snapshots, the scheduler), and some changes have no write at all (a machine whose collector went silent goes
-// offline when the clock passes its heartbeat), so one cheap read of a few signatures covers them all.
+// answers, snapshots, the scheduler), and some changes have no write at all (a source whose collector went silent, or
+// whose daemon disconnected, goes offline when the clock passes its heartbeat), so one cheap read of a few signatures
+// covers them all.
 
 /** A cheap signature of everything the page shows; two equal states mean the page has nothing to re-read. */
 export type FeedState = { eventId: number; questions: string; sessions: string; status: string };
 
-/** Reads the current signatures. `now` decides which machines count as offline; `status` is the scheduler's. */
+/** Reads the current signatures. `now` decides which sources count as offline; `status` is the scheduler's. */
 export function readFeedState(db: DatabaseSync, now: Date, status: SchedulerStatus): FeedState {
   const { m } = db.prepare('SELECT MAX(id) AS m FROM events').get() as { m: number | null };
   const q = db
@@ -22,20 +25,39 @@ export function readFeedState(db: DatabaseSync, now: Date, status: SchedulerStat
        FROM questions`,
     )
     .get() as { n: number; pending: number; last: number | null; resolved: string | null; evidence: number };
-  const sessions = db
-    .prepare('SELECT key, live_status, lifecycle, ignored, merged_into, title, machine FROM sessions ORDER BY key')
-    .all()
-    .map((r) => [r.key, r.live_status, r.lifecycle, r.ignored, r.merged_into, r.title, r.machine]);
-  // The same rule as `effectiveStatus`, so the signature flips exactly when a session would start showing as offline.
-  const offline = (db.prepare('SELECT label, last_heartbeat FROM machines ORDER BY label').all() as Array<{ label: string; last_heartbeat: string | null }>)
-    .filter((r) => r.last_heartbeat === null || now.getTime() - Date.parse(r.last_heartbeat) > OFFLINE_AFTER_MS)
-    .map((r) => r.label);
+  // Each session's status by the same rule `/sessions` and the scheduler use, plus its sources' state, so the
+  // signature flips exactly when what a session shows (or a source badge) would change.
+  const ctx = loadStatusContext(db, now);
+  const sessions = (
+    db
+      .prepare('SELECT key, live_status, lifecycle, ignored, merged_into, title, machine, content_owner FROM sessions ORDER BY key')
+      .all() as Array<{ key: string; live_status: LiveStatus; lifecycle: string; ignored: number; merged_into: string | null; title: string; machine: string | null; content_owner: string | null }>
+  ).map((r) => [
+    r.key,
+    statusIn(ctx, r, now),
+    r.lifecycle,
+    r.ignored,
+    r.merged_into,
+    r.title,
+    r.machine,
+    r.content_owner,
+    (ctx.observations.get(r.key) ?? []).map((o) => [o.source_id, o.live_status, o.lifecycle, o.fresh, o.content_state, o.gaps]),
+  ]);
+  const offline = [...ctx.sources.values()]
+    .filter((src) => !sourceAlive(src, now))
+    .map((src) => src.source_id)
+    .sort();
   return {
     eventId: m ?? 0,
     questions: `${q.n}|${q.pending}|${q.last ?? ''}|${q.resolved ?? ''}|${q.evidence}`,
     sessions: JSON.stringify({ sessions, offline }),
     status: JSON.stringify(status),
   };
+}
+
+function sourceAlive(src: SourceRow, now: Date): boolean {
+  const h = sourceHealth(src, now);
+  return h.collectorAlive && h.daemonOk;
 }
 
 /** The messages that take a page from `prev` to `next`, always in the order events, questions, sessions, status. */

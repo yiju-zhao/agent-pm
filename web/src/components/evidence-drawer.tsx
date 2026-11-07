@@ -5,6 +5,7 @@ import { AUTH_EVENT, errorText } from '../api.ts';
 import { shortTime } from '../format.ts';
 import { useApi } from '../use-api.ts';
 import { SessionTag } from './session-tag.tsx';
+import { evidenceSourceLine, SourceBadges } from './source-badges.tsx';
 
 // ---- references --------------------------------------------------------------------------------------------------
 
@@ -133,7 +134,9 @@ function timeRange(start: string | null, end: string | null): string | null {
 
 function Chunk({ chunk }: { chunk: EvidenceChunk }) {
   const when = timeRange(chunk.ts_start, chunk.ts_end);
-  const head = [`片段 #${chunk.id}`, CHUNK_KIND[chunk.kind] ?? chunk.kind, when].filter((part) => part !== null).join(' · ');
+  const head = [`片段 #${chunk.id}`, CHUNK_KIND[chunk.kind] ?? chunk.kind, when, evidenceSourceLine(chunk.source ?? null)]
+    .filter((part) => part !== null)
+    .join(' · ');
   return (
     <section className="chunk">
       <div className="dim">{head}</div>
@@ -148,6 +151,7 @@ function Body({ view }: { view: EvidenceView }) {
     <>
       <div className="drawer-meta">
         {view.session !== null ? <SessionTag session={view.session} /> : <span className="dim">{`session ${view.session_key}（已清除）`}</span>}
+        {view.session !== null ? <SourceBadges sources={view.session.sources ?? []} /> : null}
         {when !== null ? <span className="dim">{when}</span> : null}
       </div>
       {view.digest !== null ? <DigestLists digest={view.digest} /> : null}

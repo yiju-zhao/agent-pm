@@ -31,9 +31,11 @@ const SESSION: EvidenceView['session'] = {
   first_seen: '2026-10-29T08:00:00.000Z',
   last_seen: '2026-10-30T09:00:00.000Z',
   status_changed_at: null,
+  content_owner: null,
   short_id: '0d67da1f',
   effective_status: 'working',
   chunk_count: 3,
+  sources: [],
 };
 
 function digestView(over: Partial<EvidenceView> = {}): EvidenceView {
@@ -56,8 +58,8 @@ function digestView(over: Partial<EvidenceView> = {}): EvidenceView {
       trivial: false,
     },
     chunks: [
-      { id: 8, kind: 'transcript', ts_start: new Date(2026, 9, 30, 9, 6).toISOString(), ts_end: null, text: '用户：为什么掉线？\n助手：因为竞态。', truncated: false },
-      { id: 9, kind: 'transcript', ts_start: null, ts_end: null, text: '很长的一段对话', truncated: true },
+      { id: 8, kind: 'transcript', ts_start: new Date(2026, 9, 30, 9, 6).toISOString(), ts_end: null, text: '用户：为什么掉线？\n助手：因为竞态。', truncated: false, source: null },
+      { id: 9, kind: 'transcript', ts_start: null, ts_end: null, text: '很长的一段对话', truncated: true, source: null },
     ],
     ...over,
   };
@@ -226,7 +228,7 @@ test('a digest whose JSON could not be read, and one without conversation text, 
 });
 
 test('conversation text is plain text, not HTML', async () => {
-  serve(digestView({ chunks: [{ id: 8, kind: 'transcript', ts_start: null, ts_end: null, text: '<b>粗</b><script>alert(1)</script>', truncated: false }] }));
+  serve(digestView({ chunks: [{ id: 8, kind: 'transcript', ts_start: null, ts_end: null, text: '<b>粗</b><script>alert(1)</script>', truncated: false, source: null }] }));
   render(<EvidenceLink evidence="digest:3" />);
   open('摘要 #3');
   const dialog = await screen.findByRole('dialog');
