@@ -37,4 +37,6 @@ export const STAGE_LABEL: Record<Stage, string> = {
  * rules change in a way that could move projects: every working project is then reviewed once more. A new project is
  * stamped with the current version, since it is made under the current rules.
  */
-export const BOARD_RULES_VERSION = 2; // 2: priorities defined, and the review pre-fills a missing one
+// 2: priorities defined, and the review pre-fills a missing one. 3: the review is shown which priorities are missing
+// (under 2 it was not, and filled none), so every working project is reviewed once more.
+export const BOARD_RULES_VERSION = 3;

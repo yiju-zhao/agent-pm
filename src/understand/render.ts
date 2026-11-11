@@ -107,10 +107,12 @@ function eventLine(e: EventView): string {
   return `- ${parts.join(' · ')}${marks}`;
 }
 
-/** The project's own fields, then its current milestone. Empty fields are left out. */
+/**
+ * The project's own fields, then its current milestone. Empty text fields are left out; the priority is always shown,
+ * `未定` when it has none, so a reader (and the review, which fills it) can see that it is missing.
+ */
 function headLines(p: ProjectDetail): string[] {
-  const stage = [`阶段：${STAGE_LABEL[p.stage]}`];
-  if (p.priority !== null) stage.push(`优先级：${p.priority}`);
+  const stage = [`阶段：${STAGE_LABEL[p.stage]}`, `优先级：${p.priority ?? '未定'}`];
   if (p.merged_into !== null) stage.push(`已合并到：${p.merged_into}`);
 
   const lines = [`# ${oneLine(p.title)}`, `ID：${p.id}`, stage.join(' · ')];

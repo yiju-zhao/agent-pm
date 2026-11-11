@@ -274,3 +274,18 @@ test('set_priority pre-fills a missing priority, can set nothing else, and only 
   expect(results[2]).toMatchObject({ status: 'rejected', code: 'invalid' }); // extra field refused
   expect(results[3]).toMatchObject({ status: 'rejected', code: 'invalid' }); // not one of P0–P3
 });
+
+test('the review is shown which projects have no priority (under rules v2 it was not, and filled none)', () => {
+  const p = oldProject('没有优先级');
+  const q = oldProject('有优先级');
+  t.user('update_project', { project: q, fields: { priority: 'P1' } });
+  link(KEY, p);
+  t.user('link_session', { session: KEY, project: q });
+  addDigest(KEY, '做了一些事');
+  const { prompt, system } = buildRestagePrompt(t.db, t.deps, [p, q]);
+  const block = (id: string) => prompt.slice(prompt.indexOf(`<project id="${id}">`), prompt.indexOf('</project>', prompt.indexOf(`<project id="${id}">`)));
+  expect(block(p)).toContain('优先级：未定');
+  expect(block(q)).toContain('优先级：P1');
+  expect(prompt).toMatch(/^## 要复核阶段和优先级的项目/);
+  expect(system).toContain('「优先级：未定」');
+});
