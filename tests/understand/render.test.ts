@@ -83,9 +83,9 @@ test('brief shows stage in Chinese, open todos, open blockers and active session
   expect(b).not.toMatch(/决策/); // no decisions: the section is left out
 });
 
-test('brief of a bare project is only its title, id and stage', () => {
+test('brief of a bare project is only its title, id, stage and (missing) priority', () => {
   const p = t.user('create_project', { title: '空项目' }).id;
-  expect(renderBrief(detail(p))).toBe(`# 空项目\nID：${p}\n阶段：idea`);
+  expect(renderBrief(detail(p))).toBe(`# 空项目\nID：${p}\n阶段：idea · 优先级：未定`);
 });
 
 test('brief lists at most 10 open todos and the 5 most recent decisions, and says how many todos it left out', () => {
@@ -118,7 +118,7 @@ test('brief of a merged project says where it went', () => {
   const target = t.user('create_project', { title: 'target' }).id;
   const p = t.user('create_project', { title: 'old' }).id;
   expect(t.user('transition_stage', { project: p, stage: 'merged', merge_into: target }).status).toBe('applied');
-  expect(renderBrief(detail(p))).toContain(`阶段：合并 · 已合并到：${target}`);
+  expect(renderBrief(detail(p))).toContain(`阶段：合并 · 优先级：未定 · 已合并到：${target}`);
 });
 
 // ---- renderProjectMarkdown ---------------------------------------------------------------------------------------
