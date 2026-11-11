@@ -173,6 +173,7 @@ export function ProjectPage({ id }: { id: string }) {
     <main data-page="project" data-project-id={id}>
       {data.merged_into !== null ? <MergedBanner into={data.merged_into} titles={titles} /> : null}
       {error !== null ? <ErrorBar error={error} onRetry={reload} /> : null}
+      <a className="project-back" href="#/">所有项目</a>
       <Overview project={data} reload={reload} mergeTargets={mergeTargets} mergeTargetsFailed={projects.error !== null} now={now} />
       <div className="cols">
         <div className="main">

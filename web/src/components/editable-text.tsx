@@ -126,7 +126,7 @@ export function EditableText({ value, multiline = false, placeholder, onSave }: 
         </span>
       ) : (
         <button type="button" ref={trigger} className="editable-text" onClick={start}>
-          {value ? value : <span className="placeholder">{placeholder ?? '（空）'}</span>}
+          <span className="editable-value">{value ? value : <span className="placeholder">{placeholder ?? '（空）'}</span>}</span>
         </button>
       )}
       {error !== null ? (

@@ -4,6 +4,7 @@ import type { ProjectCard, QuestionView } from '../../../src/domain/read.ts';
 import type { SessionListItem } from '../../../src/server/http.ts';
 import { errorText } from '../api.ts';
 import { Fold } from '../components/blocks.tsx';
+import { Icon } from '../components/icon.tsx';
 import { Kanban } from '../components/kanban.tsx';
 import { ProjectCardView } from '../components/project-card.tsx';
 import { QuestionCard } from '../components/question-card.tsx';
@@ -35,10 +36,10 @@ function ViewToggle({ view, onChange }: { view: View; onChange: (view: View) => 
   return (
     <div className="seg" role="group" aria-label="视图">
       <button type="button" aria-pressed={view === 'list'} onClick={() => onChange('list')}>
-        列表
+        <Icon name="list" />列表
       </button>
       <button type="button" aria-pressed={view === 'kanban'} onClick={() => onChange('kanban')}>
-        看板
+        <Icon name="board" />看板
       </button>
     </div>
   );
@@ -143,7 +144,9 @@ export function HomePage() {
       <div className="cols">
         <div className="main">
           <div className="head-row">
-            <h2 className="h">{heading}</h2>
+            <h2 className="h workspace-title" aria-label={heading}>
+              项目<span className="workspace-meta">按优先级{cards !== undefined ? ` / ${groups.main.length - asleep} 个推进中 / ${asleep} 个休眠` : ''}</span>
+            </h2>
             <ViewToggle view={view} onChange={choose} />
           </div>
           {projects.error !== null ? (

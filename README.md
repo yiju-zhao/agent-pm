@@ -426,7 +426,7 @@ curl -s http://<mac-mini>:7718/mcp -H "Authorization: Bearer <mcpToken>" \
 
 中心服务在 `/` 托管一个网页：首页按优先级列出项目（卡片上有进度条、在跑的 session、阻塞和待你回答的问题），右栏是"需要你"和"待归属的 session"；点项目进详情页（改字段、里程碑、todo、阻塞、决策、时间线、事件日志；你改过的字段 AI 之后只能提议，页面上不显示锁，解锁只有 API）；`Session` 页按机器列出全部 session，可以关联到项目、取消关联、不追踪。页面里 AI 写的文字一律按纯文本显示。
 
-**样式**：界面按 [Hallmark](https://github.com/nutlope/hallmark) 的规范做过一次 restyle（主题 Cobalt，app 界面）：所有颜色、间距、字号都走 `web/src/tokens.css` 里的 token，`base.css` 是它的基础规则，`styles.css` 开头的 `Hallmark ·` 注释是这次设计的记录（主题、评审结果、有意去掉的东西）。字体用系统字体，不请求外部字体。改样式时用 token，不写颜色字面量。
+**样式**：界面按 [Hallmark](https://github.com/nutlope/hallmark) 的规范重构（主题 Coral，app 界面）：所有颜色、间距、字号都走 `web/src/tokens.css` 里的 token，`base.css` 是它的基础规则，`styles.css` 开头的 `Hallmark ·` 注释是这次设计的记录（主题、检查、保留的交互）。字体用系统字体，不请求外部字体。改样式时用 token，不写颜色字面量。
 
 **构建**：网页是 `web/` 下的 React + Vite 项目，要先构建，服务才有页面可托管（没构建时 `/` 会提示怎么构建）：
 

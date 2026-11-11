@@ -58,7 +58,9 @@ export function ProjectCardView({
           <a href={projectHref(card.id)}>{card.title}</a>
         </b>
         {waitingForYou ? <span className="alert-dot" role="img" aria-label="有 agent 在等你操作" title="有 agent 在等你操作" /> : null}
-        <span className="dim">{STAGE_LABEL[card.stage]}</span>
+      </div>
+      <div className="proj-meta">
+        <span className={`stage-tag stage-${card.stage}`}>{STAGE_LABEL[card.stage]}</span>
         {milestones > 0 ? (
           <span className="dim">
             里程碑 {done}/{milestones}

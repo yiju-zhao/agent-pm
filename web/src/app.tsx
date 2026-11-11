@@ -73,7 +73,7 @@ function SyncButton() {
   };
   return (
     <button type="button" onClick={sync} disabled={syncing}>
-      立即同步
+      <Icon name="sync" />立即同步
     </button>
   );
 }
@@ -123,16 +123,16 @@ export function App() {
   return (
     <>
       <header className="topbar">
-        <h1>agent-pm</h1>
-        <nav>
+        <h1 className="wordmark">agent<span className="wordmark-separator">-</span>pm</h1>
+        <nav aria-label="主导航">
           <a href="#/" aria-current={route.page === 'home' ? 'page' : undefined}>
-            首页
+            <Icon name="projects" />首页
           </a>
           <a href="#/sessions" aria-current={route.page === 'sessions' ? 'page' : undefined}>
-            Session
+            <Icon name="sessions" />Session
           </a>
           <a href="#/keys" aria-current={route.page === 'keys' ? 'page' : undefined}>
-            API Keys
+            <Icon name="key" />API Keys
           </a>
         </nav>
         <div className="topbar-status">
@@ -140,7 +140,7 @@ export function App() {
           <SyncButton />
           <ConnectionDot />
           <button type="button" onClick={() => setSettingsTab('access')}>
-            设置
+            <Icon name="settings" />设置
           </button>
         </div>
       </header>

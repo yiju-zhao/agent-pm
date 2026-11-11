@@ -1,11 +1,11 @@
-/* Hallmark · shape: app screen · genre: modern-minimal · theme: Cobalt (deal 1/3, seed project-board-one-developer-09f4·712e8b90·2026-11-11·r0) · redesign: restyle
- * nav: kept, a top bar with three destinations · signature: kept, the session timeline of a project · states: loading, empty, error
- * axes: light/grotesk-sans/cool · posture: restrained · contrast: pass · v2.0.0 */
-/* Hallmark · finish-review: subagent · 8 findings · 7 resolved 1 unresolved (63, the dot-joined headings are the owner's copy and the tests pin them) · gap: 49a on the click-to-edit prose at 320px */
-/* Hallmark · pre-emit critique: P3 H4 E4 S3 R4 V4 · weakest: S, a board on cool paper could be many tools; the state colours are kept for the session timeline, the one object only this tool has */
-/* Hallmark · dropped setPicked, setTarget, move(merging, unlock, onStart, onError, dllm 评测框架 解锁 · the owner asked for a stage that changes at once, with no confirm step, and for fields that never say whether the AI or the user set them: the 解锁 buttons and the stage's 确定 and 取消 are gone */
-/* Hallmark · answered F4 · the accent fill is the submit of a dialog or of the new-key form only; every other button is a key-face key behind a rule, and the pressed tab and switch are states */
-/* Hallmark · dismissed 70 · items.tsx prints no success text: the match is the title of a milestone row, and every control on the page sends its request before anything changes */
+/* Hallmark · shape: app screen · genre: modern-minimal · theme: Coral (deal 1/3, seed agent-pm-multi-agent-project-management-30ab·712e8b90·2026-11-11·r0) · redesign: full
+ * nav: kept, three destinations in a top bar · signature: project priority register and session timeline · states: loading, empty, error
+ * axes: light/grotesk-sans/warm · posture: restrained · v2.0.0 */
+/* Hallmark · pre-emit critique: P4 H4 E4 S4 R4 V3 · weakest: V, familiar workbench; priority register and decision queue carry the product rather than decoration */
+/* Hallmark · copy: verbatim · existing domain labels and data are retained; system fonts support Chinese and offline tailnet use */
+/* Hallmark · answered F4 · ink is the primary submit on modal and keys forms; other controls use cotton, selected tabs use pressed stock */
+/* Hallmark · dismissed 70 · items.tsx maps a milestone status named done; its controls send their changes to the API */
+/* Hallmark · finish-review: in-thread (Codex) · field contrast corrected; editable prose retains natural wrapping; four routes rendered, original controls retained */
 @import url("./tokens.css");
 @import url("./base.css");
 
@@ -80,15 +80,15 @@ button:disabled {
 /* The one filled action of a dialog or a form of its own. */
 .modal-actions button[type="submit"],
 .keys-create button[type="submit"] {
-  border-color: var(--color-accent-edge);
-  background: var(--color-accent);
-  color: var(--color-accent-ink);
+  border-color: var(--color-board);
+  background: var(--color-board);
+  color: var(--color-board-type);
 }
 
 .modal-actions button[type="submit"]:hover:not(:disabled),
 .keys-create button[type="submit"]:hover:not(:disabled) {
-  border-color: var(--color-accent-edge);
-  background: var(--color-accent-deep);
+  border-color: var(--color-ink-2);
+  background: var(--color-ink-2);
 }
 
 input,
@@ -184,7 +184,7 @@ select {
 .danger.asked:hover:not(:disabled) {
   border-color: var(--color-error);
   background: var(--color-error);
-  color: var(--color-accent-ink);
+  color: var(--color-key-face);
   font-weight: 500;
 }
 
@@ -1087,7 +1087,7 @@ select.prio.p0 {
 /* statusClass() sets the dot colour on `color`; on a bar it is the fill. Working is the one saturated bar. */
 .tl-bar.dot-working {
   background: var(--color-success);
-  color: var(--color-accent-ink);
+  color: var(--color-key-face);
 }
 
 .tl-bar.dot-blocked {
@@ -1529,4 +1529,148 @@ select.prio.p0 {
     flex: 1 0 100%;
     font-weight: 600;
   }
+}
+
+/* Coral workbench. Shared shell, a project register, and a quieter decision rail. */
+.topbar {
+  min-height: var(--topbar-h);
+  padding-inline: max(var(--space-lg), calc((100% - var(--container)) / 2 + var(--space-xl)));
+  background: var(--color-key-face);
+  gap: var(--space-md) var(--space-xl);
+}
+.wordmark { display: inline-flex; align-items: baseline; font-weight: 700; letter-spacing: -0.04em; }
+.wordmark-separator { color: var(--color-accent-2); margin-inline: var(--space-2xs); }
+.topbar nav { align-self: stretch; gap: var(--space-xs); }
+.topbar nav a { position: relative; gap: var(--space-xs); padding-inline: var(--space-sm); border-radius: 0; }
+.topbar nav a[aria-current="page"] { background: none; font-weight: 600; }
+.topbar nav a[aria-current="page"]::after { content: ''; position: absolute; bottom: calc(-1 * var(--space-xs)); inset-inline: var(--space-sm); height: 2px; background: var(--color-accent-2); }
+.topbar-status { gap: var(--space-sm); }
+.topbar-status button { border-color: var(--color-rule); }
+.understanding { font-size: var(--text-xs); }
+main { padding: var(--space-xl); }
+.cols { gap: var(--space-xl); align-items: flex-start; }
+.cols > .side { flex: 0 0 320px; width: 320px; padding-left: var(--space-lg); border-left: 1px solid var(--color-rule); }
+.head-row { min-height: 48px; margin-bottom: var(--space-lg); gap: var(--space-md); }
+.workspace-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-sm) var(--space-md); font-size: var(--text-2xl); }
+.workspace-meta { color: var(--color-muted); font-size: var(--text-xs); font-weight: 400; letter-spacing: normal; }
+.seg { padding: var(--space-2xs); border-radius: var(--radius-card); background: var(--color-paper-2); box-shadow: var(--press-groove); }
+.seg button { min-height: var(--control-h); padding-inline: var(--space-sm); }
+.seg button[aria-pressed="true"] { border-color: var(--color-rule); box-shadow: var(--shadow-card); }
+button, a.button { border-color: var(--color-rule-2); box-shadow: var(--shadow-card); }
+button:hover:not(:disabled), a.button:hover { border-color: var(--color-muted); background: var(--color-paper-2); }
+.linklike, .link-btn, .danger, .fold-btn, .icon-btn, .editable-text, .status-btn, .seg button, .settings-tabs button { box-shadow: none; }
+.modal-actions button[type="submit"], .keys-create button[type="submit"] { background: var(--color-board); color: var(--color-board-type); border-color: var(--color-board); }
+.modal-actions button[type="submit"]:hover:not(:disabled), .keys-create button[type="submit"]:hover:not(:disabled) { background: var(--color-ink-2); border-color: var(--color-ink-2); }
+input, select, textarea { border-color: var(--color-muted); }
+input:hover:not(:disabled), select:hover:not(:disabled), textarea:hover:not(:disabled) { border-color: var(--color-muted); }
+.proj {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--space-md);
+  row-gap: var(--space-xs);
+  padding: var(--space-lg);
+  margin-bottom: var(--space-md);
+  background: var(--color-key-face);
+  border-color: var(--color-rule);
+  box-shadow: var(--shadow-card);
+}
+.proj > * { grid-column: 1 / -1; min-width: 0; }
+.proj-head { grid-column: 1; align-items: baseline; gap: var(--space-xs); flex-wrap: nowrap; }
+.proj-head b { font-size: var(--text-md); line-height: 1.55; }
+.proj-head a { text-decoration: none; }
+.proj-head a:hover { text-decoration: underline; text-decoration-color: var(--color-accent-2); }
+.proj-head .tag { flex: none; }
+.proj-meta { grid-column: 2; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-xs); font-size: var(--text-xs); }
+.proj-meta .dim { white-space: nowrap; }
+.stage-tag { color: var(--color-muted); font-size: var(--text-xs); white-space: nowrap; }
+.stage-build, .stage-verify { color: var(--color-accent-deep); }
+.proj .summary { line-height: 1.65; padding-bottom: var(--space-2xs); }
+.proj .todo { line-height: 1.7; }
+.proj .ms { max-width: 240px; margin-block: var(--space-2xs); }
+.ms span.d { background: var(--color-accent-2); }
+.ms span.n { background: var(--color-accent); }
+.proj.dormant, .kcard.dormant { border-style: solid; background: var(--color-paper-2); box-shadow: none; }
+.side-section > .h { min-height: 48px; margin-bottom: var(--space-lg); font-size: var(--text-sm); font-weight: 600; }
+.side-section + .side-section { margin-top: var(--space-xl); padding-top: var(--space-lg); border-top: 1px solid var(--color-rule); }
+.side .q { padding: var(--space-md) 0; border: 0; border-radius: 0; background: none; }
+.side .q + .q { border-top: 1px solid var(--color-rule); }
+.q-prompt { font-weight: 500; line-height: 1.7; }
+.q-options { gap: var(--space-xs); margin-top: var(--space-sm); }
+.q-foot { margin-top: var(--space-xs); }
+.fold { margin-block: var(--space-md); }
+.fold-btn { min-height: 44px; }
+.kanban { gap: var(--space-sm); padding-bottom: var(--space-md); }
+.kcol { flex-basis: 208px; padding: var(--space-sm); background: var(--color-paper-2); border-top: 0; border-radius: var(--radius-card); }
+.kcol > .h { padding: var(--space-2xs) 0 var(--space-sm); }
+.kcard { padding: var(--space-md); gap: var(--space-xs); align-items: flex-start; box-shadow: var(--shadow-card); }
+.kcard a { font-weight: 500; text-decoration: none; }
+.project-back { display: inline-block; min-height: var(--control-h); color: var(--color-muted); font-size: var(--text-xs); }
+.overview { padding-bottom: var(--space-lg); border-bottom: 1px solid var(--color-rule); gap: var(--space-md); }
+.proj-title { font-size: var(--text-2xl); }
+.overview .title-row { align-items: baseline; }
+.overview .stage-control { align-self: flex-start; }
+.block { padding-top: var(--space-lg); margin-bottom: var(--space-lg); }
+.block > .h { font-size: var(--text-sm); font-weight: 600; margin-bottom: var(--space-md); }
+[data-page="project"] .cols > .main > .block:first-of-type { border-top: 0; padding-top: 0; }
+[data-page="project"] .side > .block:first-child { border-top: 0; padding-top: 0; }
+[data-page="project"] .cols { margin-block: var(--space-lg) var(--space-xl); }
+[data-page="project"] .editable-text { line-height: 1.6; }
+/* Editable prose is a content block; it wraps naturally while keeping a single edit target. */
+.editable-value { display: block; }
+.item { min-height: 48px; padding-block: var(--space-xs); }
+[data-page="sessions"] > .head-row, .keys-page > h2 { padding-bottom: var(--space-lg); border-bottom: 1px solid var(--color-rule); }
+[data-page="sessions"] > .head-row > .h, .keys-page > h2 { font-size: var(--text-2xl); }
+.machine-group { padding-top: var(--space-sm); }
+.machine-group > .h { color: var(--color-ink-2); font-size: var(--text-sm); margin-bottom: var(--space-sm); }
+.sess-row { gap: var(--space-sm); padding-block: var(--space-lg); }
+.sess-links { gap: var(--space-xs); }
+.settings-head { padding: var(--space-lg); }
+.settings-panel { padding: var(--space-lg); }
+.settings-tabs { width: 152px; padding: var(--space-md) var(--space-xs); }
+.settings-tabs button { min-height: 44px; }
+.keys-create, .keys-revealed { gap: var(--space-sm) var(--space-md); padding-block: var(--space-lg); }
+.keys-table th, .keys-table td { padding-block: var(--space-md); }
+@media (max-width: 78rem) {
+  .topbar { gap: var(--space-sm) var(--space-lg); }
+  .topbar-status { gap: var(--space-xs); }
+  .understanding { flex-basis: 100%; justify-content: flex-end; }
+  .cols > .side { flex-basis: 280px; width: 280px; }
+  .proj-meta { grid-column: 1 / -1; justify-content: flex-start; }
+}
+@media (max-width: 60rem) {
+  .topbar { padding: var(--space-md) var(--space-lg); }
+  .topbar nav { margin-left: auto; align-self: auto; }
+  .topbar nav a { min-height: 44px; }
+  .topbar nav a[aria-current="page"]::after { bottom: 0; }
+  .topbar-status { width: 100%; margin-left: 0; }
+  .understanding { flex-basis: auto; margin-right: auto; justify-content: flex-start; }
+  main { padding: var(--space-lg); }
+  .cols > .side { flex: auto; width: 100%; padding: var(--space-lg) 0 0; border-left: 0; border-top: 1px solid var(--color-rule); }
+  .cols { gap: var(--space-lg); }
+  .proj-meta { grid-column: 2; justify-content: flex-end; }
+}
+@media (max-width: 40rem) {
+  .topbar { padding: var(--space-xs) var(--space-md); gap: var(--space-xs); }
+  .topbar nav { gap: 0; }
+  .topbar nav a { padding-inline: var(--space-xs); gap: var(--space-2xs); font-size: var(--text-xs); }
+  .topbar-status { gap: var(--space-xs); }
+  .topbar-status button { min-height: 44px; }
+  .understanding { flex: 1 1 auto; }
+  .conn { margin-left: auto; }
+  main { padding: var(--space-lg) var(--space-md); }
+  .head-row { align-items: flex-start; margin-bottom: var(--space-md); }
+  .workspace-title { flex-direction: column; gap: var(--space-xs); }
+  .workspace-meta { font-size: var(--text-xs); }
+  .seg button { min-height: 44px; padding-inline: var(--space-xs); }
+  .proj { padding: var(--space-md); row-gap: var(--space-xs); }
+  .proj-head { grid-column: 1 / -1; }
+  .proj-meta { grid-column: 1 / -1; justify-content: flex-start; }
+  .summary { white-space: normal; }
+  .proj .summary { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .side-section > .h { margin-bottom: var(--space-xs); }
+  .proj-title { font-size: var(--text-xl); }
+  .settings-tabs { width: auto; }
+  .q-options button, .q-text button, .modal-actions button, .item button, .sess-links button { min-height: 44px; }
+  .keys-table th, .keys-table td { padding-block: 0; }
 }
