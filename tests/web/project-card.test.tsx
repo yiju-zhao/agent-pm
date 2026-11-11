@@ -28,7 +28,7 @@ test('the first line is priority, linked title and stage; the title links to the
   expect(link.getAttribute('href')).toBe('#/p/p_1');
   const priority = screen.getByText('P0');
   expect(priority.classList.contains('p0')).toBe(true);
-  expect(screen.getByText('· 构建')).toBeTruthy();
+  expect(screen.getByText('构建')).toBeTruthy();
 });
 
 test('each priority has its class, and an unset one reads 未定', () => {
@@ -49,7 +49,7 @@ test('a title is plain text, never markup', () => {
 
 test('milestone counts show only when there are milestones, as done/total', () => {
   const view = renderCard({ milestones_progress: { done: 3, doing: 1, todo: 1 } });
-  expect(screen.getByText('· 里程碑 3/5')).toBeTruthy();
+  expect(screen.getByText('里程碑 3/5')).toBeTruthy();
   view.unmount();
   renderCard({ milestones_progress: { done: 0, doing: 0, todo: 0 } });
   expect(screen.queryByText(/里程碑/)).toBeNull();
@@ -118,11 +118,12 @@ test('a blocked session puts a red dot beside the title; other statuses do not',
   expect(screen.queryByTitle('有 agent 在等你操作')).toBeNull();
 });
 
-test('every open blocker is a red line starting with ⛔', () => {
+test('every open blocker is a red line starting with the blocked icon', () => {
   renderCard({ open_blockers: [blocker({ id: 'b_1', text: '显存不够跑对照组' }), blocker({ id: 'b_2', text: '等数据授权' })] });
-  const first = screen.getByText('⛔ 显存不够跑对照组');
+  const first = screen.getByText('显存不够跑对照组');
   expect(first.classList.contains('blk')).toBe(true);
-  expect(screen.getByText('⛔ 等数据授权')).toBeTruthy();
+  expect(first.querySelector('svg.icon')).not.toBeNull();
+  expect(screen.getByText('等数据授权')).toBeTruthy();
 });
 
 test('at most three todos: the first is 下一步, the rest are counted', () => {
@@ -147,8 +148,8 @@ test('three todos are all shown without a count; none shows nothing', () => {
 
 test('a dormant project says how long and is dimmed; a closed one with the same data is not', () => {
   const dormant = renderCard({ dormant_days: 9, stage: 'idea', priority: 'P2' });
-  expect(screen.getByText('· 休眠 9 天')).toBeTruthy();
-  expect(screen.getByText('· 无活跃 session')).toBeTruthy();
+  expect(screen.getByText('休眠 9 天')).toBeTruthy();
+  expect(screen.getByText('无活跃 session')).toBeTruthy();
   expect(root(dormant).classList.contains('dormant')).toBe(true);
   dormant.unmount();
 

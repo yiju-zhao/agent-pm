@@ -6,3 +6,5 @@ dist/
 *.db-shm
 config/*.local.json
 *.bun-build
+.hallmark/
+.playwright-mcp/

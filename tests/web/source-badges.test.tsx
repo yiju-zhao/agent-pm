@@ -61,3 +61,16 @@ test('the provenance line of a chunk names the agent, the seq range and any upst
     evidenceSourceLine({ source_id: 'paseo-m', kind: 'paseo', agent_id: 'a1', epoch: 'e', seq_start: 3, seq_end: 9, events: 4, truncated_upstream: true, ts_unknown: false }),
   ).toBe('来源 paseo-m · agent a1 · seq 3–9 · 4 条 · 采集时已截断');
 });
+
+test('only a source with a problem is marked: an ended observation is a plain tag', () => {
+  render(
+    <SourceBadges
+      sources={[
+        source({ lifecycle: 'ended', end_reason: 'archived', fresh: false }),
+        source({ source_id: 'paseo-mac-mini', kind: 'paseo', external_id: 'agent-1', daemon_status: 'disconnected', fresh: false }),
+      ]}
+    />,
+  );
+  expect(screen.getByText('herdr · 主内容（已归档）').className).toBe('tag source');
+  expect(screen.getByText('Paseo · 主内容（daemon 断开）').className).toBe('tag source warn');
+});

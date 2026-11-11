@@ -11,12 +11,10 @@ beforeAll(() => {
 afterEach(cleanup);
 
 const onSave = vi.fn<(value: string) => Promise<void>>();
-const onUnlock = vi.fn<() => Promise<void>>();
 
 function setup(props: Partial<Parameters<typeof EditableText>[0]> = {}) {
   onSave.mockReset().mockResolvedValue(undefined);
-  onUnlock.mockReset().mockResolvedValue(undefined);
-  return render(<EditableText value="旧标题" locked={false} onSave={onSave} onUnlock={onUnlock} {...props} />);
+  return render(<EditableText value="旧标题" onSave={onSave} {...props} />);
 }
 
 const type = (value: string) => fireEvent.change(screen.getByRole('textbox'), { target: { value } });
@@ -154,47 +152,11 @@ test('a second Enter while the save is on its way does not send it twice', async
   await waitFor(() => expect(screen.queryByRole('textbox')).toBeNull());
 });
 
-test('a locked field shows 🔒 and 解锁 with their explanations; 解锁 calls onUnlock', async () => {
-  setup({ locked: true });
-  expect(screen.getByText('🔒').getAttribute('title')).toBe('你改过这个字段，AI 不会再改它');
-  const unlock = screen.getByRole('button', { name: '解锁' });
-  expect(unlock.getAttribute('title')).toBe('解锁后 AI 可以修改这个字段');
-  fireEvent.click(unlock);
-  await waitFor(() => expect(onUnlock).toHaveBeenCalledTimes(1));
-});
-
-test('an unlocked field shows neither; a locked one without onUnlock shows only the lock', () => {
-  const open = setup();
-  expect(screen.queryByText('🔒')).toBeNull();
-  expect(screen.queryByRole('button', { name: '解锁' })).toBeNull();
-  open.unmount();
-  setup({ locked: true, onUnlock: undefined });
-  expect(screen.getByText('🔒')).toBeTruthy();
-  expect(screen.queryByRole('button', { name: '解锁' })).toBeNull();
-});
-
-test('a refused unlock shows the reason', async () => {
-  setup({ locked: true });
-  onUnlock.mockRejectedValueOnce(new ApiError(404, 'not_found', 'gone'));
-  fireEvent.click(screen.getByRole('button', { name: '解锁' }));
-  expect((await screen.findByRole('alert')).textContent).toBe('找不到对象，可能已被删除');
-});
-
-test('the reason of a refused unlock goes away when 解锁 is tried again', async () => {
-  setup({ locked: true });
-  onUnlock.mockRejectedValueOnce(new ApiError(404, 'not_found', 'gone'));
-  fireEvent.click(screen.getByRole('button', { name: '解锁' }));
-  await screen.findByRole('alert');
-  fireEvent.click(screen.getByRole('button', { name: '解锁' }));
-  await waitFor(() => expect(onUnlock).toHaveBeenCalledTimes(2));
-  await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
-});
-
 test('a new value from the server does not overwrite what is being typed', () => {
   const view = setup();
   edit();
   type('我正在写');
-  view.rerender(<EditableText value="别处改的" locked={false} onSave={onSave} />);
+  view.rerender(<EditableText value="别处改的" onSave={onSave} />);
   expect((screen.getByRole('textbox') as HTMLInputElement).value).toBe('我正在写');
   fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' });
   expect(screen.getByRole('button', { name: '别处改的' })).toBeTruthy();
@@ -204,4 +166,10 @@ test('text from the AI is shown as plain text', () => {
   setup({ value: '<img src=x onerror=alert(1)> **粗体**' });
   expect(document.querySelector('img')).toBeNull();
   expect(screen.getByRole('button').textContent).toBe('<img src=x onerror=alert(1)> **粗体**');
+});
+
+test('the field shows only its text: nothing says who last changed it', () => {
+  setup();
+  expect(screen.getAllByRole('button')).toHaveLength(1);
+  expect(document.body.textContent).toBe('旧标题');
 });

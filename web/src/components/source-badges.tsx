@@ -25,6 +25,12 @@ export function sourceNote(s: SourceView): string | null {
   return notes.length === 0 ? null : notes.join('，');
 }
 
+/** Something is wrong with a source that still observes the session: an ended observation is only a fact. */
+function needsAttention(s: SourceView): boolean {
+  if (s.gaps > 0 || Boolean(s.identity_note)) return true;
+  return s.lifecycle === 'live' && sourceNote(s) !== null;
+}
+
 /** One small tag per source of a session: which collector sees it, whether its content feeds the analysis, and lag. */
 export function SourceBadges({ sources }: { sources: SourceView[] }) {
   if (sources.length === 0) return null;
@@ -36,7 +42,7 @@ export function SourceBadges({ sources }: { sources: SourceView[] }) {
         const label = [KIND_LABEL[s.kind] ?? s.kind, role].filter(Boolean).join(' · ');
         const title = [`${s.source_id}（${s.machine ?? '?'}）`, s.kind === 'paseo' ? `agent ${s.external_id}` : null, note, s.identity_note].filter(Boolean).join('\n');
         return (
-          <span key={`${s.source_id}:${s.external_id}`} className={note === null ? 'tag source' : 'tag source warn'} title={title}>
+          <span key={`${s.source_id}:${s.external_id}`} className={needsAttention(s) ? 'tag source warn' : 'tag source'} title={title}>
             {note === null ? label : `${label}（${note}）`}
           </span>
         );

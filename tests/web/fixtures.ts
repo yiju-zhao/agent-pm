@@ -132,7 +132,7 @@ export function card(over: Partial<ProjectCard> = {}): ProjectCard {
 
 /** A project as the detail page reads it: the card plus nothing in any list unless a test fills it. */
 export function detail(over: Partial<ProjectDetail> = {}): ProjectDetail {
-  return { ...card(), milestones: [], todos: [], decisions: [], blockers: [], contributions: [], events: [], tombstones: [], field_sources: { stage: 'user', priority: null }, ...over };
+  return { ...card(), milestones: [], todos: [], decisions: [], blockers: [], contributions: [], events: [], tombstones: [], ...over };
 }
 
 /** A session's contribution to the project as the detail carries it: the session is `tag()` unless a test says `null` (purged). */

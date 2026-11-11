@@ -4,7 +4,7 @@ import { defineConfig } from 'vite';
 // The page is built from `web/` into `dist/web`, which the server hosts at `/` (see src/server/web.ts).
 // `npm run dev:web` serves it on Vite's own port and forwards the API and the live stream to a server on 8787.
 const SERVER = 'http://127.0.0.1:8787';
-const API_PATHS = ['/projects', '/questions', '/sessions', '/events', '/evidence', '/status', '/sync'];
+const API_PATHS = ['/projects', '/questions', '/sessions', '/events', '/evidence', '/status', '/sync', '/admin'];
 
 export default defineConfig({
   root: 'web',

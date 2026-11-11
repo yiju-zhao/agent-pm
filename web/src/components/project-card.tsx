@@ -2,6 +2,7 @@ import type { ProjectCard } from '../../../src/domain/read.ts';
 import type { Priority } from '../../../src/shared/vocab.ts';
 import { STAGE_LABEL } from '../../../src/shared/vocab.ts';
 import { isDormant, sessionsByStep } from '../home-model.ts';
+import { Icon } from './icon.tsx';
 import { QuestionCard } from './question-card.tsx';
 import { SessionTag } from './session-tag.tsx';
 
@@ -57,14 +58,14 @@ export function ProjectCardView({
           <a href={projectHref(card.id)}>{card.title}</a>
         </b>
         {waitingForYou ? <span className="alert-dot" role="img" aria-label="有 agent 在等你操作" title="有 agent 在等你操作" /> : null}
-        <span className="dim">· {STAGE_LABEL[card.stage]}</span>
+        <span className="dim">{STAGE_LABEL[card.stage]}</span>
         {milestones > 0 ? (
           <span className="dim">
-            · 里程碑 {done}/{milestones}
+            里程碑 {done}/{milestones}
           </span>
         ) : null}
-        {dormant ? <span className="dim">· 休眠 {card.dormant_days} 天</span> : null}
-        {dormant && card.active_sessions.length === 0 ? <span className="dim">· 无活跃 session</span> : null}
+        {dormant ? <span className="dim">休眠 {card.dormant_days} 天</span> : null}
+        {dormant && card.active_sessions.length === 0 ? <span className="dim">无活跃 session</span> : null}
       </div>
       {card.summary ? (
         <div className="dim summary" title={card.summary}>
@@ -97,7 +98,8 @@ export function ProjectCardView({
       {moreTodos > 0 ? <div className="todo dim">还有 {moreTodos} 条</div> : null}
       {card.open_blockers.map((b) => (
         <div key={b.id} className="blk">
-          ⛔ {b.text}
+          <Icon name="blocked" />
+          {b.text}
         </div>
       ))}
       {card.pending_questions.map((q) => (

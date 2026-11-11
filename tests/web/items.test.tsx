@@ -123,19 +123,6 @@ test('the milestone title is edited in place', async () => {
   expect(request()).toEqual({ url: '/projects/p_1/milestones/m_1', method: 'PATCH', body: { title: '新名字' } });
 });
 
-test('a locked milestone field shows 🔒 and 解锁, and unlocking calls the lock route of that field', async () => {
-  milestones(detail({ milestones: [milestone({ id: 'm_1', title: '锁了的', locks: ['title', 'status'] })] }));
-  expect(screen.getAllByText('🔒')).toHaveLength(2);
-  fireEvent.click(screen.getByRole('button', { name: '解锁状态' }));
-  await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
-  expect(request()).toEqual({ url: '/projects/p_1/milestones/m_1/locks/status', method: 'DELETE', body: undefined });
-
-  fetchMock.mockClear();
-  fireEvent.click(screen.getByRole('button', { name: '解锁' }));
-  await waitFor(() => expect(reload).toHaveBeenCalledTimes(2));
-  expect(request().url).toBe('/projects/p_1/milestones/m_1/locks/title');
-});
-
 test('deleting a milestone needs a second click and then calls DELETE', async () => {
   milestones(detail({ milestones: [milestone({ id: 'm_1' })] }));
   fireEvent.click(screen.getByRole('button', { name: '删除' }));
@@ -250,17 +237,22 @@ test('a todo is added under 未分组 by default, or under the milestone picked 
   expect(request().body).toEqual({ title: '再做 B', milestone_id: 'm_1' });
 });
 
-test('a todo title and its locks work like the milestone ones', async () => {
-  todos(detail({ todos: [todo({ id: 't_1', title: '旧', locks: ['status'] })] }));
-  fireEvent.click(screen.getByRole('button', { name: '解锁状态' }));
-  await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
-  expect(request()).toEqual({ url: '/projects/p_1/todos/t_1/locks/status', method: 'DELETE', body: undefined });
+test('a row says nothing about who changed its fields: a locked milestone or todo shows no lock and no 解锁', () => {
+  milestones(detail({ milestones: [milestone({ id: 'm_1', title: '锁了的', locks: ['title', 'status'] })] }));
+  expect(screen.queryByText(/解锁/)).toBeNull();
+  expect(screen.queryByText('🔒')).toBeNull();
+  cleanup();
+  todos(detail({ todos: [todo({ id: 't_1', title: '旧', locks: ['status', 'milestone_id'] })] }));
+  expect(screen.queryByText(/解锁|所属里程碑|状态/)).toBeNull();
+});
 
+test('a todo title is edited like a milestone one', async () => {
+  todos(detail({ todos: [todo({ id: 't_1', title: '旧', locks: ['status'] })] }));
   const row = screen.getByRole('button', { name: '旧' }).closest('li') as HTMLElement;
   fireEvent.click(within(row).getByRole('button', { name: '旧' }));
   fireEvent.change(within(row).getByRole('textbox'), { target: { value: '新' } });
   fireEvent.keyDown(within(row).getByRole('textbox'), { key: 'Enter' });
-  await waitFor(() => expect(reload).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
   expect(request()).toEqual({ url: '/projects/p_1/todos/t_1', method: 'PATCH', body: { title: '新' } });
 });
 

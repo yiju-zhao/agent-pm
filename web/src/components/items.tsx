@@ -7,7 +7,8 @@ import { useWrite } from '../use-write.ts';
 import type { Writer } from '../use-write.ts';
 import { Fold, Section } from './blocks.tsx';
 import { ConfirmButton } from './confirm-button.tsx';
-import { EditableText, LockMark } from './editable-text.tsx';
+import { EditableText } from './editable-text.tsx';
+import { Icon } from './icon.tsx';
 import { EvidenceLink } from './evidence-drawer.tsx';
 
 type ListProps = { project: ProjectDetail; reload(): void };
@@ -19,38 +20,11 @@ const NEXT_STATUS: Record<ItemStatus, ItemStatus> = { todo: 'doing', doing: 'don
 const STATUS_ICON: Record<ItemStatus, string> = { done: '✓', doing: '◐', todo: '○' };
 const STATUS_TEXT: Record<ItemStatus, string> = { todo: '未开始', doing: '进行中', done: '已完成' };
 
-/** What the lock on a field of a milestone or todo is called. */
-const FIELD_LABEL: Record<string, string> = { title: '标题', status: '状态', position: '顺序', priority: '优先级', milestone_id: '所属里程碑' };
-
 const projectPath = (project: ProjectDetail) => `/projects/${encodeURIComponent(project.id)}`;
 
-/** Locks on the fields of an item that its own row does not show (the title's lock is on the title). */
-function FieldLocks({ locks, path, fire }: { locks: string[]; path: string; fire: Writer['fire'] }) {
-  return (
-    <>
-      {locks
-        .filter((field) => field !== 'title')
-        .map((field) => (
-          <LockMark
-            key={field}
-            field={Object.hasOwn(FIELD_LABEL, field) ? FIELD_LABEL[field] : field}
-            onUnlock={() => fire(() => apiSend('DELETE', `${path}/locks/${encodeURIComponent(field)}`))}
-          />
-        ))}
-    </>
-  );
-}
-
-/** The title of a milestone or todo: edited in place, locked once the user has edited it. */
-function ItemTitle({ title, locks, path, write }: { title: string; locks: string[]; path: string; write: Writer['write'] }) {
-  return (
-    <EditableText
-      value={title}
-      locked={locks.includes('title')}
-      onSave={(value) => write(() => apiSend('PATCH', path, { title: value }))}
-      onUnlock={() => write(() => apiSend('DELETE', `${path}/locks/title`))}
-    />
-  );
+/** The title of a milestone or todo, edited in place. */
+function ItemTitle({ title, path, write }: { title: string; path: string; write: Writer['write'] }) {
+  return <EditableText value={title} onSave={(value) => write(() => apiSend('PATCH', path, { title: value }))} />;
 }
 
 function DeleteButton({ path, fire }: { path: string; fire: Writer['fire'] }) {
@@ -107,8 +81,7 @@ function MilestoneItem({ milestone, base, writer }: { milestone: MilestoneRow; b
       >
         {STATUS_ICON[milestone.status]}
       </button>
-      <ItemTitle title={milestone.title} locks={milestone.locks} path={path} write={write} />
-      <FieldLocks locks={milestone.locks} path={path} fire={fire} />
+      <ItemTitle title={milestone.title} path={path} write={write} />
       <DeleteButton path={path} fire={fire} />
     </li>
   );
@@ -175,8 +148,7 @@ function TodoItem({ todo, base, writer }: { todo: TodoRow; base: string; writer:
           void fire(() => apiSend('PATCH', path, { status: next }));
         }}
       />
-      <ItemTitle title={todo.title} locks={todo.locks} path={path} write={write} />
-      <FieldLocks locks={todo.locks} path={path} fire={fire} />
+      <ItemTitle title={todo.title} path={path} write={write} />
       <DeleteButton path={path} fire={fire} />
     </li>
   );
@@ -243,7 +215,7 @@ function BlockerItem({ blocker, base, writer }: { blocker: BlockerRow; base: str
   const open = blocker.status === 'open';
   return (
     <li className={open ? 'item blk' : 'item cleared'} data-blocker-id={blocker.id}>
-      {open ? <span aria-hidden="true">⛔</span> : null}
+      {open ? <Icon name="blocked" /> : null}
       <span className="blocker-text">{blocker.text}</span>
       <span className="tag">{KIND_LABEL[blocker.kind]}</span>
       {open ? (
@@ -316,7 +288,7 @@ export function DecisionList({ project, reload }: ListProps) {
         <ul className="items">
           {project.decisions.map((d) => (
             <li key={d.id} className="item" data-decision-id={d.id}>
-              <span className="dim">{shortDate(d.decided_at)}</span> <span>{d.text}</span>
+              <span className="dim">{shortDate(d.decided_at)}</span> <span className="blocker-text">{d.text}</span>
               {d.evidence.length > 0 ? (
                 <span className="evidence">
                   {d.evidence.map((ref, index) => (

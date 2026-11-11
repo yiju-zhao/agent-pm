@@ -10,23 +10,20 @@ beforeEach(() => {
 });
 afterEach(() => t.db.close());
 
-const sources = (id: string) => getProject(t.db, new Date(NOW), id)!.field_sources;
+// Who set a value is not shown anywhere; it lives in the events (actor) and the locks, and decides what the AI may do.
 
-test('an AI-made project with an AI priority reads as pre-filled; the user changing either makes it theirs', () => {
+test('a priority the AI pre-filled is the field itself; once the user changes it the AI can only propose', () => {
   const id = t.ai('create_project', { title: '新课题', priority: 'P2' }).id as string;
-  expect(sources(id)).toEqual({ stage: 'ai', priority: 'ai' });
-  t.ai('transition_stage', { project: id, stage: 'explore' });
-  expect(sources(id).stage).toBe('ai');
-  t.user('transition_stage', { project: id, stage: 'build' });
+  expect(getProject(t.db, new Date(NOW), id)!.priority).toBe('P2');
+  expect(t.ai('update_project', { project: id, fields: { priority: 'P1' } }).status).toBe('applied');
   t.user('update_project', { project: id, fields: { priority: 'P0' } });
-  expect(sources(id)).toEqual({ stage: 'user', priority: 'user' });
-  // The AI can no longer change the user's priority directly: it only proposes.
   expect(t.ai('update_project', { project: id, fields: { priority: 'P3' } }).status).not.toBe('applied');
   expect(getProject(t.db, new Date(NOW), id)!.priority).toBe('P0');
+  const actors = (t.db.prepare(`SELECT actor FROM events WHERE project_id = ? AND op IN ('create_project', 'update_project') ORDER BY id`).all(id) as Array<{ actor: string }>).map((r) => r.actor);
+  expect(actors.slice(0, 3)).toEqual(['ai:curator', 'ai:curator', 'user']);
 });
 
-test('no priority is no source; a new project starts under the current board rules', () => {
+test('a new project starts under the current board rules', () => {
   const id = t.user('create_project', { title: '手建的' }).id as string;
-  expect(sources(id)).toEqual({ stage: 'user', priority: null });
   expect((t.db.prepare('SELECT stage_rules_seen FROM projects WHERE id = ?').get(id) as { stage_rules_seen: number }).stage_rules_seen).toBe(BOARD_RULES_VERSION);
 });
