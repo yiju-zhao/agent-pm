@@ -2,64 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { errorText } from '../api.ts';
 
-const LOCKED_TEXT = '你改过这个字段，AI 不会再改它';
-const UNLOCK_TEXT = '解锁后 AI 可以修改这个字段';
-
-/**
- * 🔒 beside a field the user has edited (the AI will not change it any more) and, when `onUnlock` is given, the button
- * that gives it back. `field` names the field when the mark does not stand right beside it. A refused unlock goes to
- * `onError`; `onStart` runs as each try begins (to clear what the last refusal left on screen).
- */
-export function LockMark({
-  field,
-  onUnlock,
-  onError,
-  onStart,
-}: {
-  field?: string;
-  onUnlock?: () => Promise<unknown>;
-  onError?: (err: unknown) => void;
-  onStart?: () => void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const unlock = async () => {
-    if (onUnlock === undefined) return;
-    onStart?.();
-    setBusy(true);
-    try {
-      await onUnlock();
-    } catch (err) {
-      onError?.(err);
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <span className="lock-mark">
-      <span className="lock" title={LOCKED_TEXT}>
-        🔒
-      </span>
-      {field !== undefined ? <span className="dim">{field}</span> : null}
-      {onUnlock !== undefined ? (
-        <button type="button" className="linklike" title={UNLOCK_TEXT} aria-label={field !== undefined ? `解锁${field}` : undefined} disabled={busy} onClick={unlock}>
-          解锁
-        </button>
-      ) : null}
-    </span>
-  );
-}
-
 type EditableTextProps = {
   value: string | null;
-  /** The user has edited this field: it shows 🔒 and, with `onUnlock`, 解锁. */
-  locked: boolean;
   /** A text area (saved with Cmd/Ctrl+Enter) instead of a single line (saved with Enter). */
   multiline?: boolean;
   /** Shown, dimmed, while the value is empty. */
   placeholder?: string;
   /** Saves the trimmed text. A rejection keeps the field open and its reason is shown beside it. */
   onSave(value: string): Promise<void>;
-  onUnlock?(): Promise<void>;
 };
 
 /**
@@ -67,7 +17,7 @@ type EditableTextProps = {
  * Esc or 取消 puts it back as it was. Nothing is sent when the text did not change. The typed text is never replaced by
  * a newer `value` while it is being edited.
  */
-export function EditableText({ value, locked, multiline = false, placeholder, onSave, onUnlock }: EditableTextProps) {
+export function EditableText({ value, multiline = false, placeholder, onSave }: EditableTextProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
@@ -179,7 +129,6 @@ export function EditableText({ value, locked, multiline = false, placeholder, on
           {value ? value : <span className="placeholder">{placeholder ?? '（空）'}</span>}
         </button>
       )}
-      {locked ? <LockMark onUnlock={onUnlock} onStart={() => setError(null)} onError={(err) => setError(errorText(err))} /> : null}
       {error !== null ? (
         <span className="field-error" role="alert">
           {error}

@@ -174,16 +174,6 @@ test('a project without priority shows 未定 in the menu', async () => {
   expect(within(menu).getAllByRole('option').map((o) => o.textContent)).toEqual(['未定', 'P0 · 最高', 'P1 · 高', 'P2 · 中', 'P3 · 低']);
 });
 
-test('a priority the AI pre-filled says so next to the same menu; one the user set shows the lock instead', async () => {
-  project = detail({ priority: 'P2', field_sources: { stage: 'ai', priority: 'ai' } });
-  await renderPage();
-  expect(within(screen.getByRole('combobox', { name: '优先级' }).parentElement!).getByText('AI 预填')).toBeTruthy();
-  cleanup();
-  project = detail({ priority: 'P2', locks: ['priority'], field_sources: { stage: 'user', priority: 'user' } });
-  await renderPage();
-  expect(within(screen.getByRole('combobox', { name: '优先级' }).parentElement!).queryByText('AI 预填')).toBeNull();
-});
-
 test('picking a priority sends it; 未定 sends null; the page reads the project again', async () => {
   project = detail({ priority: 'P0' });
   await renderPage();
@@ -196,18 +186,6 @@ test('picking a priority sends it; 未定 sends null; the page reads the project
     { url: '/projects/p_1', method: 'PATCH', body: { priority: 'P2' } },
     { url: '/projects/p_1', method: 'PATCH', body: { priority: null } },
   ]);
-});
-
-test('a locked priority and a locked title show 🔒 with 解锁, which calls their lock routes', async () => {
-  project = detail({ locks: ['priority', 'title'] });
-  await renderPage();
-  const head = region('项目概览');
-  expect(within(head).getAllByText('🔒')).toHaveLength(2);
-  fireEvent.click(within(head).getByRole('button', { name: '解锁优先级' }));
-  await waitFor(() => expect(writesMade()).toHaveLength(1));
-  fireEvent.click(within(head).getByRole('button', { name: '解锁' }));
-  await waitFor(() => expect(writesMade()).toHaveLength(2));
-  expect(writesMade().map((w) => `${w.method} ${w.url}`)).toEqual(['DELETE /projects/p_1/locks/priority', 'DELETE /projects/p_1/locks/title']);
 });
 
 test('the title is edited in place', async () => {
@@ -228,14 +206,6 @@ test('big picture: 是什么, 为什么, 做完的标准, each with （还没有
   expect(within(region('做完的标准')).getByText('（还没有）')).toBeTruthy();
 });
 
-test('a locked summary has 🔒 beside 是什么, the other fields do not', async () => {
-  project = detail({ locks: ['summary'] });
-  await renderPage();
-  expect(within(region('是什么')).getByText('🔒')).toBeTruthy();
-  expect(within(region('为什么')).queryByText('🔒')).toBeNull();
-  expect(within(region('做完的标准')).queryByText('🔒')).toBeNull();
-});
-
 test('saving 为什么 sends PATCH {why}, then the page shows what the server now has', async () => {
   await renderPage();
   const why = region('为什么');
@@ -245,25 +215,23 @@ test('saving 为什么 sends PATCH {why}, then the page shows what the server no
   fireEvent.keyDown(within(why).getByRole('textbox'), { key: 'Enter', metaKey: true });
   await waitFor(() => expect(within(region('为什么')).getByText('评测口径不统一')).toBeTruthy());
   expect(writesMade()).toEqual([{ url: '/projects/p_1', method: 'PATCH', body: { why: '评测口径不统一' } }]);
-  expect(within(region('为什么')).getByText('🔒')).toBeTruthy();
 });
 
-test('the same for 是什么 and 做完的标准, and 解锁 deletes the lock of that field', async () => {
+test('the same for 是什么', async () => {
   project = detail({ summary: '旧', done_criteria: '旧标准', locks: ['summary', 'done_criteria'] });
   await renderPage();
   fireEvent.click(within(region('是什么')).getByText('旧'));
   fireEvent.change(within(region('是什么')).getByRole('textbox'), { target: { value: '新' } });
   fireEvent.keyDown(within(region('是什么')).getByRole('textbox'), { key: 'Enter', ctrlKey: true });
   await waitFor(() => expect(writesMade()).toHaveLength(1));
-  fireEvent.click(within(region('做完的标准')).getByRole('button', { name: '解锁' }));
-  await waitFor(() => expect(writesMade()).toHaveLength(2));
-  fireEvent.click(within(region('是什么')).getByRole('button', { name: '解锁' }));
-  await waitFor(() => expect(writesMade()).toHaveLength(3));
-  expect(writesMade().map((w) => `${w.method} ${w.url} ${JSON.stringify(w.body ?? null)}`)).toEqual([
-    'PATCH /projects/p_1 {"summary":"新"}',
-    'DELETE /projects/p_1/locks/done_criteria null',
-    'DELETE /projects/p_1/locks/summary null',
-  ]);
+  expect(writesMade().map((w) => `${w.method} ${w.url} ${JSON.stringify(w.body ?? null)}`)).toEqual(['PATCH /projects/p_1 {"summary":"新"}']);
+});
+
+test('the page never says who set a value: no lock, no 解锁 and no AI mark, whatever is locked', async () => {
+  project = detail({ priority: 'P2', locks: ['priority', 'title', 'summary', 'why', 'done_criteria'] });
+  await renderPage();
+  expect(screen.queryByText(/解锁|AI 预填|你定的/)).toBeNull();
+  expect(screen.queryByText('🔒')).toBeNull();
 });
 
 test('a refusal (409) is told in a toast, and the field stays open with the text', async () => {
@@ -335,9 +303,8 @@ test('the stage menu offers the other projects as merge targets, not the project
   await renderPage();
   fireEvent.change(screen.getByRole('combobox', { name: '阶段' }), { target: { value: 'merged' } });
   const target = screen.getByRole('combobox', { name: '合并到' });
-  expect(within(target).getAllByRole('option').map((o) => o.textContent)).toEqual(['选择目标项目', 'loopwm']);
+  expect(within(target).getAllByRole('option').map((o) => o.textContent)).toEqual(['合并到哪个项目…', 'loopwm']);
   fireEvent.change(target, { target: { value: 'p_2' } });
-  fireEvent.click(screen.getByRole('button', { name: '确定' }));
   await waitFor(() => expect(writesMade()).toHaveLength(1));
   expect(writesMade()[0]).toEqual({ url: '/projects/p_1/stage', method: 'POST', body: { stage: 'merged', merge_into: 'p_2' } });
 });

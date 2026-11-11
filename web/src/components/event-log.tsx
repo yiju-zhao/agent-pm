@@ -58,18 +58,20 @@ function EventRow({ event, has, jump, reload }: RowProps) {
       {event.entity !== null ? <span className="dim">{event.entity}</span> : null}
       {event.is_veto ? <span className="tag veto">否决</span> : null}
       {event.reason !== null && event.reason !== '' ? <span className="event-reason">{event.reason}</span> : null}
-      {event.evidence.map((evidence, i) => (
-        <EvidenceLink key={`${i}:${evidence}`} evidence={evidence} />
-      ))}
-      {reverts !== null ? <JumpLink text={`撤销了 #${reverts}`} target={reverts} has={has} jump={jump} /> : null}
-      {revertedBy !== null ? (
-        <JumpLink text={`已被 #${revertedBy} 撤销`} target={revertedBy} has={has} jump={jump} />
-      ) : (
-        <ConfirmButton label="撤销" confirmLabel="确定撤销？" onConfirm={() => fire(() => apiSend('POST', `/events/${id}/revert`))} />
-      )}
-      <button type="button" className="link-btn" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        详情
-      </button>
+      <span className="event-actions">
+        {event.evidence.map((evidence, i) => (
+          <EvidenceLink key={`${i}:${evidence}`} evidence={evidence} />
+        ))}
+        {reverts !== null ? <JumpLink text={`撤销了 #${reverts}`} target={reverts} has={has} jump={jump} /> : null}
+        {revertedBy !== null ? (
+          <JumpLink text={`已被 #${revertedBy} 撤销`} target={revertedBy} has={has} jump={jump} />
+        ) : (
+          <ConfirmButton label="撤销" confirmLabel="确定撤销？" onConfirm={() => fire(() => apiSend('POST', `/events/${id}/revert`))} />
+        )}
+        <button type="button" className="link-btn" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+          详情
+        </button>
+      </span>
       {open ? (
         <div className="event-detail">
           <pre>{jsonText(event.before)}</pre>

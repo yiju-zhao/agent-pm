@@ -155,14 +155,14 @@ test('a last_error shows a warning whose title is the error', async () => {
   serve(understanding({ last_error: 'rate limited: try later' }));
   renderApp();
   await screen.findByText('空闲');
-  expect(screen.getByTitle('rate limited: try later').textContent).toBe('⚠');
+  expect(screen.getByTitle('rate limited: try later').getAttribute('aria-label')).toBe('最近一次出错');
 });
 
 test('no warning without a last_error', async () => {
   serve(understanding());
   renderApp();
   await screen.findByText('空闲');
-  expect(screen.queryByText('⚠')).toBeNull();
+  expect(screen.queryByRole('img', { name: '最近一次出错' })).toBeNull();
 });
 
 test('a failing /status shows the error text instead of a status', async () => {

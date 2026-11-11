@@ -4,12 +4,12 @@ import { PRIORITIES, PRIORITY_LABEL, PRIORITY_MEANING } from '../../../src/share
 import { apiSend, errorText } from '../api.ts';
 import type { ApiError } from '../api.ts';
 import { Fold, Section } from '../components/blocks.tsx';
-import { EditableText, LockMark } from '../components/editable-text.tsx';
+import { EditableText } from '../components/editable-text.tsx';
 import { EventLog } from '../components/event-log.tsx';
 import { BlockerList, DecisionList, MilestoneList, TodoList } from '../components/items.tsx';
 import { projectHref } from '../components/project-card.tsx';
 import { QuestionCard } from '../components/question-card.tsx';
-import { SourceMark, StageControl } from '../components/stage-control.tsx';
+import { StageControl } from '../components/stage-control.tsx';
 import { Timeline } from '../components/timeline.tsx';
 import { relTime, shortDate } from '../format.ts';
 import { useApi } from '../use-api.ts';
@@ -76,11 +76,6 @@ function PriorityControl({ project, reload }: PageProps) {
           </option>
         ))}
       </select>
-      {project.locks.includes('priority') ? (
-        <LockMark field="优先级" onUnlock={() => fire(() => apiSend('DELETE', `${path}/locks/priority`))} />
-      ) : (
-        <SourceMark source={project.field_sources.priority} />
-      )}
     </span>
   );
 }
@@ -101,9 +96,7 @@ function Overview({ project, reload, mergeTargets, mergeTargetsFailed, now }: Ov
         <h2 className="proj-title">
           <EditableText
             value={project.title}
-            locked={project.locks.includes('title')}
             onSave={(title) => write(() => apiSend('PATCH', path, { title }))}
-            onUnlock={() => write(() => apiSend('DELETE', `${path}/locks/title`))}
           />
         </h2>
       </div>
@@ -123,10 +116,8 @@ function BigPicture({ project, reload }: PageProps) {
           <EditableText
             multiline
             value={project[field]}
-            locked={project.locks.includes(field)}
             placeholder="（还没有）"
             onSave={(value) => write(() => apiSend('PATCH', path, { [field]: value }))}
-            onUnlock={() => write(() => apiSend('DELETE', `${path}/locks/${field}`))}
           />
         </Section>
       ))}

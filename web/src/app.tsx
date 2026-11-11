@@ -3,6 +3,7 @@ import type { SchedulerStatus } from '../../src/understand/status.ts';
 import { AUTH_EVENT, apiSend, errorText } from './api.ts';
 import { SettingsModal } from './components/settings-modal.tsx';
 import type { SettingsTab } from './components/settings-modal.tsx';
+import { Icon } from './components/icon.tsx';
 import { useToast } from './components/toast.tsx';
 import { HomePage } from './pages/home.tsx';
 import { KeysPage } from './pages/keys.tsx';
@@ -48,8 +49,8 @@ function UnderstandingStatus() {
     <span className="understanding">
       <span>{status ? understandingText(status) : error ? errorText(error) : '…'}</span>
       {status?.last_error ? (
-        <span className="warn" title={status.last_error}>
-          ⚠
+        <span className="warn" role="img" aria-label="最近一次出错" title={status.last_error}>
+          <Icon name="warning" />
         </span>
       ) : null}
     </span>
