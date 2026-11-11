@@ -1,4 +1,5 @@
 import { tmpdir } from 'node:os';
+import type { Credential } from '../server/settings.ts';
 import type { LlmCall, LlmErrorKind, LlmOutcome, LlmRunner } from './llm.ts';
 
 /** How long one call may run before the runner aborts it, unless `LlmCall.timeoutMs` says otherwise. */
@@ -120,7 +121,7 @@ const NON_SUBSCRIPTION_ENV = [
 export function buildQueryOptions(
   sdk: Pick<SdkModule, 'tool' | 'createSdkMcpServer'>,
   call: LlmCall,
-  opts: { oauthToken?: string },
+  opts: RunnerAuth,
 ): SdkQueryOptions {
   const options: SdkQueryOptions = {
     model: call.model,
@@ -134,11 +135,17 @@ export function buildQueryOptions(
     cwd: tmpdir(),
   };
   // `env` replaces the subprocess environment, so it has to carry everything else too. API credentials, a custom
-  // endpoint and the cloud-provider switches are stripped so an inherited setting can never make the call bill
-  // anything other than the subscription.
+  // endpoint and the cloud-provider switches are always stripped, so an inherited setting can never decide what a call
+  // bills: only the credential chosen here does. An API key (chosen explicitly in the settings) bills that API
+  // account; everything else bills the Claude subscription.
   const env: Record<string, string | undefined> = { ...process.env };
-  if (opts.oauthToken) env.CLAUDE_CODE_OAUTH_TOKEN = opts.oauthToken;
   for (const name of NON_SUBSCRIPTION_ENV) delete env[name];
+  const credential = opts.credential?.() ?? (opts.oauthToken ? { mode: 'oauth_token' as const, token: opts.oauthToken } : { mode: 'login' as const });
+  if (credential.mode === 'oauth_token') env.CLAUDE_CODE_OAUTH_TOKEN = credential.token;
+  if (credential.mode === 'api_key') {
+    delete env.CLAUDE_CODE_OAUTH_TOKEN;
+    env.ANTHROPIC_API_KEY = credential.key;
+  }
   options.env = env;
   if (call.outputSchema) options.outputFormat = { type: 'json_schema', schema: call.outputSchema };
   if (call.tools && call.tools.length > 0) {
@@ -171,7 +178,13 @@ function errMessage(err: unknown): string {
  * A call that runs longer than `call.timeoutMs` (default `DEFAULT_LLM_TIMEOUT_MS`) is aborted and comes back as
  * `other`, so a hung subprocess cannot block the scheduler's one-call-at-a-time slot forever.
  */
-export function agentSdkRunner(opts: { oauthToken?: string }): LlmRunner {
+/**
+ * Which credential a call runs under. `credential` is read at every call (the settings may change it while the center
+ * runs); without it, `oauthToken` or else the local Claude Code login.
+ */
+export type RunnerAuth = { oauthToken?: string; credential?: () => Credential };
+
+export function agentSdkRunner(opts: RunnerAuth): LlmRunner {
   return async (call) => {
     const started = Date.now();
     const timeoutMs = call.timeoutMs ?? DEFAULT_LLM_TIMEOUT_MS;

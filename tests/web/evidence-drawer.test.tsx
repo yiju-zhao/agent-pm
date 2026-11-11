@@ -19,7 +19,7 @@ const SESSION: EvidenceView['session'] = {
   terminal_id: 't1',
   workspace_id: 'w1',
   tab_id: 'tab1',
-  cwd: '/work/herdr-pm',
+  cwd: '/work/agent-pm',
   title: '修采集器',
   live_status: 'working',
   lifecycle: 'live',

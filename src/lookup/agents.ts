@@ -1,4 +1,4 @@
-// Pure core of `herdr-pm open`: list the agents on this machine and on every enabled herdr remote
+// Pure core of `agent-pm open`: list the agents on this machine and on every enabled herdr remote
 // machine, and match a short id against them. It is bundled into a single-file bun binary, so it
 // must import nothing but node built-ins (and src/lookup, src/shared, zod): no server, no domain.
 

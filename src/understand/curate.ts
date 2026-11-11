@@ -8,7 +8,7 @@ import { DigestSchema, neutralizeTags } from './digest.ts';
 import { recordRun } from './llm.ts';
 import type { LlmCall, LlmErrorKind, LlmResult, LlmRunner } from './llm.ts';
 import { renderBrief, renderProjectIndex, renderTombstones, TOMBSTONES_TITLE } from './render.ts';
-import { STAGE_GUIDE } from './stage-guide.ts';
+import { PRIORITY_GUIDE, STAGE_GUIDE } from './stage-guide.ts';
 
 /** Most digests one curator run takes; the rest wait for the next run. */
 export const CURATE_MAX_DIGESTS = 20;
@@ -48,7 +48,7 @@ function loadBatch(db: DatabaseSync, ids: number[]): BatchDigest[] {
 // ---- prompt ------------------------------------------------------------------------------------------------------
 
 const SYSTEM_PROMPT = [
-  '你是 herdr-pm 的整理员。herdr-pm 是一块看板，把用户同时开着的多个 AI 编程 agent session 的工作整理成项目。',
+  '你是 agent-pm 的整理员。agent-pm 是一块看板，把用户同时开着的多个 AI 编程 agent session 的工作整理成项目。',
   '前面的摘要员已经把对话概括成摘要。你的任务：阅读这一批摘要和相关项目的当前状态，用工具更新看板——发现新课题并建项目、',
   '把 session 关联到项目（和里程碑）、推进阶段、维护 todo / 里程碑 / 阻塞 / 决策；拿不准又不该自己决定的事，向用户提问。',
   '',
@@ -78,6 +78,8 @@ const SYSTEM_PROMPT = [
   '11. 用对话所用的语言写项目文字，保持简短具体。结束时用一两句话说明做了什么。',
   '',
   STAGE_GUIDE,
+  '',
+  PRIORITY_GUIDE,
 ].join('\n');
 
 /** An attribute value that cannot break out of its quotes or its line. */

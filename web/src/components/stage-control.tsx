@@ -6,10 +6,27 @@ import { apiSend } from '../api.ts';
 import { useWrite } from '../use-write.ts';
 
 /**
- * Where the project is, and the way to move it. Every stage but the current one is offered, none picked until the person
- * picks one; whether the move is allowed is the server's call and a refusal is shown as a toast. Merging asks for the
- * project to merge into: `mergeTargets` is undefined while that list is on its way (or, with `mergeTargetsFailed`, could
- * not be read). `reload` runs after a move has been accepted.
+ * Who a fixed-choice field's value came from: pre-filled by the AI (the person changes it in place, in the same control)
+ * or set by the person. Nothing while the field has no value.
+ */
+export function SourceMark({ source }: { source: 'ai' | 'user' | null }) {
+  if (source === null) return null;
+  return source === 'ai' ? (
+    <span className="field-source ai" title="AI 根据对话预填的值，直接在这里改即可">
+      AI 预填
+    </span>
+  ) : (
+    <span className="field-source user" title="你设定或确认过的值">
+      你定的
+    </span>
+  );
+}
+
+/**
+ * The project's stage as one field: the menu shows the current stage, and picking another one only proposes it; it moves
+ * when confirmed (确定), and 取消 puts the menu back. Whether a move is allowed is the server's call, and a refusal is
+ * shown as a toast with the pick kept. Merging asks for the project to merge into: `mergeTargets` is undefined while
+ * that list is on its way (or, with `mergeTargetsFailed`, could not be read). `reload` runs after a move was accepted.
  */
 export function StageControl({
   project,
@@ -23,16 +40,15 @@ export function StageControl({
   reload?: () => void;
 }) {
   const { fire } = useWrite(reload);
-  const options = STAGES.filter((s) => s !== project.stage);
-  const [picked, setPicked] = useState<Stage | ''>('');
+  const [picked, setPicked] = useState<Stage | null>(null);
   const [target, setTarget] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // The stage that was picked may have become the current one (the move went through): then nothing is picked again.
-  const stage = picked !== '' && options.includes(picked) ? picked : '';
+  // A pick that became the current stage (the move went through) is no longer pending.
+  const pending = picked !== null && picked !== project.stage ? picked : null;
   const targets = (mergeTargets ?? []).filter((t) => t.id !== project.id);
-  const merging = stage === 'merged';
-  const ready = stage !== '' && (!merging || targets.some((t) => t.id === target));
+  const merging = pending === 'merged';
+  const ready = pending !== null && (!merging || targets.some((t) => t.id === target));
   const path = `/projects/${encodeURIComponent(project.id)}/stage`;
   const resume = project.stage === 'parked' ? project.stage_before_park : null;
 
@@ -60,26 +76,39 @@ export function StageControl({
 
   return (
     <span className="stage-control">
-      <span className="dim">{`当前阶段：${STAGE_LABEL[project.stage]}`}</span>
-      <select aria-label="新阶段" value={stage} onChange={(e) => setPicked(e.target.value as Stage | '')}>
-        <option value="">选择阶段…</option>
-        {options.map((s) => (
-          <option key={s} value={s}>
-            {STAGE_LABEL[s]}
-          </option>
-        ))}
-      </select>
+      <label className="field-label">
+        阶段
+        <select
+          aria-label="阶段"
+          className={pending !== null ? 'pending' : undefined}
+          value={pending ?? project.stage}
+          onChange={(e) => setPicked(e.target.value as Stage)}
+        >
+          {STAGES.map((s) => (
+            <option key={s} value={s}>
+              {STAGE_LABEL[s]}
+            </option>
+          ))}
+        </select>
+      </label>
+      {pending === null ? <SourceMark source={project.field_sources.stage} /> : null}
       {merging ? targetMenu : null}
-      <button
-        type="button"
-        disabled={busy || !ready}
-        onClick={() => {
-          if (stage !== '') void move(merging ? { stage, merge_into: target } : { stage });
-        }}
-      >
-        确定
-      </button>
-      {resume !== null ? (
+      {pending !== null ? (
+        <>
+          <span className="dim">{`${STAGE_LABEL[project.stage]} → ${STAGE_LABEL[pending]}`}</span>
+          <button
+            type="button"
+            disabled={busy || !ready}
+            onClick={() => void move(merging ? { stage: pending, merge_into: target } : { stage: pending })}
+          >
+            确定
+          </button>
+          <button type="button" disabled={busy} onClick={() => setPicked(null)}>
+            取消
+          </button>
+        </>
+      ) : null}
+      {resume !== null && pending === null ? (
         <button type="button" disabled={busy} onClick={() => void move({ stage: resume })}>
           {`恢复到 ${STAGE_LABEL[resume]}`}
         </button>

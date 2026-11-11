@@ -114,7 +114,7 @@ export function describeOption(o: QuestionOptionView): string {
 }
 
 /**
- * `text` cut to at most `max` characters by leaving out the middle (`/Users/eas…/herdr-pm-web`): the start says where
+ * `text` cut to at most `max` characters by leaving out the middle (`/Users/eas…/agent-pm-web`): the start says where
  * it is and the end says what it is, and a path needs both. Counted in characters, so nothing is cut in half.
  */
 export function middleEllipsis(text: string, max: number): string {

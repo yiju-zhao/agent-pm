@@ -187,7 +187,7 @@ export function loadDigestContext(db: DatabaseSync, now: Date, sessionKey: strin
 }
 
 const SYSTEM_PROMPT = [
-  '你是 herdr-pm 的摘要员。herdr-pm 是一块看板，把用户同时开着的多个 AI 编程 agent session 的工作整理成项目。',
+  '你是 agent-pm 的摘要员。agent-pm 是一块看板，把用户同时开着的多个 AI 编程 agent session 的工作整理成项目。',
   '你的任务：阅读某个 session 的一段对话记录，概括这段时间发生了什么，交给后面的整理员去更新看板。你不直接改看板。',
   '',
   '规则：',

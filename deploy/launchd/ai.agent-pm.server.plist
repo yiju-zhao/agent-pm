@@ -3,10 +3,10 @@
 <!--
   Central server (run on mac-mini). The __PLACEHOLDERS__ are filled in with sed, see README.md:
     __NODE_BIN__     absolute path of node >= 26 (`command -v node`)
-    __REPO_DIR__     absolute path of the herdr-pm checkout on this machine
+    __REPO_DIR__     absolute path of the agent-pm checkout on this machine
     __CONFIG_PATH__  absolute path of the server config (copy of config/server.example.json)
     __HOME__         absolute home directory (launchd does not expand "~")
-  The log directory must exist: mkdir -p ~/Library/Logs/herdr-pm
+  The log directory must exist: mkdir -p ~/Library/Logs/agent-pm
   No secrets here: the bearer tokens live in the server config, and the Claude token for the understanding layer
   lives in its own chmod 600 file named by understanding.oauthTokenFile (see README.md). Do not add an
   EnvironmentVariables block with CLAUDE_CODE_OAUTH_TOKEN.
@@ -14,7 +14,7 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>ai.herdr-pm.server</string>
+  <string>ai.agent-pm.server</string>
   <key>ProgramArguments</key>
   <array>
     <string>__NODE_BIN__</string>
@@ -32,8 +32,8 @@
   <key>ThrottleInterval</key>
   <integer>10</integer>
   <key>StandardOutPath</key>
-  <string>__HOME__/Library/Logs/herdr-pm/server.log</string>
+  <string>__HOME__/Library/Logs/agent-pm/server.log</string>
   <key>StandardErrorPath</key>
-  <string>__HOME__/Library/Logs/herdr-pm/server.err.log</string>
+  <string>__HOME__/Library/Logs/agent-pm/server.err.log</string>
 </dict>
 </plist>

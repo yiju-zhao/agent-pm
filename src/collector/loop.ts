@@ -179,7 +179,7 @@ async function pushTranscript(s: SnapshotSession, t: Tick): Promise<number> {
     if (r.reset) {
       // Chunks re-read from 0 whose offset_start collides with the old file's are dropped as duplicates.
       t.log(
-        `${t.now.toISOString()} herdr-pm collector: session ${s.key}: transcript ${path} was truncated or replaced ` +
+        `${t.now.toISOString()} agent-pm collector: session ${s.key}: transcript ${path} was truncated or replaced ` +
           `(shorter than cursor ${offset}); re-reading from 0`,
       );
     }
@@ -319,7 +319,7 @@ export async function collectOnce(
     } catch (err) {
       if (err instanceof RetryableError) throw err;
       errors += 1;
-      log(`${now.toISOString()} herdr-pm collector: session ${s.key}: ${err instanceof Error ? err.message : String(err)}`);
+      log(`${now.toISOString()} agent-pm collector: session ${s.key}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
   return { sessions: sessions.length, chunksPushed, errors };
@@ -350,7 +350,7 @@ export async function runCollector(cfg: CollectorConfig): Promise<never> {
     let error: unknown = null;
     try {
       const { errors } = await collectOnce(cfg, store, deps, sidebar);
-      if (errors > 0) console.error(`${new Date().toISOString()} herdr-pm collector: tick finished with ${errors} failed session(s)`);
+      if (errors > 0) console.error(`${new Date().toISOString()} agent-pm collector: tick finished with ${errors} failed session(s)`);
       failures = 0;
     } catch (err) {
       failures += 1;
@@ -359,7 +359,7 @@ export async function runCollector(cfg: CollectorConfig): Promise<never> {
     const delay = backoffDelay(cfg.pollMs, failures);
     if (failures > 0) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`${new Date().toISOString()} herdr-pm collector: ${message} (retrying in ${Math.round(delay / 1000)}s)`);
+      console.error(`${new Date().toISOString()} agent-pm collector: ${message} (retrying in ${Math.round(delay / 1000)}s)`);
     }
     await sleep(delay);
   }

@@ -495,7 +495,7 @@ test('without a short id and without a terminal it is a usage error', async () =
   const r = await open([]);
   expect(r.code).toBe(2);
   expect(r.stderr).toContain('缺少短 ID');
-  expect(r.stderr).toContain('herdr-pm open [<短ID>] [--remote split|inline]');
+  expect(r.stderr).toContain('agent-pm open [<短ID>] [--remote split|inline]');
   expect(r.calls).toEqual([]);
 });
 
@@ -508,7 +508,7 @@ test.each([
   const r = await open(args);
   expect(r.code).toBe(2);
   expect(r.stderr).toContain(mention);
-  expect(r.stderr).toContain('用法：herdr-pm open');
+  expect(r.stderr).toContain('用法：agent-pm open');
   expect(r.calls).toEqual([]);
 });
 
@@ -545,7 +545,7 @@ test('a failing pane list falls back to inline', async () => {
 
 let dir: string;
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'herdr-pm-open-'));
+  dir = mkdtempSync(join(tmpdir(), 'agent-pm-open-'));
 });
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });

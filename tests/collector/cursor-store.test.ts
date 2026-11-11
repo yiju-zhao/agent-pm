@@ -7,7 +7,7 @@ import { CursorStore } from '../../src/collector/cursor-store.ts';
 let dir: string;
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'herdr-pm-store-'));
+  dir = await mkdtemp(join(tmpdir(), 'agent-pm-store-'));
 });
 
 afterEach(async () => {

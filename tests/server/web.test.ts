@@ -22,10 +22,10 @@ let webDir: string;
 beforeEach(() => {
   db = openDb(':memory:');
   // root/secret sits next to the web dir, root/web/index.html next to assets: neither may leak through /assets/.
-  root = mkdtempSync(join(tmpdir(), 'herdr-pm-web-'));
+  root = mkdtempSync(join(tmpdir(), 'agent-pm-web-'));
   webDir = join(root, 'web');
   mkdirSync(join(webDir, 'assets'), { recursive: true });
-  writeFileSync(join(webDir, 'index.html'), '<!doctype html><title>herdr-pm</title>');
+  writeFileSync(join(webDir, 'index.html'), '<!doctype html><title>agent-pm</title>');
   writeFileSync(join(webDir, 'assets', 'app-abc.js'), 'console.log(1)');
   writeFileSync(join(webDir, 'assets', 'app-abc.css'), 'body{}');
   writeFileSync(join(webDir, 'assets', 'logo.svg'), '<svg/>');
@@ -46,7 +46,7 @@ test('/ returns index.html without caching', async () => {
   expect(res.status).toBe(200);
   expect(res.headers.get('content-type')).toMatch(/^text\/html/);
   expect(res.headers.get('cache-control')).toBe('no-cache');
-  expect(await res.text()).toContain('<title>herdr-pm</title>');
+  expect(await res.text()).toContain('<title>agent-pm</title>');
 });
 
 test('/assets/* returns the file with its type and an immutable cache header', async () => {

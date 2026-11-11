@@ -1,0 +1,29 @@
+# Paseo collector, one instance per observed daemon: the instance name is the source id, e.g.
+#   agent-pm-paseo-collector@paseo-gx10.service  →  config ~/.config/herdr-pm/paseo-gx10.json
+# Independent of agent-pm-collector.service (own config, token file, state directory, restarts); see README.md:
+#   mkdir -p ~/.config/systemd/user ~/.config/herdr-pm
+#   cp agent-pm-paseo-collector@.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now agent-pm-paseo-collector@<source id>
+#   loginctl enable-linger "$USER"        # keep it running without an open login session
+# It runs node 26 from a checkout of this repository (`npm ci` done) at ~/agent-pm; for another place:
+#   systemctl --user edit agent-pm-paseo-collector@<source id>   →   [Service] Environment=AGENT_PM_REPO=/path/to/repo
+# No token or password goes in here: the config names the files they are read from.
+# Logs: journalctl --user -u agent-pm-paseo-collector@<source id> -f
+[Unit]
+Description=agent-pm Paseo collector (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Environment=AGENT_PM_REPO=%h/agent-pm
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=%h
+ExecStart=/usr/bin/env node ${AGENT_PM_REPO}/src/cli.ts collect-paseo --config %h/.config/herdr-pm/%i.json
+# SIGTERM: stop reading, keep unsent batches in the outbox, exit. Agents are never touched.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

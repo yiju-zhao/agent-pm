@@ -122,12 +122,12 @@ test('a failing report never rejects and logs the same error once', async () => 
   for (let i = 0; i < 3; i += 1) await expect(reporter.update(sessions, labels, later(i * 1000))).resolves.toBeUndefined();
   // A failed pane is retried every round.
   expect(report).toHaveBeenCalledTimes(3);
-  expect(log).toHaveBeenCalledExactlyOnceWith('herdr-pm collect: sidebar metadata for w1:p1 failed: pane not found');
+  expect(log).toHaveBeenCalledExactlyOnceWith('agent-pm collect: sidebar metadata for w1:p1 failed: pane not found');
 
   report.mockRejectedValue(new Error('unknown flag --source'));
   await reporter.update(sessions, labels, later(4000));
   expect(log).toHaveBeenCalledTimes(2);
-  expect(log).toHaveBeenLastCalledWith('herdr-pm collect: sidebar metadata for w1:p1 failed: unknown flag --source');
+  expect(log).toHaveBeenLastCalledWith('agent-pm collect: sidebar metadata for w1:p1 failed: unknown flag --source');
 });
 
 test('a pane that recovers is written, and a later failure is logged again', async () => {
@@ -157,5 +157,5 @@ test('one failing pane does not stop the others', async () => {
     T0,
   );
   expect(report).toHaveBeenCalledTimes(2);
-  expect(log).toHaveBeenCalledExactlyOnceWith('herdr-pm collect: sidebar metadata for w1:p1 failed: not an Error');
+  expect(log).toHaveBeenCalledExactlyOnceWith('agent-pm collect: sidebar metadata for w1:p1 failed: not an Error');
 });

@@ -13,6 +13,7 @@ import {
   STATUS_CACHE_MS,
   TICK_MS,
 } from '../../src/understand/scheduler.ts';
+import { STAGE_RULES_VERSION } from '../../src/understand/stage-guide.ts';
 import { openDb } from '../../src/server/db.ts';
 import { NOW, setup } from '../domain/helpers.ts';
 import type { Setup } from '../domain/helpers.ts';
@@ -1063,7 +1064,7 @@ test('with nothing else to do, the scheduler reviews unreviewed projects once, t
 
   expect(await s.tick()).toBe('restaged');
   expect(calls.map((c) => c.role)).toEqual(['restage']);
-  expect(stageSeen(p)).toBe(1);
+  expect(stageSeen(p)).toBe(STAGE_RULES_VERSION);
   expect(await s.tick()).toBe('idle');
   expect(calls).toHaveLength(1);
 });
@@ -1092,7 +1093,7 @@ test('a failed stage review backs off, and is given up after repeated failures',
   advance(BACKOFF_START_MS * 2);
   expect(await s.tick()).toBe('skipped');
   expect(calls).toHaveLength(3);
-  expect(stageSeen(p)).toBe(1);
+  expect(stageSeen(p)).toBe(STAGE_RULES_VERSION);
   expect(await s.tick()).toBe('idle');
 });
 

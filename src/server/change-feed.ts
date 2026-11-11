@@ -122,7 +122,7 @@ export class ChangeFeed {
       messages = this.state === null ? [] : diffFeed(this.db, this.state, next);
       this.state = next;
     } catch (err) {
-      console.error(`herdr-pm server: change feed poll failed: ${err instanceof Error ? err.message : String(err)}`);
+      console.error(`agent-pm server: change feed poll failed: ${err instanceof Error ? err.message : String(err)}`);
       return;
     }
     for (const msg of messages) {
@@ -130,7 +130,7 @@ export class ChangeFeed {
         try {
           listener(msg);
         } catch (err) {
-          console.error(`herdr-pm server: change feed listener failed: ${err instanceof Error ? err.message : String(err)}`);
+          console.error(`agent-pm server: change feed listener failed: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
     }

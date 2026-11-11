@@ -46,7 +46,7 @@ function freshServer(): void {
 }
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'herdr-pm-loop-'));
+  dir = await mkdtemp(join(tmpdir(), 'agent-pm-loop-'));
   cfg = {
     server: 'http://pm.test',
     machine: MACHINE,
@@ -909,7 +909,7 @@ test('sidebar failures do not fail the tick', async () => {
   await collectOnce(cfg, store, deps, sidebar);
   expect(deps.calls.reportMetadata).toHaveLength(2);
   expect(deps.calls.log).toEqual([
-    'herdr-pm collect: sidebar metadata for w1:p1 failed: herdr pane report-metadata failed: pane not found',
+    'agent-pm collect: sidebar metadata for w1:p1 failed: herdr pane report-metadata failed: pane not found',
   ]);
 });
 

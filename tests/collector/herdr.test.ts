@@ -174,7 +174,7 @@ async function fakeHerdr(name: string, script: string): Promise<string> {
 }
 
 beforeAll(async () => {
-  binDir = await mkdtemp(join(tmpdir(), 'herdr-pm-test-'));
+  binDir = await mkdtemp(join(tmpdir(), 'agent-pm-test-'));
 });
 afterAll(async () => {
   await rm(binDir, { recursive: true, force: true });

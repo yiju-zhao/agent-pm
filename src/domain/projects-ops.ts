@@ -6,6 +6,7 @@ import { linkSession } from './links-ops.ts';
 import type { OpArgs, OpName } from './ops.ts';
 import { confirmOptions } from './questions.ts';
 import { aiMayTransition, checkTransition } from './stage.ts';
+import { BOARD_RULES_VERSION } from '../shared/vocab.ts';
 import { OpRejected, STAGE_LABEL } from './types.ts';
 import type { Stage } from './types.ts';
 
@@ -42,6 +43,7 @@ function createProject(ctx: OpContext, args: OpArgs<'create_project'>): { id: st
     created_by: ctx.actor,
     user_touched: ctx.ai ? 0 : 1,
     created_at: ctx.deps.now().toISOString(),
+    stage_rules_seen: BOARD_RULES_VERSION,
   });
   ctx.projectId = id;
   if (args.from_session !== undefined) linkSession(ctx, { session: args.from_session, project: id });

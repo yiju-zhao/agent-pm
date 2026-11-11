@@ -19,7 +19,7 @@ let dbPath: string;
 let opened: DatabaseSync | null = null;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'herdr-pm-seed-'));
+  dir = mkdtempSync(join(tmpdir(), 'agent-pm-seed-'));
   dbPath = join(dir, 'demo.db');
 });
 

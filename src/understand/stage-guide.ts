@@ -1,10 +1,12 @@
-// What each stage means, as the curator and the stage review read it. One text for both, so they judge alike.
+// What each stage and priority means, as the curator and the stage review read it. One text for both, so they judge
+// alike.
+import { BOARD_RULES_VERSION, PRIORITIES, PRIORITY_LABEL, PRIORITY_MEANING } from '../shared/vocab.ts';
 
 /**
  * Bump when `STAGE_GUIDE` changes in a way that could move projects: every working project is then reviewed again
  * (see `restage.ts`). Projects made after a bump start at the new version, since the curator judged them under it.
  */
-export const STAGE_RULES_VERSION = 1;
+export const STAGE_RULES_VERSION = BOARD_RULES_VERSION;
 
 export const STAGE_GUIDE = [
   '阶段定义（按已经发生的事实判断，不按计划；拿不准时停在较早的阶段）：',
@@ -22,4 +24,11 @@ export const STAGE_GUIDE = [
   '- 往前推进（idea→explore→build→verify）直接生效，一次只能走一步；事实表明已经走到更后面时，连续调用 transition_stage，每次前进一步。',
   '- 回退、done、parked、abandoned、merged 不会直接生效，会变成给用户的确认题；只有摘要里有明确事实时才提。',
   '- 当前阶段已经符合事实就不要动。',
+].join('\n');
+
+export const PRIORITY_GUIDE = [
+  '优先级定义（P0 最高，P3 最低；只能取这四个值）：',
+  ...PRIORITIES.map((p) => `- ${p}（${PRIORITY_LABEL[p]}）：${PRIORITY_MEANING[p]}。`),
+  '按对话和项目里的事实判断：有截止日期、阻塞了别的项目、用户说「急」「先做这个」的往高处放；用户说「有空再说」「顺便」的往低处放；',
+  '拿不准时用 P2。用户改过（锁定）的优先级不要动：再改只会变成给用户的确认题。',
 ].join('\n');

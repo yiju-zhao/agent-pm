@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useId, useMemo, useState, useSyncExternalStore } from 'react';
-import type { FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { SchedulerStatus } from '../../src/understand/status.ts';
-import { AUTH_EVENT, apiSend, errorText, setToken } from './api.ts';
+import { AUTH_EVENT, apiSend, errorText } from './api.ts';
+import { SettingsModal } from './components/settings-modal.tsx';
+import type { SettingsTab } from './components/settings-modal.tsx';
 import { useToast } from './components/toast.tsx';
 import { HomePage } from './pages/home.tsx';
+import { KeysPage } from './pages/keys.tsx';
 import { ProjectPage } from './pages/project.tsx';
 import { SessionsPage } from './pages/sessions.tsx';
 import { parseHash } from './route.ts';
@@ -85,58 +87,6 @@ function ConnectionDot() {
   );
 }
 
-function TokenDialog({ onClose }: { onClose: () => void }) {
-  const toast = useToast();
-  const [value, setValue] = useState('');
-  const titleId = useId();
-  const inputId = useId();
-  const token = value.trim();
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  const save = (e: FormEvent) => {
-    e.preventDefault();
-    if (token === '') return;
-    // Blocked site data: closing as if saved would leave the person wondering why the next write asks again.
-    if (!setToken(token)) {
-      toast('无法保存 token（浏览器禁止了本地存储）');
-      return;
-    }
-    onClose();
-  };
-  const clear = () => {
-    setToken(null);
-    onClose();
-  };
-
-  return (
-    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <form className="modal" role="dialog" aria-modal="true" aria-labelledby={titleId} onSubmit={save}>
-        <h2 id={titleId}>设置 token</h2>
-        <label htmlFor={inputId}>token</label>
-        <input id={inputId} type="password" autoComplete="off" autoFocus value={value} onChange={(e) => setValue(e.target.value)} />
-        <div className="modal-actions">
-          <button type="submit" disabled={token === ''}>
-            保存
-          </button>
-          <button type="button" onClick={clear}>
-            清除
-          </button>
-          <button type="button" onClick={onClose}>
-            取消
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
 function subscribeHash(onChange: () => void): () => void {
   window.addEventListener('hashchange', onChange);
   return () => window.removeEventListener('hashchange', onChange);
@@ -151,18 +101,20 @@ function Page({ route }: { route: Route }) {
       return <ProjectPage key={route.id} id={route.id} />;
     case 'sessions':
       return <SessionsPage />;
+    case 'keys':
+      return <KeysPage />;
   }
 }
 
 export function App() {
   const hash = useSyncExternalStore(subscribeHash, () => window.location.hash);
   const route = useMemo(() => parseHash(hash), [hash]);
-  const [tokenOpen, setTokenOpen] = useState(false);
-  const closeToken = useCallback(() => setTokenOpen(false), []);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab | null>(null);
+  const closeSettings = useCallback(() => setSettingsTab(null), []);
 
-  // A write without a token, or with one the server refused, asks for the token here.
+  // A write without a key, or with one the server refused, asks for the key here.
   useEffect(() => {
-    const open = () => setTokenOpen(true);
+    const open = () => setSettingsTab('access');
     window.addEventListener(AUTH_EVENT, open);
     return () => window.removeEventListener(AUTH_EVENT, open);
   }, []);
@@ -170,7 +122,7 @@ export function App() {
   return (
     <>
       <header className="topbar">
-        <h1>herdr-pm</h1>
+        <h1>agent-pm</h1>
         <nav>
           <a href="#/" aria-current={route.page === 'home' ? 'page' : undefined}>
             首页
@@ -178,18 +130,21 @@ export function App() {
           <a href="#/sessions" aria-current={route.page === 'sessions' ? 'page' : undefined}>
             Session
           </a>
+          <a href="#/keys" aria-current={route.page === 'keys' ? 'page' : undefined}>
+            API Keys
+          </a>
         </nav>
         <div className="topbar-status">
           <UnderstandingStatus />
           <SyncButton />
           <ConnectionDot />
-          <button type="button" onClick={() => setTokenOpen(true)}>
-            设置 token
+          <button type="button" onClick={() => setSettingsTab('access')}>
+            设置
           </button>
         </div>
       </header>
       <Page route={route} />
-      {tokenOpen ? <TokenDialog onClose={closeToken} /> : null}
+      {settingsTab !== null ? <SettingsModal initialTab={settingsTab} onClose={closeSettings} /> : null}
     </>
   );
 }

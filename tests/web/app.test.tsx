@@ -224,7 +224,7 @@ test('AUTH_EVENT opens the token dialog and saving stores the token', async () =
     window.dispatchEvent(new Event(AUTH_EVENT));
   });
   const dialog = await screen.findByRole('dialog');
-  const input = within(dialog).getByLabelText('token');
+  const input = within(dialog).getByLabelText('API key');
   fireEvent.change(input, { target: { value: '  my-secret-token ' } });
   fireEvent.click(within(dialog).getByRole('button', { name: '保存' }));
 
@@ -239,20 +239,20 @@ test('a token the browser will not store keeps the dialog open and says so', asy
   vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
     throw new Error('blocked');
   });
-  fireEvent.click(screen.getByRole('button', { name: '设置 token' }));
+  fireEvent.click(screen.getByRole('button', { name: '设置' }));
   const dialog = await screen.findByRole('dialog');
-  fireEvent.change(within(dialog).getByLabelText('token'), { target: { value: 'my-secret-token' } });
+  fireEvent.change(within(dialog).getByLabelText('API key'), { target: { value: 'my-secret-token' } });
   fireEvent.click(within(dialog).getByRole('button', { name: '保存' }));
-  expect(await screen.findByText('无法保存 token（浏览器禁止了本地存储）')).toBeTruthy();
+  expect(await screen.findByText('无法保存 key（浏览器禁止了本地存储）')).toBeTruthy();
   expect(screen.getByRole('dialog')).toBeTruthy();
 });
 
-test('the 设置 token button opens the dialog; 清除 removes the stored token', async () => {
+test('the 设置 button opens the dialog; 清除 removes the stored key', async () => {
   serve(understanding());
   setToken('old-token');
   renderApp();
   await screen.findByText('空闲');
-  fireEvent.click(screen.getByRole('button', { name: '设置 token' }));
+  fireEvent.click(screen.getByRole('button', { name: '设置' }));
   const dialog = await screen.findByRole('dialog');
   fireEvent.click(within(dialog).getByRole('button', { name: '清除' }));
   expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
@@ -265,13 +265,13 @@ test('closing the token dialog with 取消 or Escape keeps the stored token', as
   renderApp();
   await screen.findByText('空闲');
 
-  fireEvent.click(screen.getByRole('button', { name: '设置 token' }));
+  fireEvent.click(screen.getByRole('button', { name: '设置' }));
   let dialog = await screen.findByRole('dialog');
-  fireEvent.change(within(dialog).getByLabelText('token'), { target: { value: 'typed-but-not-saved' } });
+  fireEvent.change(within(dialog).getByLabelText('API key'), { target: { value: 'typed-but-not-saved' } });
   fireEvent.click(within(dialog).getByRole('button', { name: '取消' }));
   expect(screen.queryByRole('dialog')).toBeNull();
 
-  fireEvent.click(screen.getByRole('button', { name: '设置 token' }));
+  fireEvent.click(screen.getByRole('button', { name: '设置' }));
   dialog = await screen.findByRole('dialog');
   fireEvent.keyDown(dialog, { key: 'Escape' });
   expect(screen.queryByRole('dialog')).toBeNull();
@@ -282,7 +282,7 @@ test('保存 does nothing for an empty token', async () => {
   serve(understanding());
   renderApp();
   await screen.findByText('空闲');
-  fireEvent.click(screen.getByRole('button', { name: '设置 token' }));
+  fireEvent.click(screen.getByRole('button', { name: '设置' }));
   const dialog = await screen.findByRole('dialog');
   const save = within(dialog).getByRole('button', { name: '保存' }) as HTMLButtonElement;
   expect(save.disabled).toBe(true);

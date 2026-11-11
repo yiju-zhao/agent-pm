@@ -169,6 +169,11 @@ export type ProjectDetail = ProjectCard & {
   events: EventView[];
   /** Things the user deleted or unlinked, so the curator does not propose them again. */
   tombstones: Array<{ table: string; id: string; label: string; deleted_at: string }>;
+  /**
+   * Who the current value of each fixed-choice field came from: `ai` (pre-filled by the curator or the review, the user
+   * can change it in place) or `user` (set or confirmed by the user). `priority` is `null` while it has no value.
+   */
+  field_sources: { stage: 'ai' | 'user'; priority: 'ai' | 'user' | null };
 };
 
 // ---- small helpers -----------------------------------------------------------------------------------------------
@@ -540,6 +545,26 @@ export function getProject(db: DatabaseSync, now: Date, id: string): ProjectDeta
     }),
     events: loadEvents(db, id),
     tombstones: loadTombstones(db, id),
+    field_sources: fieldSources(db, card),
+  };
+}
+
+/**
+ * The stage comes from the last stage move (or the creation) that was not reverted; a move the user confirmed by
+ * answering a question is the user's. The priority is the user's when locked (the user set it), else the AI's.
+ */
+function fieldSources(db: DatabaseSync, card: ProjectCard): ProjectDetail['field_sources'] {
+  const last = db
+    .prepare(
+      `SELECT actor FROM events WHERE project_id = ? AND op IN ('create_project', 'transition_stage')
+         AND reverted_by IS NULL AND coalesce(is_veto, 0) = 0
+       ORDER BY id DESC LIMIT 1`,
+    )
+    .get(card.id) as { actor: string } | undefined;
+  const byAi = (actor: string | undefined) => actor !== undefined && actor.startsWith('ai:');
+  return {
+    stage: byAi(last?.actor) ? 'ai' : 'user',
+    priority: card.priority === null ? null : card.locks.includes('priority') ? 'user' : 'ai',
   };
 }
 

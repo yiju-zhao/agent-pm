@@ -2,6 +2,7 @@
 // which the person types once and the page keeps in localStorage. A missing or rejected token never fails silently: it
 // raises AUTH_EVENT on `window`, which opens the token dialog.
 
+// Storage keys kept from before the rename, so a key saved in the browser survives it.
 export const TOKEN_KEY = 'herdr-pm.userToken';
 /** Dispatched on `window` when a request needs a token that is missing, or the server refused it (401). */
 export const AUTH_EVENT = 'herdr-pm:auth';

@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { ProjectCard, ProjectDetail, QuestionView } from '../../../src/domain/read.ts';
-import { PRIORITIES } from '../../../src/shared/vocab.ts';
+import { PRIORITIES, PRIORITY_LABEL, PRIORITY_MEANING } from '../../../src/shared/vocab.ts';
 import { apiSend, errorText } from '../api.ts';
 import type { ApiError } from '../api.ts';
 import { Fold, Section } from '../components/blocks.tsx';
@@ -9,7 +9,7 @@ import { EventLog } from '../components/event-log.tsx';
 import { BlockerList, DecisionList, MilestoneList, TodoList } from '../components/items.tsx';
 import { projectHref } from '../components/project-card.tsx';
 import { QuestionCard } from '../components/question-card.tsx';
-import { StageControl } from '../components/stage-control.tsx';
+import { SourceMark, StageControl } from '../components/stage-control.tsx';
 import { Timeline } from '../components/timeline.tsx';
 import { relTime, shortDate } from '../format.ts';
 import { useApi } from '../use-api.ts';
@@ -65,19 +65,22 @@ function PriorityControl({ project, reload }: PageProps) {
       <select
         aria-label="优先级"
         className={project.priority === null ? 'prio pnone' : `prio ${project.priority.toLowerCase()}`}
+        title={project.priority === null ? '还没有优先级' : `${project.priority}：${PRIORITY_MEANING[project.priority]}`}
         value={project.priority ?? ''}
         onChange={(e) => void fire(() => apiSend('PATCH', path, { priority: e.target.value === '' ? null : e.target.value }))}
       >
         <option value="">未定</option>
         {PRIORITIES.map((p) => (
-          <option key={p} value={p}>
-            {p}
+          <option key={p} value={p} title={PRIORITY_MEANING[p]}>
+            {`${p} · ${PRIORITY_LABEL[p]}`}
           </option>
         ))}
       </select>
       {project.locks.includes('priority') ? (
         <LockMark field="优先级" onUnlock={() => fire(() => apiSend('DELETE', `${path}/locks/priority`))} />
-      ) : null}
+      ) : (
+        <SourceMark source={project.field_sources.priority} />
+      )}
     </span>
   );
 }

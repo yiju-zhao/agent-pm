@@ -4,12 +4,12 @@ import { bodyLimit } from 'hono/body-limit';
 import type { ZodType } from 'zod';
 import { BatchV2, LeaseRequest, MAX_V2_BODY_BYTES, SnapshotV2 } from '../shared/ingest-v2.ts';
 import type { V2Error } from '../shared/ingest-v2.ts';
-import { bearerToken, tokenMatches } from './bearer.ts';
+import { principalOf } from './keys.ts';
 import type { ServerConfig } from './config.ts';
 import { acquireLease, applyPaseoSnapshot, bodyHash, commitBatch, getCheckpoint, IngestError } from './ingest-repo.ts';
 import type { PaseoSource } from './ingest-repo.ts';
 
-// `/ingest/v2/*`: the routes of Paseo collectors. A token belongs to exactly one configured source and may write that
+// `/ingest/v2/*`: the routes of Paseo collectors. A key (`ingest:paseo:<source>`) belongs to one configured source and may write that
 // source only; the source, machine and daemon identity come from the server config, never from the request body (a
 // body naming another source is refused). Legacy herdr tokens get nothing here, and Paseo tokens nothing on the legacy
 // routes. Every timestamp is the server's clock.
@@ -18,17 +18,15 @@ function errorBody(code: V2Error['error'], message: string, checkpoint?: V2Error
   return checkpoint === undefined ? { error: code, message } : { error: code, message, checkpoint };
 }
 
-/** The configured source whose token was presented, or the error response to send. */
-function authenticateSource(c: Context, config: ServerConfig): PaseoSource | Response {
-  const presented = bearerToken(c.req.header('Authorization'));
-  // Compare against every configured token (no early exit), each in constant time.
-  const matches = Object.entries(config.paseoCollectors ?? {}).filter(([, e]) => presented !== null && tokenMatches(presented, e.token));
-  if (presented === null || matches.length !== 1) {
+/** The configured source whose key was presented (an `ingest:paseo:<source>` key), or the error response to send. */
+function authenticateSource(c: Context, db: DatabaseSync, config: ServerConfig, clock: () => Date): PaseoSource | Response {
+  const p = principalOf(c, db, config, clock());
+  const entry = p?.scope.kind === 'ingest_paseo' ? config.paseoCollectors?.[p.scope.source] : undefined;
+  if (p === null || p.scope.kind !== 'ingest_paseo' || entry === undefined) {
     c.header('WWW-Authenticate', 'Bearer');
     return c.json({ error: 'missing or invalid bearer token' }, 401);
   }
-  const [sourceId, entry] = matches[0]!;
-  return { sourceId, machine: entry.machine, serverId: entry.serverId };
+  return { sourceId: p.scope.source, machine: entry.machine, serverId: entry.serverId };
 }
 
 async function readBody<T extends { source_id: string }>(c: Context, src: PaseoSource, schema: ZodType<T>): Promise<{ body: T; raw: unknown } | Response> {
@@ -59,7 +57,7 @@ export function mountIngestV2(app: Hono, db: DatabaseSync, config: ServerConfig,
   });
 
   app.post('/ingest/v2/lease', limit, async (c) => {
-    const src = authenticateSource(c, config);
+    const src = authenticateSource(c, db, config, clock);
     if (src instanceof Response) return src;
     const read = await readBody(c, src, LeaseRequest);
     if (read instanceof Response) return read;
@@ -71,7 +69,7 @@ export function mountIngestV2(app: Hono, db: DatabaseSync, config: ServerConfig,
   });
 
   app.post('/ingest/v2/snapshot', limit, async (c) => {
-    const src = authenticateSource(c, config);
+    const src = authenticateSource(c, db, config, clock);
     if (src instanceof Response) return src;
     const read = await readBody(c, src, SnapshotV2);
     if (read instanceof Response) return read;
@@ -86,7 +84,7 @@ export function mountIngestV2(app: Hono, db: DatabaseSync, config: ServerConfig,
   });
 
   app.get('/ingest/v2/checkpoint', (c) => {
-    const src = authenticateSource(c, config);
+    const src = authenticateSource(c, db, config, clock);
     if (src instanceof Response) return src;
     const agentId = c.req.query('agent_id');
     if (!agentId) return c.json(errorBody('invalid', 'query parameter "agent_id" is required'), 400);
@@ -94,7 +92,7 @@ export function mountIngestV2(app: Hono, db: DatabaseSync, config: ServerConfig,
   });
 
   app.post('/ingest/v2/batches', limit, async (c) => {
-    const src = authenticateSource(c, config);
+    const src = authenticateSource(c, db, config, clock);
     if (src instanceof Response) return src;
     const read = await readBody(c, src, BatchV2);
     if (read instanceof Response) return read;

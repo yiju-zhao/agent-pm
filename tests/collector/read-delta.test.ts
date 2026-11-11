@@ -8,7 +8,7 @@ let dir: string;
 let p: string;
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'herdr-pm-read-delta-'));
+  dir = await mkdtemp(join(tmpdir(), 'agent-pm-read-delta-'));
   p = join(dir, 'transcript.jsonl');
 });
 

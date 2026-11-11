@@ -118,7 +118,7 @@ test('a batch holds at most RESTAGE_MAX_PROJECTS projects', () => {
 // ---- prompt ------------------------------------------------------------------------------------------------------
 
 test('the prompt shows each project with the recent non-trivial digests of its linked sessions', () => {
-  const p = oldProject('herdr-pm 阶段复核');
+  const p = oldProject('agent-pm 阶段复核');
   link(KEY, p);
   const old = addDigest(KEY, '最早的进展', { tsEnd: '2026-10-20T09:00:00.000Z' });
   const recent: number[] = [];
@@ -134,7 +134,7 @@ test('the prompt shows each project with the recent non-trivial digests of its l
   expect(built.shown).toEqual([p]);
   expect(built.digestIds).toEqual(recent);
   expect(built.prompt).toContain(`<project id="${p}">`);
-  expect(built.prompt).toContain('herdr-pm 阶段复核');
+  expect(built.prompt).toContain('agent-pm 阶段复核');
   expect(built.prompt).toContain('进展 5');
   for (const id of [old, trivial, skipped, unrelated]) expect(built.prompt).not.toContain(`<digest id="${id}"`);
   expect(built.system).toContain(STAGE_GUIDE);
@@ -163,7 +163,7 @@ test('projects with nothing to cite are marked reviewed without a model call', a
   expect(seen(p)).toBe(STAGE_RULES_VERSION);
 });
 
-test('the review gets only transition_stage and get_project, and can move a project several steps forward', async () => {
+test('the review gets only transition_stage, get_project and set_priority, and can move a project several steps forward', async () => {
   const p = oldProject('已经在写代码的项目');
   link(KEY, p);
   const d = addDigest(KEY, '方案定了，开始写代码');
@@ -178,7 +178,7 @@ test('the review gets only transition_stage and get_project, and can move a proj
 
   expect(outcome).toEqual({ status: 'reviewed', projectIds: [p] });
   expect(calls[0]).toMatchObject({ role: 'restage', model: MODEL, maxTurns: RESTAGE_MAX_TURNS });
-  expect(calls[0].tools?.map((x) => x.name)).toEqual(['transition_stage', 'get_project']);
+  expect(calls[0].tools?.map((x) => x.name)).toEqual(['transition_stage', 'get_project', 'set_priority']);
   expect(results.map((r) => r.status)).toEqual(['applied', 'applied']);
   expect(row(t.db, 'projects', p)).toMatchObject({ stage: 'build', stage_rules_seen: STAGE_RULES_VERSION });
   expect(t.db.prepare(`SELECT role, ok FROM llm_runs`).all()).toEqual([{ role: 'restage', ok: 1 }]);
@@ -248,4 +248,29 @@ test('a failed run after a stage move landed still marks the batch reviewed', as
 test('the curator system prompt carries the stage guide too', async () => {
   const { buildCuratorPrompt } = await import('../../src/understand/curate.ts');
   expect(buildCuratorPrompt(t.db, t.deps, []).system).toContain(STAGE_GUIDE);
+});
+
+test('set_priority pre-fills a missing priority, can set nothing else, and only proposes over a user lock', async () => {
+  const p = oldProject('没有优先级的项目');
+  const locked = oldProject('用户定过优先级的项目');
+  t.user('update_project', { project: locked, fields: { priority: 'P3' } });
+  link(KEY, p);
+  t.user('link_session', { session: KEY, project: locked });
+  const d = addDigest(KEY, '这个下周要交，最急');
+  const results: Array<Record<string, unknown>> = [];
+  const { runner } = fakeRunner(SUCCESS, async (call) => {
+    results.push(await callTool(call, 'set_priority', { project: p, priority: 'P0', reason: '有硬期限', evidence: [`digest:${d}`] }));
+    results.push(await callTool(call, 'set_priority', { project: locked, priority: 'P0', reason: '有硬期限', evidence: [`digest:${d}`] }));
+    results.push(await callTool(call, 'set_priority', { project: p, priority: 'P0', title: '改标题', reason: 'x', evidence: [`digest:${d}`] }));
+    results.push(await callTool(call, 'set_priority', { project: p, priority: 'urgent', reason: 'x', evidence: [`digest:${d}`] }));
+  });
+
+  await runRestage(t.db, t.deps, runner, [p, locked], { model: MODEL });
+
+  expect(row(t.db, 'projects', p)).toMatchObject({ priority: 'P0', title: '没有优先级的项目' });
+  expect(row(t.db, 'projects', locked)).toMatchObject({ priority: 'P3' });
+  expect(results[0]!.status).toBe('applied');
+  expect(results[1]!.status).not.toBe('applied'); // a question for the user instead
+  expect(results[2]).toMatchObject({ status: 'rejected', code: 'invalid' }); // extra field refused
+  expect(results[3]).toMatchObject({ status: 'rejected', code: 'invalid' }); // not one of P0–P3
 });

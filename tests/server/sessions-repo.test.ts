@@ -652,7 +652,7 @@ test('getSession follows a merged key, and is null for a key that is not a sessi
 });
 
 test('migrations are idempotent when opening the same file twice', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'herdr-pm-db-'));
+  const dir = await mkdtemp(join(tmpdir(), 'agent-pm-db-'));
   try {
     const path = join(dir, 'pm.db');
     const first = openDb(path);

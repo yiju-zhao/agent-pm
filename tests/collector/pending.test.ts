@@ -13,7 +13,7 @@ import {
 let dir: string;
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'herdr-pm-pending-'));
+  dir = await mkdtemp(join(tmpdir(), 'agent-pm-pending-'));
 });
 
 afterEach(async () => {

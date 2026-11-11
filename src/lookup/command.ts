@@ -1,4 +1,4 @@
-// `herdr-pm open [<短ID>]`: arguments, the questions it asks, what it prints, and the real
+// `agent-pm open [<短ID>]`: arguments, the questions it asks, what it prints, and the real
 // process / terminal plumbing behind OpenDeps. Bundled into the single-file bun binary, so it
 // imports only node built-ins and src/lookup (never the server, node:sqlite, hono or the Agent SDK).
 import { spawn } from 'node:child_process';
@@ -11,7 +11,7 @@ import { describePlan, executePlan, findFocusedPane, planOpen } from './open.ts'
 import type { OpenDeps, OpenPlan, RemoteMode } from './open.ts';
 
 const DEFAULT_SERVER = 'http://localhost:7718';
-const USAGE = '用法：herdr-pm open [<短ID>] [--remote split|inline] [--server <url>] [--herdr <path>] [--dry-run]';
+const USAGE = '用法：agent-pm open [<短ID>] [--remote split|inline] [--server <url>] [--herdr <path>] [--dry-run]';
 const PANE_LIST_TIMEOUT_MS = 5000;
 
 const STATUS_TEXT: Record<string, string> = {
@@ -64,7 +64,7 @@ async function focusedPaneOf(deps: OpenDeps): Promise<string | null> {
 }
 
 /**
- * Runs `herdr-pm open` and returns the exit code: 0 opened, 1 not found / ambiguous / failed to
+ * Runs `agent-pm open` and returns the exit code: 0 opened, 1 not found / ambiguous / failed to
  * open, 2 usage error; an inline attach returns ssh's own. `makeDeps` gets the `--herdr` value
  * (default `herdr`) once the arguments are parsed. In a terminal, a failure waits for Enter before
  * returning, so a popup does not vanish with its message.
@@ -75,7 +75,7 @@ export async function runOpen(
   makeDeps: (herdrBin: string) => OpenDeps,
 ): Promise<number> {
   const usageError = (message: string) => {
-    io.stderr(`herdr-pm open: ${message}\n${USAGE}\n`);
+    io.stderr(`agent-pm open: ${message}\n${USAGE}\n`);
     return 2;
   };
   const parsed = parseOpenArgs(args);
@@ -117,7 +117,7 @@ export async function runOpen(
     // Not by a session id herdr knows. The center may still say where the session runs: the collector reads the
     // native id of a codex pane that herdr reports without one from its rollout, so the pane is found by terminal.
     // The center only names the terminal; the pane that is opened comes from herdr's own listing.
-    const server = parsed.args.server || deps.env.HERDR_PM_SERVER || DEFAULT_SERVER;
+    const server = parsed.args.server || deps.env.AGENT_PM_SERVER || deps.env.HERDR_PM_SERVER || DEFAULT_SERVER;
     const sessions = await centerSessions(deps.fetch, server, sid);
     const terminals = (sessions ?? []).flatMap((s) =>
       s.effective_status !== 'ended' && s.effective_status !== 'purged' && s.terminal_id !== null ? [s.terminal_id] : [],
