@@ -15,13 +15,16 @@ import { disabledStatus } from '../understand/status.ts';
 import { bearerToken, tokenMatches } from './bearer.ts';
 import type { ServerConfig } from './config.ts';
 import { mountDomainRoutes, userAuth } from './domain-routes.ts';
+import { mountIngestV2 } from './ingest-v2.ts';
 import { applySnapshot, findByShortId, insertChunks, listSessions, maxOffset } from './sessions-repo.ts';
 import type { SessionView } from './sessions-repo.ts';
+import { herdrSourceId } from './sources-repo.ts';
 import { sidebarLabels } from './sidebar.ts';
 import { mountWeb } from './web.ts';
 
 /**
- * The central API. `/ingest/*` is for collectors (bearer token bound to one machine); the project
+ * The central API. `/ingest/*` is for herdr collectors (bearer token bound to one machine), `/ingest/v2/*`
+ * (`./ingest-v2.ts`) for Paseo collectors (bearer token bound to one source); the project
  * API (`./domain-routes.ts`) takes the user token on writes; `/mcp` (`../mcp/server.ts`) takes the MCP token; every
  * other GET, `/sessions*` included, is unauthenticated for now (Tailscale only), except `/evidence/:ref`, which returns raw
  * conversation text and takes the user token. Every timestamp the server stores comes from `clock`,
@@ -83,9 +86,12 @@ export function createApp(
     if (forbidden) return forbidden;
     const sessionKey = c.req.query('session_key');
     if (!sessionKey) return c.json({ error: 'query parameter "session_key" is required' }, 400);
-    const body: OffsetResponse = { session_key: sessionKey, max_offset_end: maxOffset(db, sessionKey) };
+    // The machine's herdr source's own checkpoint: it counts content kept as standby too, so it is never asked for again.
+    const body: OffsetResponse = { session_key: sessionKey, max_offset_end: maxOffset(db, sessionKey, herdrSourceId(machine)) };
     return c.json(body);
   });
+
+  mountIngestV2(app, db, config, clock);
 
   app.get('/sessions', (c) => {
     const sessions = listSessions(
@@ -193,6 +199,7 @@ function checkKey(key: string, where: string, machine: string): string | null {
   } catch {
     return `invalid session key at ${where}: ${JSON.stringify(key)}`;
   }
+  if (parsed.kind === 'source_pending') return `session key at ${where} belongs to a Paseo source: ${JSON.stringify(key)}`;
   if (parsed.kind === 'pending' && parsed.machine !== machine) {
     return `session key at ${where} is pending for machine ${JSON.stringify(parsed.machine)}, not ${JSON.stringify(machine)}: ${JSON.stringify(key)}`;
   }

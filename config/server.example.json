@@ -9,6 +9,13 @@
     "gx10-090e": "REPLACE-WITH-RANDOM-TOKEN-gx10-090e",
     "gx10-c757": "REPLACE-WITH-RANDOM-TOKEN-gx10-c757"
   },
+  "paseoCollectors": {
+    "paseo-mac-mini": {
+      "token": "REPLACE-WITH-RANDOM-PASEO-TOKEN-mac-mini",
+      "machine": "mac-mini",
+      "serverId": "REPLACE-WITH-THE-DAEMON-SERVER-ID"
+    }
+  },
   "understanding": {
     "enabled": true,
     "digestModel": "claude-haiku-5-5",

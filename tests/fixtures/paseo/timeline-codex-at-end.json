@@ -1,0 +1,22 @@
+{
+ "requestId": "id-147c70ca0c3c",
+ "agentId": "id-ec0f1225cd53",
+ "agent": null,
+ "direction": "after",
+ "projection": "projected",
+ "epoch": "epoch-2",
+ "reset": false,
+ "staleCursor": false,
+ "gap": false,
+ "window": {
+  "minSeq": 1,
+  "maxSeq": 1604,
+  "nextSeq": 1605
+ },
+ "startCursor": null,
+ "endCursor": null,
+ "hasOlder": true,
+ "hasNewer": false,
+ "entries": [],
+ "error": null
+}

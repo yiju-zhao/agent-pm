@@ -1,0 +1,510 @@
+{
+ "serverIdPresent": true,
+ "entries": [
+  {
+   "agent": {
+    "id": "id-214df03c944f",
+    "provider": "claude",
+    "cwd": "/work/project",
+    "workspaceId": "id-a8133ee75e10",
+    "model": "claude-opus-5-5",
+    "thinkingOptionId": "thin",
+    "effectiveThinkingOptionId": "effe",
+    "runtimeInfo": {
+     "provider": "claude",
+     "sessionId": null,
+     "model": null,
+     "modeId": "mode"
+    },
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "updatedAt": "2026-01-01T00:10:37.420Z",
+    "lastUserMessageAt": "2026-01-01T00:00:01.197Z",
+    "status": "running",
+    "activeTurn": {
+     "turnId": "id-421db73d5961",
+     "startedAt": "2026-01-01T00:00:01.197Z"
+    },
+    "capabilities": {
+     "supportsStreaming": true,
+     "supportsSessionPersistence": true,
+     "supportsSessionListing": true,
+     "supportsDynamicModes": true,
+     "supportsMcpServers": true,
+     "supportsReasoningStream": true,
+     "supportsToolInvocations": true,
+     "supportsRewindConversation": true,
+     "supportsRewindFiles": true,
+     "supportsRewindBoth": true
+    },
+    "currentModeId": "auto",
+    "availableModes": [],
+    "features": [],
+    "pendingPermissions": [],
+    "persistence": {
+     "provider": "claude",
+     "sessionId": "id-8fa36e564cf1",
+     "nativeHandle": "id-8fa36e564cf1",
+     "metadata": {}
+    },
+    "title": "title#4 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "labels": {},
+    "archivedAt": null,
+    "lastUsage": {
+     "contextWindowMaxTokens": 1000000,
+     "contextWindowUsedTokens": 207128
+    },
+    "requiresAttention": false,
+    "attentionReason": null,
+    "attentionTimestamp": null
+   },
+   "project": {
+    "projectKey": "id-b72af22cfb86",
+    "projectName": "projectN",
+    "workspaceName": "workspaceName#6 xxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "checkout": {
+     "cwd": "/work/project",
+     "currentBranch": "curren",
+     "remoteUrl": null,
+     "worktreeRoot": "/work/project",
+     "isGit": true,
+     "isPaseoOwnedWorktree": false,
+     "mainRepoRoot": null
+    }
+   }
+  },
+  {
+   "agent": {
+    "id": "id-82943f4c4731",
+    "provider": "claude",
+    "cwd": "/work/project",
+    "workspaceId": "id-4bb6aa956c43",
+    "model": "claude-opus-5-5",
+    "thinkingOptionId": "thin",
+    "effectiveThinkingOptionId": "effe",
+    "runtimeInfo": {
+     "provider": "claude",
+     "sessionId": "id-bf3534f3e494",
+     "model": "claude-opus-5-5",
+     "modeId": "mode",
+     "extra": {
+      "runtimeModel": "claude-opus-5-5"
+     }
+    },
+    "createdAt": "2025-12-29T02:51:05.004Z",
+    "updatedAt": "2026-01-01T00:03:57.042Z",
+    "lastUserMessageAt": "2025-12-31T23:59:28.787Z",
+    "status": "idle",
+    "activeTurn": null,
+    "capabilities": {
+     "supportsStreaming": true,
+     "supportsSessionPersistence": true,
+     "supportsSessionListing": true,
+     "supportsDynamicModes": true,
+     "supportsMcpServers": true,
+     "supportsReasoningStream": true,
+     "supportsToolInvocations": true,
+     "supportsRewindConversation": true,
+     "supportsRewindFiles": true,
+     "supportsRewindBoth": true
+    },
+    "currentModeId": "auto",
+    "availableModes": [],
+    "features": [],
+    "pendingPermissions": [],
+    "persistence": {
+     "provider": "claude",
+     "sessionId": "id-bf3534f3e494",
+     "nativeHandle": "id-bf3534f3e494",
+     "metadata": {}
+    },
+    "title": "title#11",
+    "labels": {},
+    "archivedAt": null,
+    "lastUsage": {
+     "inputTokens": 50,
+     "cachedInputTokens": 8223551,
+     "outputTokens": 19283,
+     "totalCostUsd": 34.074035800000004,
+     "contextWindowMaxTokens": 1000000,
+     "contextWindowUsedTokens": 367437
+    },
+    "requiresAttention": true,
+    "attentionReason": "finished",
+    "attentionTimestamp": "2026-01-01T00:03:57.041Z"
+   },
+   "project": {
+    "projectKey": "id-b07ca1717287",
+    "projectName": "projectNa",
+    "workspaceName": "workspaceName#13",
+    "checkout": {
+     "cwd": "/work/project",
+     "currentBranch": "currentBranch#14",
+     "remoteUrl": null,
+     "worktreeRoot": "/work/project",
+     "isGit": true,
+     "isPaseoOwnedWorktree": false,
+     "mainRepoRoot": null
+    }
+   }
+  },
+  {
+   "agent": {
+    "id": "id-ec0f1225cd53",
+    "provider": "codex",
+    "cwd": "/work/project",
+    "workspaceId": "id-a8133ee75e10",
+    "model": "gpt-6-astra",
+    "thinkingOptionId": "thin",
+    "effectiveThinkingOptionId": "effe",
+    "runtimeInfo": {
+     "provider": "codex",
+     "sessionId": "id-f81ad6789838",
+     "model": "gpt-6-astra",
+     "thinkingOptionId": "thin",
+     "modeId": "modeId#18 x",
+     "extra": {
+      "collaborationMode": "collabo"
+     }
+    },
+    "createdAt": "2025-12-29T08:10:44.141Z",
+    "updatedAt": "2025-12-31T23:57:15.547Z",
+    "lastUserMessageAt": "2025-12-31T23:56:19.406Z",
+    "status": "idle",
+    "activeTurn": null,
+    "capabilities": {
+     "supportsStreaming": true,
+     "supportsSessionPersistence": true,
+     "supportsSessionListing": true,
+     "supportsDynamicModes": false,
+     "supportsMcpServers": true,
+     "supportsReasoningStream": true,
+     "supportsToolInvocations": true,
+     "supportsRewindConversation": true,
+     "supportsRewindFiles": false,
+     "supportsRewindBoth": false
+    },
+    "currentModeId": "auto-review",
+    "availableModes": [],
+    "features": [],
+    "pendingPermissions": [],
+    "persistence": {
+     "provider": "codex",
+     "sessionId": "id-f81ad6789838",
+     "nativeHandle": "id-f81ad6789838",
+     "metadata": {}
+    },
+    "title": "title#20 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "labels": {},
+    "archivedAt": null,
+    "lastUsage": {
+     "inputTokens": 181122,
+     "cachedInputTokens": 175488,
+     "outputTokens": 1723,
+     "contextWindowMaxTokens": 828400,
+     "contextWindowUsedTokens": 182845
+    },
+    "requiresAttention": false,
+    "attentionReason": null,
+    "attentionTimestamp": null
+   },
+   "project": {
+    "projectKey": "id-b72af22cfb86",
+    "projectName": "projectN",
+    "workspaceName": "workspaceName#22 xxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "checkout": {
+     "cwd": "/work/project",
+     "currentBranch": "curren",
+     "remoteUrl": null,
+     "worktreeRoot": "/work/project",
+     "isGit": true,
+     "isPaseoOwnedWorktree": false,
+     "mainRepoRoot": null
+    }
+   }
+  },
+  {
+   "agent": {
+    "id": "id-6df8192ab2a8",
+    "provider": "codex",
+    "cwd": "/work/project",
+    "workspaceId": "id-74aa3f559a7b",
+    "model": "gpt-6-astra",
+    "thinkingOptionId": "thin",
+    "effectiveThinkingOptionId": "effe",
+    "runtimeInfo": {
+     "provider": "codex",
+     "sessionId": "id-b64fc2f9a604",
+     "model": "gpt-6-astra",
+     "thinkingOptionId": "thin",
+     "modeId": "modeId#27 x",
+     "extra": {
+      "collaborationMode": "collabo"
+     }
+    },
+    "createdAt": "2025-12-29T09:12:06.546Z",
+    "updatedAt": "2025-12-31T23:55:53.021Z",
+    "lastUserMessageAt": "2025-12-30T04:00:20.032Z",
+    "status": "idle",
+    "activeTurn": null,
+    "capabilities": {
+     "supportsStreaming": true,
+     "supportsSessionPersistence": true,
+     "supportsSessionListing": true,
+     "supportsDynamicModes": false,
+     "supportsMcpServers": true,
+     "supportsReasoningStream": true,
+     "supportsToolInvocations": true,
+     "supportsRewindConversation": true,
+     "supportsRewindFiles": false,
+     "supportsRewindBoth": false
+    },
+    "currentModeId": "auto-review",
+    "availableModes": [],
+    "features": [],
+    "pendingPermissions": [],
+    "persistence": {
+     "provider": "codex",
+     "sessionId": "id-b64fc2f9a604",
+     "nativeHandle": "id-b64fc2f9a604",
+     "metadata": {}
+    },
+    "title": "title#29 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "labels": {},
+    "archivedAt": null,
+    "lastUsage": {
+     "inputTokens": 166607,
+     "cachedInputTokens": 163584,
+     "outputTokens": 413,
+     "contextWindowMaxTokens": 828400,
+     "contextWindowUsedTokens": 167020
+    },
+    "requiresAttention": false,
+    "attentionReason": null,
+    "attentionTimestamp": null
+   },
+   "project": {
+    "projectKey": "id-0d479fd5c7c0",
+    "projectName": "projectNa",
+    "workspaceName": "workspaceName#31 xxxxxxxxxxxxxxxxxxxxxxx",
+    "checkout": {
+     "cwd": "/work/project",
+     "currentBranch": "curr",
+     "remoteUrl": null,
+     "worktreeRoot": "/work/project",
+     "isGit": true,
+     "isPaseoOwnedWorktree": false,
+     "mainRepoRoot": null
+    }
+   }
+  },
+  {
+   "agent": {
+    "id": "id-3a13fb528f85",
+    "provider": "codex",
+    "cwd": "/work/project",
+    "workspaceId": "id-8bf85a13471b",
+    "model": "gpt-6-astra",
+    "thinkingOptionId": "thin",
+    "effectiveThinkingOptionId": "effe",
+    "runtimeInfo": {
+     "provider": "codex",
+     "sessionId": "id-47932b0cba34",
+     "model": "gpt-6-astra",
+     "thinkingOptionId": "thin",
+     "modeId": "modeId#36 x",
+     "extra": {
+      "collaborationMode": "collabo"
+     }
+    },
+    "createdAt": "2025-12-30T08:00:27.229Z",
+    "updatedAt": "2025-12-31T19:51:14.149Z",
+    "lastUserMessageAt": "2025-12-30T18:13:45.246Z",
+    "status": "closed",
+    "capabilities": {
+     "supportsStreaming": false,
+     "supportsSessionPersistence": true,
+     "supportsDynamicModes": false,
+     "supportsMcpServers": false,
+     "supportsReasoningStream": false,
+     "supportsToolInvocations": true,
+     "supportsRewindConversation": false,
+     "supportsRewindFiles": false,
+     "supportsRewindBoth": false
+    },
+    "currentModeId": "auto-review",
+    "availableModes": [],
+    "pendingPermissions": [],
+    "persistence": {
+     "provider": "codex",
+     "sessionId": "id-47932b0cba34",
+     "nativeHandle": "id-47932b0cba34",
+     "metadata": {}
+    },
+    "title": "title#38 ",
+    "requiresAttention": false,
+    "attentionReason": null,
+    "attentionTimestamp": null,
+    "archivedAt": null,
+    "labels": {}
+   },
+   "project": {
+    "projectKey": "id-5c276edf09ed",
+    "projectName": "projectName#",
+    "workspaceName": "worksp",
+    "checkout": {
+     "cwd": "/work/project",
+     "currentBranch": null,
+     "remoteUrl": null,
+     "worktreeRoot": "/work/project",
+     "isGit": true,
+     "isPaseoOwnedWorktree": false,
+     "mainRepoRoot": null
+    }
+   }
+  },
+  {
+   "agent": {
+    "id": "id-4d23f38429d8",
+    "provider": "claude",
+    "cwd": "/work/project",
+    "workspaceId": "id-12545ad3aa52",
+    "model": "claude-opus-5-5",
+    "thinkingOptionId": "thinki",
+    "effectiveThinkingOptionId": "effect",
+    "runtimeInfo": {
+     "provider": "claude",
+     "sessionId": "id-09067d961b0b",
+     "model": null,
+     "modeId": "mode"
+    },
+    "createdAt": "2025-12-29T09:16:30.200Z",
+    "updatedAt": "2025-12-31T08:16:51.211Z",
+    "lastUserMessageAt": "2025-12-31T08:16:14.493Z",
+    "status": "idle",
+    "activeTurn": null,
+    "capabilities": {
+     "supportsStreaming": true,
+     "supportsSessionPersistence": true,
+     "supportsSessionListing": true,
+     "supportsDynamicModes": true,
+     "supportsMcpServers": true,
+     "supportsReasoningStream": true,
+     "supportsToolInvocations": true,
+     "supportsRewindConversation": true,
+     "supportsRewindFiles": true,
+     "supportsRewindBoth": true
+    },
+    "currentModeId": "auto",
+    "availableModes": [],
+    "features": [],
+    "pendingPermissions": [],
+    "persistence": {
+     "provider": "claude",
+     "sessionId": "id-09067d961b0b",
+     "nativeHandle": "id-09067d961b0b",
+     "metadata": {}
+    },
+    "title": "title#44 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "labels": {},
+    "archivedAt": null,
+    "requiresAttention": false,
+    "attentionReason": null,
+    "attentionTimestamp": null
+   },
+   "project": {
+    "projectKey": "id-ec850cfabd62",
+    "projectName": "projectName#45 xxxxx",
+    "workspaceName": "workspaceName#46 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "checkout": {
+     "cwd": "/work/project",
+     "currentBranch": "curr",
+     "remoteUrl": null,
+     "worktreeRoot": "/work/project",
+     "isGit": true,
+     "isPaseoOwnedWorktree": false,
+     "mainRepoRoot": null
+    }
+   }
+  },
+  {
+   "agent": {
+    "id": "id-7c939311c124",
+    "provider": "codex",
+    "cwd": "/work/project",
+    "workspaceId": "id-a17d94fe06ce",
+    "model": "gpt-6-astra",
+    "thinkingOptionId": "thin",
+    "effectiveThinkingOptionId": "effe",
+    "runtimeInfo": {
+     "provider": "codex",
+     "sessionId": "id-c232f2f503f4",
+     "model": "gpt-6-astra",
+     "thinkingOptionId": "thin",
+     "modeId": "modeId#51 x",
+     "extra": {
+      "collaborationMode": "collabo"
+     }
+    },
+    "createdAt": "2025-12-29T03:05:13.373Z",
+    "updatedAt": "2025-12-29T20:42:07.934Z",
+    "lastUserMessageAt": "2025-12-29T20:42:01.068Z",
+    "status": "idle",
+    "activeTurn": null,
+    "capabilities": {
+     "supportsStreaming": true,
+     "supportsSessionPersistence": true,
+     "supportsSessionListing": true,
+     "supportsDynamicModes": false,
+     "supportsMcpServers": true,
+     "supportsReasoningStream": true,
+     "supportsToolInvocations": true,
+     "supportsRewindConversation": true,
+     "supportsRewindFiles": false,
+     "supportsRewindBoth": false
+    },
+    "currentModeId": "auto-review",
+    "availableModes": [],
+    "features": [],
+    "pendingPermissions": [],
+    "persistence": {
+     "provider": "codex",
+     "sessionId": "id-c232f2f503f4",
+     "nativeHandle": "id-c232f2f503f4",
+     "metadata": {}
+    },
+    "title": "title#53 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "labels": {},
+    "archivedAt": null,
+    "lastUsage": {
+     "inputTokens": 107147,
+     "cachedInputTokens": 107136,
+     "outputTokens": 63,
+     "contextWindowMaxTokens": 258400,
+     "contextWindowUsedTokens": 107210
+    },
+    "requiresAttention": false,
+    "attentionReason": null,
+    "attentionTimestamp": null
+   },
+   "project": {
+    "projectKey": "id-f8d50d1ef3b3",
+    "projectName": "projectNa",
+    "workspaceName": "workspaceName#55 xxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "checkout": {
+     "cwd": "/work/project",
+     "isGit": false,
+     "currentBranch": null,
+     "remoteUrl": null,
+     "worktreeRoot": null,
+     "isPaseoOwnedWorktree": false,
+     "mainRepoRoot": null
+    }
+   }
+  }
+ ],
+ "pageInfo": {
+  "nextCursor": null,
+  "prevCursor": null,
+  "hasMore": false
+ }
+}

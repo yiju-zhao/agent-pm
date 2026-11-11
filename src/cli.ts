@@ -12,7 +12,8 @@ import type { Scheduler } from './understand/scheduler.ts';
 // Server modules (node:sqlite, hono) are loaded only inside the `server` command, with a dynamic
 // import: the single-file collector binary is built with bun, which has no node:sqlite, so the
 // `collect`, `sessions` and `open` paths must never evaluate them (src/lookup, which `open` runs,
-// imports only node built-ins, src/shared and zod).
+// imports only node built-ins, src/shared and zod). The Paseo collector (and its SDK) is loaded the
+// same way, only by `collect-paseo`, so the herdr collector never loads the Paseo SDK.
 
 /** The process-facing side of the CLI, injectable so tests need no network, terminal or exit. */
 export type Io = {
@@ -28,6 +29,7 @@ const DEFAULT_SERVER = 'http://localhost:7718';
 const USAGE = `Usage:
   herdr-pm server --config <path>                      run the central server
   herdr-pm collect --config <path>                     run the collector on this machine
+  herdr-pm collect-paseo --config <path>               run a Paseo collector for one daemon (node 26)
   herdr-pm sessions [--server <url>] [--machine <m>]   list sessions known to the central server
   herdr-pm open [<短ID>] [--remote split|inline] [--dry-run]   open an agent by short id in herdr
 `;
@@ -43,6 +45,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
         return await runServer(args, io);
       case 'collect':
         return await runCollect(args, io);
+      case 'collect-paseo':
+        return await runCollectPaseo(args, io);
       case 'sessions':
         return await runSessions(args, io);
       case 'open':
@@ -175,6 +179,20 @@ async function runCollect(args: string[], io: Io): Promise<number> {
   const config = loadCollectorConfig(requireConfig('collect', args));
   io.stdout(`herdr-pm collect: machine ${config.machine} -> ${config.server}\n`);
   return runCollector(config);
+}
+
+async function runCollectPaseo(args: string[], io: Io): Promise<number> {
+  const configPath = requireConfig('collect-paseo', args);
+  let mod: typeof import('./paseo-collector/cli.ts');
+  try {
+    mod = await import('./paseo-collector/cli.ts');
+  } catch (err) {
+    throw new Error(
+      `the Paseo collector cannot load here (${describeError(err)}); run it with node 26 from the repository: node src/cli.ts collect-paseo --config <path>`,
+      { cause: err },
+    );
+  }
+  return mod.runPaseoCollect(configPath, io);
 }
 
 const SessionList = z.array(

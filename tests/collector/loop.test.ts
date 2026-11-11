@@ -354,8 +354,10 @@ test('server database restored from an older backup: only the lost gap is re-sen
   const before = chunks();
   expect(before).toHaveLength(3);
 
-  // Restoring the backup taken after the first push drops everything the server stored since.
+  // Restoring the backup taken after the first push drops everything the server stored since: the chunks and the
+  // source's byte checkpoint (a restore rolls back the whole database file).
   db.prepare('DELETE FROM chunks WHERE offset_start >= ?').run(backupEnd * 1000);
+  db.prepare('UPDATE source_offsets SET offset_end = ? WHERE offset_end > ?').run(backupEnd, backupEnd);
   pushResults = [];
   await collectOnce(cfg, await CursorStore.load(cfg.stateFile), deps);
 
@@ -449,6 +451,7 @@ test('first push per process resumes from server max when server is behind (rest
 
   // Restoring a backup taken after line 2 drops what the server stored since; the local cursor is at line 4.
   db.prepare('DELETE FROM chunks WHERE offset_start >= ?').run(end2 * 1000);
+  db.prepare('UPDATE source_offsets SET offset_end = ? WHERE offset_end > ?').run(end2, end2); // restored with the chunks
   expect(chunks()).toHaveLength(1);
   pushResults = [];
   const restarted = await CursorStore.load(cfg.stateFile);

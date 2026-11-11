@@ -110,7 +110,7 @@ test('chunk evidence', () => {
     digest: null,
   });
   expect(view!.session?.short_id).toBe('5d27595b');
-  expect(view!.chunks).toEqual([{ id, kind: 'transcript', ts_start: TS1, ts_end: TS2, text: '你好', truncated: false }]);
+  expect(view!.chunks).toEqual([{ id, kind: 'transcript', ts_start: TS1, ts_end: TS2, text: '你好', truncated: false, source: null }]);
 });
 
 test('digest evidence carries the parsed digest and its chunks', () => {

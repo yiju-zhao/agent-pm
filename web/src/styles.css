@@ -1167,3 +1167,12 @@ main {
     font-size: 16px;
   }
 }
+
+/* Source badges: which collector sees a session (herdr, Paseo), its content role, and lag or gaps. */
+.tag.source {
+  font-size: 0.85em;
+}
+.tag.source.warn {
+  border-color: var(--connecting);
+  color: var(--ink);
+}

@@ -8,13 +8,33 @@ export const EVIDENCE_MAX_CHUNKS = 20;
 /** A chunk's text is cut to this many characters. */
 export const EVIDENCE_CHUNK_CHARS = 4000;
 
+/**
+ * Where a chunk came from. A herdr chunk: its source (`herdr:<machine>`). A Paseo chunk: its source, the Paseo agent id
+ * (not the provider's session id), the timeline epoch and seq range of the events in it, how many there are, and
+ * whether any of them was already cut by the collector or had no timestamp of its own. `null` for chunks that predate
+ * sources (and `report` chunks).
+ */
+export type EvidenceSource = {
+  source_id: string;
+  kind: 'herdr' | 'paseo';
+  agent_id: string | null;
+  epoch: string | null;
+  seq_start: number | null;
+  seq_end: number | null;
+  events: number;
+  truncated_upstream: boolean;
+  ts_unknown: boolean;
+};
+
 export type EvidenceChunk = {
   id: number;
   kind: string;
   ts_start: string | null;
   ts_end: string | null;
   text: string;
+  /** The text shown here was cut to `EVIDENCE_CHUNK_CHARS`. */
   truncated: boolean;
+  source: EvidenceSource | null;
 };
 
 export type EvidenceView = {
@@ -32,7 +52,7 @@ export type EvidenceView = {
   chunks: EvidenceChunk[];
 };
 
-type ChunkRaw = { id: number; session_key: string; kind: string; ts_start: string | null; ts_end: string | null; text: string | null };
+type ChunkRaw = { id: number; session_key: string; kind: string; ts_start: string | null; ts_end: string | null; text: string | null; source_id: string | null };
 type DigestRaw = { id: number; session_key: string; chunk_ids: string | null; json: string | null; ts_start: string | null; ts_end: string | null };
 
 /** Only `digest:<n>` and `chunk:<n>` with `n` a positive integer written without sign, zeros or exponent. */
@@ -43,7 +63,7 @@ export function parseEvidenceRef(ref: string): { kind: 'digest' | 'chunk'; id: n
   return Number.isSafeInteger(id) ? { kind: m[1] as 'digest' | 'chunk', id } : null;
 }
 
-const CHUNK_COLUMNS = 'id, session_key, kind, ts_start, ts_end, text';
+const CHUNK_COLUMNS = 'id, session_key, kind, ts_start, ts_end, text, source_id';
 
 /** The text cut to `EVIDENCE_CHUNK_CHARS`, without leaving half of a surrogate pair at the end. */
 function cut(text: string): { text: string; truncated: boolean } {
@@ -54,8 +74,41 @@ function cut(text: string): { text: string; truncated: boolean } {
   return { text: text.slice(0, end), truncated: true };
 }
 
-function chunkView(r: ChunkRaw): EvidenceChunk {
-  return { id: r.id, kind: r.kind, ts_start: r.ts_start, ts_end: r.ts_end, ...cut(r.text ?? '') };
+function chunkSource(db: DatabaseSync, r: ChunkRaw): EvidenceSource | null {
+  if (r.source_id === null) return null;
+  if (r.source_id.startsWith('herdr:')) {
+    return { source_id: r.source_id, kind: 'herdr', agent_id: null, epoch: null, seq_start: null, seq_end: null, events: 0, truncated_upstream: false, ts_unknown: false };
+  }
+  const events = db
+    .prepare(
+      `SELECT e.stream_id, e.epoch, e.seq_start, e.seq_end, e.ts_known, e.meta FROM chunk_sources cs
+       JOIN source_events e ON e.id = cs.source_event_id WHERE cs.chunk_id = ? ORDER BY e.seq_start, e.id`,
+    )
+    .all(r.id) as Array<{ stream_id: string; epoch: string | null; seq_start: number | null; seq_end: number | null; ts_known: number; meta: string | null }>;
+  const truncated = (meta: string | null): boolean => {
+    try {
+      const m = JSON.parse(meta ?? '{}') as { text_truncated?: unknown; tool?: { input_truncated?: unknown; output_truncated?: unknown } | null };
+      return m.text_truncated != null || m.tool?.input_truncated != null || m.tool?.output_truncated != null;
+    } catch {
+      return false;
+    }
+  };
+  const seqs = events.flatMap((e) => [e.seq_start, e.seq_end]).filter((n): n is number => n !== null);
+  return {
+    source_id: r.source_id,
+    kind: 'paseo',
+    agent_id: events[0]?.stream_id ?? null,
+    epoch: events[0]?.epoch ?? null,
+    seq_start: seqs.length ? Math.min(...seqs) : null,
+    seq_end: seqs.length ? Math.max(...seqs) : null,
+    events: events.length,
+    truncated_upstream: events.some((e) => truncated(e.meta)),
+    ts_unknown: events.some((e) => e.ts_known === 0),
+  };
+}
+
+function chunkView(db: DatabaseSync, r: ChunkRaw): EvidenceChunk {
+  return { id: r.id, kind: r.kind, ts_start: r.ts_start, ts_end: r.ts_end, ...cut(r.text ?? ''), source: chunkSource(db, r) };
 }
 
 /** The digest JSON as an object; `null` when it is missing, not JSON, or not an object. */
@@ -103,7 +156,7 @@ export function getEvidence(db: DatabaseSync, now: Date, ref: string): EvidenceV
       ts_start: chunk.ts_start,
       ts_end: chunk.ts_end,
       digest: null,
-      chunks: [chunkView(chunk)],
+      chunks: [chunkView(db, chunk)],
     };
   }
 
@@ -128,6 +181,6 @@ export function getEvidence(db: DatabaseSync, now: Date, ref: string): EvidenceV
     ts_start: digest.ts_start,
     ts_end: digest.ts_end,
     digest: parseDigest(digest.json),
-    chunks: chunks.map(chunkView),
+    chunks: chunks.map((c) => chunkView(db, c)),
   };
 }

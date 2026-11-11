@@ -14,6 +14,7 @@
 |---|---|---|---|
 | 中心服务 | `herdr-pm server --config <path>` | mac-mini（一台） | `node src/cli.ts`（需要 Node >= 26，用到 `node:sqlite`） |
 | 采集器 | `herdr-pm collect --config <path>` | 每台机器各一个：笔记本、mac-mini、gx10-090e、gx10-c757 | bun 编译出的单文件二进制，目标机器不需要装 node / bun |
+| Paseo 采集器 | `herdr-pm collect-paseo --config <path>` | 每个 Paseo daemon 一个（可与 daemon 同机或远程连接） | `node src/cli.ts`（Node 26，从仓库运行），见「Paseo 采集器（计划 6）」 |
 
 另有一个查询命令：`herdr-pm sessions [--server <url>] [--machine <m>]`，列出中心已知的 session。
 
@@ -218,7 +219,7 @@ herdr-pm sessions --server http://100.111.225.68:7718 --machine gx10-090e
 ```
 
 - **短ID**：原生 session ID 的前 8 位，冲突时自动加长。pending（还没拿到原生 ID 的）session 用 terminal ID 的前几位。
-- **状态**：中心算出来的 `effective_status`，取值 `idle` / `working` / `blocked` / `done` / `unknown`（agent 自己的状态），`ended`（herdr 里已关闭），`purged`（对话文件已删），以及 **`offline`**（该机器超过 3 分钟没有心跳；这只是读取时的显示，不会把 session 判成 ended）。
+- **状态**：中心算出来的 `effective_status`，取值 `idle` / `working` / `blocked` / `done` / `unknown`（agent 自己的状态），`ended`（所有来源都已结束它：herdr 里已关闭、Paseo 里已归档或关闭），`purged`（对话文件已删），以及 **`offline`**（看到它的来源都不新鲜：采集器超过 3 分钟没有心跳，或 Paseo daemon 断开；这只是读取时的显示，不会把 session 判成 ended）。多个来源同时看到时，取新鲜来源里最「活跃」的状态（working > blocked > done > idle > unknown）。
 - 命令连不上中心时会打印原因并以非 0 退出码结束。
 
 表里没有 `fidelity` 和 `chunk_count`；要看这两项直接读 API：
@@ -485,6 +486,87 @@ rows = [["state_icon", "machine", "workspace", "tab"], ["agent", "$pm_sid", "$pm
 
 > TODO（Task 5，真实环境手动检查后由使用者填写）：弹窗里 `HERDR_ENV` 是否为 `1`；本机 agent 的 focus 在弹窗关闭后是否停在目标 pane；herdr 正切到远程机器（TUI 在看远程）时 `split` 的表现；`split` 和 `inline` 各自适合的场景，以及最终推荐的默认值。
 
+## Paseo 采集器（计划 6）
+
+主要工作在 Paseo 里时，用一个**独立进程**把 Paseo daemon 上的 agent 状态和对话送到同一个中心，和 herdr 采集器同时运行、互不依赖：各有自己的配置、token、状态目录、重试和常驻服务，停掉任何一个，另一个照常工作。设计和实施记录见 `docs/superpowers/plans/2026-11-04-06-paseo-collector.md`。
+
+- 一个实例只连**一个**明确配置的 daemon（`ws://` / `wss://`），通过 `@getpaseo/client` SDK（固定 0.15.0，已对 daemon 0.15.0 验证）只读：列目录、按 ID 查 agent、读时间线、订阅变化。**不**创建、发消息、停止、归档或重载 agent；停掉采集器不改变任何 agent。
+- 中心按「来源」分别记录：herdr 机器是来源 `herdr:<machine>`，每个 Paseo 采集器是配置里的一个 `sourceId`。一个来源的快照只结束它自己的观察；一个来源的心跳也掩盖不了另一个来源的离线。同一个原生会话（同机、同 provider、同原生 session ID）被 herdr 和 Paseo 同时看到时，是一个逻辑会话、两个来源。
+- 内容只由一个来源送进摘要（`content_owner`，先送到内容的来源；已有 herdr 内容的旧会话保持 herdr）。另一个来源的内容照样持久保存为 standby 证据，不重复分析；herdr 是 standby 时它的字节游标照样前进，不会反复补传。
+- **不读未加载的 agent**：daemon 0.15.0 读一个未加载（`closed`）agent 的时间线会把它从持久化里恢复成一个运行时。采集器对这样的 agent 只上报状态（来源显示「未加载，暂不读取」），等你在 Paseo 里打开它（daemon 加载它）后再从中心确认的位置补读。已跟踪的 agent 被归档后，会再读一次它的最后内容（daemon 用只读的历史会话提供归档 agent 的历史，不运行任何东西）；不想要就在配置里设 `"readArchivedTracked": false`。
+- 断线重连不会自动回放漏掉的事件，采集器总是从**中心已确认的位置**补读；批次先写本地 outbox 再提交，中心在一个事务里写证据、回执和位置，确认丢失后重发同一批次不会产生重复证据。时间线被替换（epoch 变化）时，有 provider 消息 ID 的行按 ID 去重，无法核对的行标为「待核对的重叠」并记录缺口，不会把整段历史重新交给模型。
+
+### 中心配置
+
+在 `server.json` 里加 `paseoCollectors`（键是 sourceId，只能用字母、数字、`.`、`_`、`-`）：
+
+```json
+"paseoCollectors": {
+  "paseo-mac-mini": { "token": "<openssl rand -hex 32>", "machine": "mac-mini", "serverId": "<daemon 的 server id>" }
+}
+```
+
+- `machine` 是**被观察的 daemon 所在机器**，不是采集器进程所在机器；用和 herdr 采集器相同的机器 label，同机的同一个会话才能关联。
+- `serverId` 和 daemon 实际地址在 daemon 那台机器上查：`paseo status --json` 里的 `serverId` 和 `listen`。连到别的 daemon（server id 不同）的采集器会被拒绝，它也不会读那个 daemon。
+- 这个 token 只能写这一个来源，和 `collectors`、`userToken`、`mcpToken` 及其他 Paseo token 都必须不同（配置校验会拒绝）；旧的 herdr token 不能写 Paseo 来源，反之亦然。
+
+### 采集器配置
+
+复制 `config/paseo-collector.example.json`（例如到 `~/.config/herdr-pm/paseo-mac-mini.json`），改：
+
+- `server`：中心地址；`sourceId`、`machine`：和中心配置一致。
+- `paseo.url`：daemon 的 WebSocket 地址，`ws://<listen>/ws`。示例里的 `127.0.0.1:6767` 只是占位：daemon 监听在 Tailscale 地址上时要写那个地址。
+- `paseo.serverId`：同上。daemon 启用了密码时加 `"passwordFile"`。
+- `tokenFile`：只含 token 的文件（`chmod 600`）。token 和 daemon 密码都只从文件读，不进配置、日志或服务模板。
+- `stateDir`：每个来源一个，**不能共用**（目录锁保证同一时间只有一个进程用它；它记着这个来源和 daemon 的身份，换来源会拒绝启动）。里面只有待提交批次（outbox）和身份，没有位置：位置以中心为准，删掉这个目录只会让采集器从中心的位置继续。
+- 可选：`includeArchivedHistory`（首次导入已归档的 agent，默认关）、`includeBackground`（默认开，后台 workspace 的 agent 也列出）、`exclude`（`{"projectKeys": [...], "labels": {...}}`，被排除的标为不再跟踪，不算结束）、`maxConcurrentAgents`、`maxOutboxBytes`（outbox 到上限时暂停读内容，心跳照常，不丢批次）。
+
+手动跑一次（前台，Ctrl-C 停止）：
+
+```bash
+cd <仓库> && npm ci
+node src/cli.ts collect-paseo --config ~/.config/herdr-pm/paseo-mac-mini.json
+```
+
+日志一行一事件，只写来源、agent ID、错误和积压，不写对话内容。bun 单文件二进制里**没有** Paseo SDK（构建时 `--external`），从二进制运行 `collect-paseo` 会提示改用 node。
+
+### 常驻
+
+macOS（每个来源一个 job，和 herdr 采集器的 job 分开）：
+
+```bash
+mkdir -p ~/Library/Logs/herdr-pm
+sed -e "s#__SOURCE_ID__#paseo-mac-mini#g" -e "s#__NODE_BIN__#$(command -v node)#g" -e "s#__REPO__#$PWD#g" \
+    -e "s#__CONFIG_PATH__#$HOME/.config/herdr-pm/paseo-mac-mini.json#g" -e "s#__HOME__#$HOME#g" \
+    deploy/launchd/ai.herdr-pm.paseo-collector.plist > ~/Library/LaunchAgents/ai.herdr-pm.paseo-collector.paseo-mac-mini.plist
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/ai.herdr-pm.paseo-collector.paseo-mac-mini.plist
+# 停用：launchctl bootout "gui/$(id -u)/ai.herdr-pm.paseo-collector.paseo-mac-mini"
+```
+
+Linux（systemd 用户服务模板，实例名就是 sourceId，配置在 `~/.config/herdr-pm/<sourceId>.json`，仓库默认在 `~/herdr-pm`，别处用 `systemctl --user edit` 设 `HERDR_PM_REPO`）：
+
+```bash
+cp deploy/systemd/herdr-pm-paseo-collector@.service ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now herdr-pm-paseo-collector@paseo-gx10
+# 停用：systemctl --user disable --now herdr-pm-paseo-collector@paseo-gx10
+```
+
+### 上线顺序与回退
+
+1. **备份中心数据库**（中心停着时复制 `herdr-pm.db*`，或 `sqlite3 herdr-pm.db ".backup herdr-pm.pre-v5.db"`）。
+2. 升级中心代码并重启。启动时自动做 v5 迁移（只追加表和列：已有 session、chunk、digest 的 ID 和项目引用不变；每台机器成为 `herdr:<machine>` 来源，已有 session 回填为它的观察，字节游标从已有 chunk 初始化）。旧 herdr 采集器**不用改配置、不用重装**，`/ingest/snapshot`、`/ingest/chunks`、`/ingest/offset` 照旧。
+3. 确认 herdr 数据照常更新（`herdr-pm sessions`、网页）。
+4. 在中心配置里加 `paseoCollectors` 并重启中心，再启动 Paseo 采集器。网页的会话行会出现来源标签（herdr / Paseo、主内容 / 备用、离线或滞后原因）。
+5. 回退：停用 Paseo 采集器即可回到只采 herdr。中心要继续用支持 v5 的版本；**不要**用迁移前的旧中心程序打开迁移后的数据库（要回到旧程序，就连同第 1 步的备份一起回退）。
+
+### 已知限制
+
+- 第一版不自动发现 Paseo 的远程 hosts、不建 SSH 隧道、不配 relay；多个 daemon 就起多个实例。没有在真实跨机 daemon 上验收过。
+- 不读未加载的 agent（见上）；Claude / Codex 以外的 provider 只保证状态，未知的时间线行只计数，不当作正文。
+- 同一原生 ID 出现在两台机器上时保守地保留为两个会话（键带 `@<machine>`，并标「身份待核对」）；身份迟到、两边都已有内容时，后到一边的内容只作证据保存，不自动拼接。
+- 时间线是 provider 的投影，不等于原始 transcript；daemon 自身丢失的历史（`gap`、窗口外的历史）记为缺口。
+- `herdr-pm open` 对只由 Paseo 看到的会话只提示「请在 Paseo 中打开」，不伪造 herdr pane。
+
 ## 部署验收（计划 1 完成的标志）
 
 - [ ] 四台机器上本地执行 `herdr integration status`，claude 和 codex integration 都已安装。
@@ -503,4 +585,4 @@ npx tsc            # 类型检查（不产出文件）
 
 Node 26 直接运行 `.ts`：`node src/cli.ts <command> ...`；`npm link` 之后 `herdr-pm` 命令可直接用（`package.json` 的 `bin` 指向 `src/cli.ts`）。本地配置写成 `config/*.local.json`（已在 `.gitignore` 里）。
 
-`src/cli.ts` 只在 `server` 命令里动态 `import()` 服务端模块（`node:sqlite`、hono）：采集器二进制是 bun 编译的，bun 没有 `node:sqlite`，所以 `collect`、`sessions` 和 `open` 路径不能加载它们（`open` 的代码在 `src/lookup/`，只能 import node 内置模块、`src/shared/` 和 zod）。
+`src/cli.ts` 只在 `server` 命令里动态 `import()` 服务端模块（`node:sqlite`、hono）：采集器二进制是 bun 编译的，bun 没有 `node:sqlite`，所以 `collect`、`sessions` 和 `open` 路径不能加载它们（`open` 的代码在 `src/lookup/`，只能 import node 内置模块、`src/shared/` 和 zod）。Paseo 采集器（`src/paseo-collector/`）同理只由 `collect-paseo` 动态加载，SDK 只在 `sdk.ts` 里动态 `import()`；`tests/cli.test.ts` 守着这些边界。Paseo 的故障路径测试用 `tests/helpers/fake-paseo.ts`（可控的假 daemon）和 `tests/helpers/center.ts`（临时数据库上的真实中心）；对真实 daemon 的只读契约测试：`PASEO_CONTRACT_URL=ws://<listen>/ws npx vitest run tests/paseo-collector/sdk.test.ts`。

@@ -1,0 +1,17 @@
+{
+  "server": "http://127.0.0.1:7718",
+  "sourceId": "paseo-mac-mini",
+  "machine": "mac-mini",
+  "tokenFile": "~/.config/herdr-pm/paseo-collector-token",
+  "paseo": {
+    "url": "ws://127.0.0.1:6767/ws",
+    "serverId": "REPLACE-WITH-THE-DAEMON-SERVER-ID"
+  },
+  "stateDir": "~/.local/state/herdr-pm/paseo-mac-mini",
+  "heartbeatMs": 10000,
+  "reconcileMs": 60000,
+  "maxConcurrentAgents": 4,
+  "includeArchivedHistory": false,
+  "includeBackground": true,
+  "readArchivedTracked": true
+}

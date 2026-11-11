@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Paseo collector, one job per observed daemon (source). Independent of the herdr collector job: its own label, config,
+  token file, state directory and logs; either can be stopped without the other. The __PLACEHOLDERS__ are filled in
+  with sed, see README.md ("Paseo 采集器"):
+    __SOURCE_ID__    the source id of this collector (its "sourceId", e.g. paseo-mac-mini); part of the label and log names
+    __NODE_BIN__     absolute path of node 26, e.g. /opt/homebrew/bin/node
+    __REPO__         absolute path of this repository (with `npm ci` done; the Paseo SDK is loaded from its node_modules)
+    __CONFIG_PATH__  absolute path of this source's config (copy of config/paseo-collector.example.json)
+    __HOME__         absolute home directory (launchd does not expand "~")
+  No token or password goes in here: they are read from the files the config names.
+  The log directory must exist: mkdir -p ~/Library/Logs/herdr-pm
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.herdr-pm.paseo-collector.__SOURCE_ID__</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE_BIN__</string>
+    <string>__REPO__/src/cli.ts</string>
+    <string>collect-paseo</string>
+    <string>--config</string>
+    <string>__CONFIG_PATH__</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__REPO__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <!-- SIGTERM on unload: the collector stops reading, keeps unsent batches in its outbox and exits; agents are untouched. -->
+  <key>ExitTimeOut</key>
+  <integer>30</integer>
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/herdr-pm/paseo-collector.__SOURCE_ID__.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/herdr-pm/paseo-collector.__SOURCE_ID__.err.log</string>
+</dict>
+</plist>

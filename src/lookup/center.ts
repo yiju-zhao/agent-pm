@@ -14,12 +14,23 @@ const Sessions = z.array(
     title: z.string(),
     // The herdr terminal the session runs in; a center that does not send it is read as "unknown".
     terminal_id: z.string().nullable().default(null),
+    // Which collectors observe it; a center that predates sources sends none.
+    sources: z
+      .array(z.object({ kind: z.string(), lifecycle: z.string(), external_id: z.string(), machine: z.string().nullable() }))
+      .default([]),
   }),
 );
 
 export type CenterSession = z.infer<typeof Sessions>[number];
 
 function describe(s: CenterSession): string {
+  // Seen only through Paseo: there is no herdr pane to open, and none is made up.
+  const herdr = s.sources.filter((o) => o.kind === 'herdr' && o.lifecycle === 'live');
+  const paseo = s.sources.filter((o) => o.kind === 'paseo' && o.lifecycle === 'live');
+  if (herdr.length === 0 && paseo.length > 0 && s.effective_status !== 'ended' && s.effective_status !== 'purged') {
+    const agent = paseo[0]!;
+    return `这个 session 只由 Paseo 采集（${agent.machine ?? s.machine} · agent ${agent.external_id} · ${s.title}），不在 herdr 里，请在 Paseo 中打开`;
+  }
   switch (s.effective_status) {
     case 'ended':
     case 'purged':

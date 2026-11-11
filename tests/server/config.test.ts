@@ -202,3 +202,32 @@ test('understanding settings are optional and oauthTokenFile resolves relative t
   expect(() => loadServerConfig(bad)).toThrow(/understanding\.enabled/);
   expect(() => loadServerConfig(bad)).toThrow(/understanding\.digestModel/);
 });
+
+test('paseoCollectors: optional; each token must differ from every other token, and errors never print it', async () => {
+  const base = { port: 8787, dbPath: 'x.db', userToken: USER_TOKEN, mcpToken: MCP_TOKEN, collectors: { laptop: 'laptop-collector-token' } };
+  expect(loadServerConfig(await configFile(base)).paseoCollectors).toBeUndefined();
+  const ok = loadServerConfig(
+    await configFile({ ...base, paseoCollectors: { 'paseo-mac-mini': { token: 'paseo-token-0123456789', machine: 'mac-mini', serverId: 'srv_x' } } }),
+  );
+  expect(ok.paseoCollectors).toEqual({ 'paseo-mac-mini': { token: 'paseo-token-0123456789', machine: 'mac-mini', serverId: 'srv_x' } });
+  for (const [token, clash] of [
+    ['laptop-collector-token', 'a herdr collector token'],
+    [USER_TOKEN, 'userToken'],
+    [MCP_TOKEN, 'mcpToken'],
+  ]) {
+    const path = await configFile({ ...base, paseoCollectors: { p: { token, machine: 'm', serverId: 's' } } });
+    expect(() => loadServerConfig(path)).toThrow(`paseoCollectors.p.token: must differ from ${clash}`);
+    try {
+      loadServerConfig(path);
+    } catch (err) {
+      expect((err as Error).message).not.toContain(token);
+    }
+  }
+  const twice = await configFile({
+    ...base,
+    paseoCollectors: { a: { token: 'same-paseo-token-0123', machine: 'm', serverId: 's1' }, b: { token: 'same-paseo-token-0123', machine: 'm', serverId: 's2' } },
+  });
+  expect(() => loadServerConfig(twice)).toThrow('must differ from another Paseo collector token');
+  const colon = await configFile({ ...base, paseoCollectors: { 'herdr:m': { token: 'paseo-token-0123456789', machine: 'm', serverId: 's' } } });
+  expect(() => loadServerConfig(colon)).toThrow(/source id must contain only/);
+});
