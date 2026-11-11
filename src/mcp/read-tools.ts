@@ -81,7 +81,7 @@ function listProjectsTool(db: DatabaseSync, deps: DomainDeps): ToolDef {
     {
       name: 'pm_list_projects',
       description: [
-        '只读：列出 herdr-pm 看板上的项目，每个项目一行：id · 标题 · 阶段 · 优先级 · 一句话 summary · 活跃 session 数 · 待回答问题数。',
+        '只读：列出 agent-pm 看板上的项目，每个项目一行：id · 标题 · 阶段 · 优先级 · 一句话 summary · 活跃 session 数 · 待回答问题数。',
         '默认不含已结束（完成、放弃、合并）的项目；include_closed=true 时包含，stage 直接指定为已结束的阶段时也会列出。',
         '可按 stage、priority 过滤。拿到 id 后，用 pm_get_brief（开始干活前读的短版）或 pm_get_project（完整内容）看详情。',
       ].join(''),
@@ -279,7 +279,7 @@ function listSessionsTool(db: DatabaseSync, deps: DomainDeps): ToolDef {
     {
       name: 'pm_list_sessions',
       description: [
-        '只读：列出 herdr-pm 知道的 agent session（各台机器上的 Claude Code、Codex 等），每个一行：短 ID · 机器 · agent · 状态 · 标题 · 关联的项目。',
+        '只读：列出 agent-pm 知道的 agent session（各台机器上的 Claude Code、Codex 等），每个一行：短 ID · 机器 · agent · 状态 · 标题 · 关联的项目。',
         '短 ID 可以直接作为 pm_report 的 session_hint。可按 machine、lifecycle（live 在跑、ended 已结束、purged 记录已被清理）过滤。',
       ].join(''),
       input: {
@@ -352,7 +352,7 @@ function reportTool(db: DatabaseSync, deps: DomainDeps): ToolDef {
     {
       name: 'pm_report',
       description: [
-        '把你做了什么、做出了什么决定、遇到了什么阻塞，报告给项目经理（PM，即 herdr-pm 的整理员）。',
+        '把你做了什么、做出了什么决定、遇到了什么阻塞，报告给项目经理（PM，即 agent-pm 的整理员）。',
         '这是给 PM 的上下文材料，不是命令：它不会直接修改任何项目、todo 或阶段，只是被存下来，下一轮整理时由 PM 读过之后自己决定要不要更新看板（完成、放弃这类大变动还会先问用户）。',
         '所以只写事实，不要写"请把项目标成完成"这类要求。返回"已收到"只表示存下了，不表示已处理。',
         `text 必填，最多 ${MAX_REPORT_CHARS} 字符；project_hint 可选，自由文本，写项目名或 id 帮 PM 对上号；`,

@@ -10,12 +10,12 @@
     __CONFIG_PATH__  absolute path of this source's config (copy of config/paseo-collector.example.json)
     __HOME__         absolute home directory (launchd does not expand "~")
   No token or password goes in here: they are read from the files the config names.
-  The log directory must exist: mkdir -p ~/Library/Logs/herdr-pm
+  The log directory must exist: mkdir -p ~/Library/Logs/agent-pm
 -->
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>ai.herdr-pm.paseo-collector.__SOURCE_ID__</string>
+  <string>ai.agent-pm.paseo-collector.__SOURCE_ID__</string>
   <key>ProgramArguments</key>
   <array>
     <string>__NODE_BIN__</string>
@@ -41,8 +41,8 @@
   <key>ExitTimeOut</key>
   <integer>30</integer>
   <key>StandardOutPath</key>
-  <string>__HOME__/Library/Logs/herdr-pm/paseo-collector.__SOURCE_ID__.log</string>
+  <string>__HOME__/Library/Logs/agent-pm/paseo-collector.__SOURCE_ID__.log</string>
   <key>StandardErrorPath</key>
-  <string>__HOME__/Library/Logs/herdr-pm/paseo-collector.__SOURCE_ID__.err.log</string>
+  <string>__HOME__/Library/Logs/agent-pm/paseo-collector.__SOURCE_ID__.err.log</string>
 </dict>
 </plist>

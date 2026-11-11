@@ -170,6 +170,12 @@ const WRITE_ROUTES: Array<[method: string, pattern: string, body?: unknown]> = [
   ['POST', '/questions/:id/dismiss'],
   // Not a project write, but it starts model calls, so it takes the user token too (see http.test.ts).
   ['POST', '/sync'],
+  // Keys and settings (admin-routes.test.ts): admin keys only.
+  ['POST', '/admin/keys', { name: 'x', scope: 'mcp' }],
+  ['DELETE', '/admin/keys/:id'],
+  ['PUT', '/admin/settings/models', { models: { digest: 'claude-haiku-5-5' } }],
+  ['PUT', '/admin/settings/provider', { mode: 'login' }],
+  ['DELETE', '/admin/settings/provider/:kind'],
 ];
 
 test('every write route refuses a missing, wrong, collector and malformed token without touching the database', async () => {

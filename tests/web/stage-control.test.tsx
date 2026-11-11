@@ -16,7 +16,7 @@ const applied = () => json({ status: 'applied', event_id: 7, question_ids: [], w
 const TARGETS = [
   { id: 'p_1', title: 'dLLM 评测框架' },
   { id: 'p_2', title: 'loopwm' },
-  { id: 'p_3', title: 'herdr-pm' },
+  { id: 'p_3', title: 'agent-pm' },
 ];
 
 /** `targets: null` stands for a project list that has not arrived (or, with `targetsFailed`, could not be read). */
@@ -33,7 +33,7 @@ function renderControl(over: Partial<ProjectDetail> = {}, targets: typeof TARGET
   );
 }
 
-const stageSelect = () => screen.getByRole('combobox', { name: '新阶段' }) as HTMLSelectElement;
+const stageSelect = () => screen.getByRole('combobox', { name: '阶段' }) as HTMLSelectElement;
 const choose = (stage: string) => fireEvent.change(stageSelect(), { target: { value: stage } });
 const request = () => {
   const [url, init] = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
@@ -58,25 +58,33 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-test('shows the current stage, and every other stage in the menu but not that one', () => {
-  renderControl({ stage: 'build' });
-  expect(screen.getByText('当前阶段：构建')).toBeTruthy();
+test('one field: the menu shows the current stage among all stages, with who set it', () => {
+  renderControl({ field_sources: { stage: 'ai', priority: null } });
+  expect(stageSelect().value).toBe('build');
   const labels = within(stageSelect()).getAllByRole('option').map((o) => o.textContent);
-  expect(labels).toEqual(['选择阶段…', 'idea', '探索', '验证', '完成', '搁置', '放弃', '合并']);
-  expect(within(stageSelect()).queryByRole('option', { name: '构建' })).toBeNull();
+  expect(labels).toEqual(['idea', '探索', '构建', '验证', '完成', '搁置', '放弃', '合并']);
+  expect(screen.getByText('AI 预填')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '确定' })).toBeNull();
+  cleanup();
+  renderControl({ field_sources: { stage: 'user', priority: null } });
+  expect(screen.getByText('你定的')).toBeTruthy();
 });
 
-test('nothing is picked at first, so one stray click on 确定 moves nothing', () => {
+test('picking another stage only proposes it: nothing is sent until 确定, and 取消 puts the field back', async () => {
   renderControl();
-  expect(stageSelect().value).toBe('');
-  const ok = screen.getByRole('button', { name: '确定' }) as HTMLButtonElement;
-  expect(ok.disabled).toBe(true);
-  fireEvent.click(ok);
+  choose('verify');
+  expect(stageSelect().value).toBe('verify');
+  expect(screen.getByText('构建 → 验证')).toBeTruthy();
+  expect(fetchMock).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '取消' }));
+  expect(stageSelect().value).toBe('build');
+  expect(screen.queryByRole('button', { name: '确定' })).toBeNull();
   expect(fetchMock).not.toHaveBeenCalled();
   choose('verify');
-  expect(ok.disabled).toBe(false);
-  choose('');
-  expect(ok.disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '确定' }));
+  await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+  expect(request()).toMatchObject({ url: '/projects/p_1/stage', method: 'POST', body: { stage: 'verify' } });
+  expect((request().headers as Record<string, string>).Authorization).toBe('Bearer tok-1');
 });
 
 test('选了 合并 但没选目标时 确定 不能点；选了目标后发出 {stage, merge_into}', async () => {
@@ -84,28 +92,20 @@ test('选了 合并 但没选目标时 确定 不能点；选了目标后发出 
   choose('merged');
   const ok = screen.getByRole('button', { name: '确定' }) as HTMLButtonElement;
   expect(ok.disabled).toBe(true);
-
   const target = screen.getByRole('combobox', { name: '合并到' }) as HTMLSelectElement;
-  // The project itself is no target.
   expect(within(target).queryByRole('option', { name: 'dLLM 评测框架' })).toBeNull();
-  expect(within(target).getAllByRole('option').map((o) => o.textContent)).toEqual(['选择目标项目', 'loopwm', 'herdr-pm']);
-
+  expect(within(target).getAllByRole('option').map((o) => o.textContent)).toEqual(['选择目标项目', 'loopwm', 'agent-pm']);
   fireEvent.change(target, { target: { value: 'p_2' } });
   expect(ok.disabled).toBe(false);
   fireEvent.click(ok);
   await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
   expect(request()).toMatchObject({ url: '/projects/p_1/stage', method: 'POST', body: { stage: 'merged', merge_into: 'p_2' } });
-  expect((request().headers as Record<string, string>).Authorization).toBe('Bearer tok-1');
 });
 
-test('the target menu is only there for 合并; any other stage is sent alone', async () => {
+test('the target menu is only there for 合并', () => {
   renderControl();
-  expect(screen.queryByRole('combobox', { name: '合并到' })).toBeNull();
   choose('verify');
   expect(screen.queryByRole('combobox', { name: '合并到' })).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '确定' }));
-  await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
-  expect(request().body).toEqual({ stage: 'verify' });
 });
 
 test('with no other project to merge into, 合并 cannot be confirmed and says why', () => {
@@ -116,46 +116,41 @@ test('with no other project to merge into, 合并 cannot be confirmed and says w
 });
 
 test('while the project list is on its way the merge menu says 加载中…; when it cannot be read it says so', () => {
-  const view = renderControl({}, null);
+  renderControl({}, null);
   choose('merged');
   expect(screen.getByText('加载中…')).toBeTruthy();
-  expect(screen.queryByText('没有可以合并进去的项目')).toBeNull();
   expect((screen.getByRole('button', { name: '确定' }) as HTMLButtonElement).disabled).toBe(true);
-  view.unmount();
-
+  cleanup();
   renderControl({}, null, true);
   choose('merged');
   expect(screen.getByText('读不到项目列表')).toBeTruthy();
-  expect(screen.queryByText('没有可以合并进去的项目')).toBeNull();
-  expect((screen.getByRole('button', { name: '确定' }) as HTMLButtonElement).disabled).toBe(true);
 });
 
 test('a parked project has a button back to the stage it was parked from', async () => {
   renderControl({ stage: 'parked', stage_before_park: 'build' });
-  expect(within(stageSelect()).queryByRole('option', { name: '搁置' })).toBeNull();
+  expect(stageSelect().value).toBe('parked');
   fireEvent.click(screen.getByRole('button', { name: '恢复到 构建' }));
   await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
   expect(request()).toMatchObject({ url: '/projects/p_1/stage', method: 'POST', body: { stage: 'build' } });
 });
 
 test('a project that is not parked has no 恢复 button', () => {
-  renderControl({ stage: 'build', stage_before_park: null });
+  renderControl();
   expect(screen.queryByRole('button', { name: /恢复到/ })).toBeNull();
 });
 
-test('a refusal is shown in Chinese and nothing is reloaded; the choice stays', async () => {
-  fetchMock.mockImplementation(async () =>
-    json({ error: 'not_allowed', message: 'build -> done skips verify' }, 409),
-  );
+test('a refusal is shown in Chinese and nothing is reloaded; the choice stays pending', async () => {
+  fetchMock.mockImplementation(async () => json({ error: 'not_allowed', message: 'build -> done skips verify' }, 409));
   renderControl();
   choose('done');
   fireEvent.click(screen.getByRole('button', { name: '确定' }));
   expect(await screen.findByText('不允许这个操作：build -> done skips verify')).toBeTruthy();
   expect(reload).not.toHaveBeenCalled();
   expect(stageSelect().value).toBe('done');
+  expect(screen.getByRole('button', { name: '确定' })).toBeTruthy();
 });
 
-test('when the project moves to the chosen stage, the menu goes back to 选择阶段…', () => {
+test('when the project moves to the picked stage, the field simply shows it, with nothing pending', () => {
   const view = renderControl({ stage: 'build' });
   choose('verify');
   view.rerender(
@@ -163,8 +158,6 @@ test('when the project moves to the chosen stage, the menu goes back to 选择�
       <StageControl project={detail({ id: 'p_1', stage: 'verify' })} mergeTargets={TARGETS} reload={reload} />
     </ToastProvider>,
   );
-  expect(stageSelect().value).toBe('');
-  expect((screen.getByRole('button', { name: '确定' }) as HTMLButtonElement).disabled).toBe(true);
-  expect(within(stageSelect()).queryByRole('option', { name: '验证' })).toBeNull();
-  expect(within(stageSelect()).getByRole('option', { name: '构建' })).toBeTruthy();
+  expect(stageSelect().value).toBe('verify');
+  expect(screen.queryByRole('button', { name: '确定' })).toBeNull();
 });

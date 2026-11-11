@@ -27,11 +27,11 @@ export type Io = {
 const DEFAULT_SERVER = 'http://localhost:7718';
 
 const USAGE = `Usage:
-  herdr-pm server --config <path>                      run the central server
-  herdr-pm collect --config <path>                     run the collector on this machine
-  herdr-pm collect-paseo --config <path>               run a Paseo collector for one daemon (node 26)
-  herdr-pm sessions [--server <url>] [--machine <m>]   list sessions known to the central server
-  herdr-pm open [<短ID>] [--remote split|inline] [--dry-run]   open an agent by short id in herdr
+  agent-pm server --config <path>                      run the central server
+  agent-pm collect --config <path>                     run the collector on this machine
+  agent-pm collect-paseo --config <path>               run a Paseo collector for one daemon (node 26)
+  agent-pm sessions [--server <url>] [--machine <m>]   list sessions known to the central server
+  agent-pm open [<短ID>] [--remote split|inline] [--dry-run]   open an agent by short id in herdr
 `;
 
 class UsageError extends Error {}
@@ -63,10 +63,10 @@ export async function main(argv: string[], io: Io): Promise<number> {
     }
   } catch (err) {
     if (err instanceof UsageError) {
-      io.stderr(`herdr-pm: ${err.message}\n\n${USAGE}`);
+      io.stderr(`agent-pm: ${err.message}\n\n${USAGE}`);
       return 2;
     }
-    io.stderr(`herdr-pm: ${describeError(err)}\n`);
+    io.stderr(`agent-pm: ${describeError(err)}\n`);
     return 1;
   }
 }
@@ -105,6 +105,10 @@ async function runServer(args: string[], io: Io): Promise<number> {
     understanding.enabled && understanding.oauthTokenFile !== undefined ? readTokenFile(understanding.oauthTokenFile) : undefined;
 
   const db = openDb(config.dbPath);
+  // Provider secrets set from the web UI are kept beside the config, never in the database.
+  const { Settings } = await import('./server/settings.ts');
+  const { dirname, join } = await import('node:path');
+  const settings = new Settings(db, config, join(dirname(configPath), 'secrets'));
   let scheduler: Scheduler | null = null;
   let removeListeners = () => {};
   try {
@@ -113,25 +117,24 @@ async function runServer(args: string[], io: Io): Promise<number> {
       const { Scheduler } = await import('./understand/scheduler.ts');
       const { agentSdkRunner } = await import('./understand/agent-sdk.ts');
       const { defaultDeps } = await import('./domain/types.ts');
-      scheduler = new Scheduler(db, defaultDeps(), agentSdkRunner({ oauthToken }), {
-        digest: understanding.digestModel,
-        curate: understanding.curateModel,
-      });
-      if (oauthToken === undefined && !process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+      // Models and the credential are read before each call, so changes in the settings apply without a restart. The
+      // token file named in the config was checked above; the settings fall back to it when nothing else is chosen.
+      scheduler = new Scheduler(db, defaultDeps(), agentSdkRunner({ credential: () => settings.credential() }), () => settings.models());
+      if (settings.credential().mode === 'login' && !process.env.CLAUDE_CODE_OAUTH_TOKEN) {
         io.stdout(
-          'herdr-pm server: no understanding.oauthTokenFile and no CLAUDE_CODE_OAUTH_TOKEN; model calls use this machine\'s Claude Code login\n',
+          'agent-pm server: no understanding.oauthTokenFile and no CLAUDE_CODE_OAUTH_TOKEN; model calls use this machine\'s Claude Code login\n',
         );
       }
     }
     // `npm run build:web` writes the web UI here (relative to this file, so it works from any working directory).
     const webDir = fileURLToPath(new URL('../dist/web', import.meta.url));
-    const app = createApp(db, config, undefined, undefined, { scheduler, webDir });
+    const app = createApp(db, config, undefined, undefined, { scheduler, webDir, settings });
     const feed = new ChangeFeed(db, { status: () => scheduler?.status() ?? disabledStatus() });
     await new Promise<void>((resolve, reject) => {
       // No hostname: listen on every interface, so collectors and the CLI can reach it over Tailscale.
       const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
         const collectors = Object.keys(config.collectors).length;
-        io.stdout(`herdr-pm server: listening on :${info.port} (all interfaces), db ${config.dbPath}, ${collectors} collector(s)\n`);
+        io.stdout(`agent-pm server: listening on :${info.port} (all interfaces), db ${config.dbPath}, ${collectors} collector(s)\n`);
         scheduler?.start();
       });
       server.once('error', reject);
@@ -156,7 +159,7 @@ async function runServer(args: string[], io: Io): Promise<number> {
     removeListeners();
     // A model call in flight finishes (and writes its result) before the database goes away.
     if (scheduler !== null) {
-      if (scheduler.status().running !== null) io.stdout('herdr-pm server: waiting for the running model call to finish…\n');
+      if (scheduler.status().running !== null) io.stdout('agent-pm server: waiting for the running model call to finish…\n');
       await scheduler.stop();
     }
     db.close();
@@ -177,7 +180,7 @@ function readTokenFile(path: string): string {
 
 async function runCollect(args: string[], io: Io): Promise<number> {
   const config = loadCollectorConfig(requireConfig('collect', args));
-  io.stdout(`herdr-pm collect: machine ${config.machine} -> ${config.server}\n`);
+  io.stdout(`agent-pm collect: machine ${config.machine} -> ${config.server}\n`);
   return runCollector(config);
 }
 

@@ -41,7 +41,7 @@ function addSession(key: string): void {
 /** A build-stage project with a milestone, an open and a done todo, an open and a cleared blocker, and a live session. */
 function fullProject(): string {
   const p = t.user('create_project', {
-    title: '做 herdr-pm',
+    title: '做 agent-pm',
     stage: 'explore',
     priority: 'P1',
     summary: '把分散在各终端的 agent 工作收拢成一张看板',
@@ -66,7 +66,7 @@ test('brief shows stage in Chinese, open todos, open blockers and active session
   const p = fullProject();
   const b = renderBrief(detail(p));
 
-  expect(b).toContain('# 做 herdr-pm');
+  expect(b).toContain('# 做 agent-pm');
   expect(b).toContain(`ID：${p}`);
   expect(b).toContain('阶段：探索');
   expect(b).toContain('优先级：P1');
@@ -141,7 +141,7 @@ test('project markdown carries everything the brief does, plus all milestones, t
   const brief = renderBrief(detail(p));
 
   // Everything the brief says about the project itself is in the full view.
-  for (const line of ['# 做 herdr-pm', '阶段：探索', '优先级：P1', '当前里程碑：m_1 · 理解层上线（进行中）']) {
+  for (const line of ['# 做 agent-pm', '阶段：探索', '优先级：P1', '当前里程碑：m_1 · 理解层上线（进行中）']) {
     expect(brief).toContain(line);
     expect(md).toContain(line);
   }

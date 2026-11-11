@@ -161,7 +161,7 @@ export async function createPaseoSdk(opts: { url: string; password?: string; con
   const client: PaseoClient = createPaseoClient({
     url: opts.url,
     password: opts.password,
-    clientId: 'herdr-pm-paseo-collector',
+    clientId: 'agent-pm-paseo-collector',
     connectTimeoutMs: opts.connectTimeoutMs ?? 15_000,
     reconnect: { enabled: true, baseDelayMs: 1000, maxDelayMs: 30_000 },
   });

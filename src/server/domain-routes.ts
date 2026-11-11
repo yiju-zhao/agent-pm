@@ -10,7 +10,7 @@ import { getProject, listProjects, listQuestions } from '../domain/read.ts';
 import type { QuestionView } from '../domain/read.ts';
 import { PRIORITIES, STAGES } from '../domain/types.ts';
 import type { DomainDeps, OpResult, RejectCode } from '../domain/types.ts';
-import { requireToken } from './bearer.ts';
+import { isAdmin, requireScope } from './keys.ts';
 import type { ServerConfig } from './config.ts';
 
 /** Request bodies of the write routes are small JSON documents. */
@@ -94,8 +94,9 @@ async function readBody<S extends z.ZodType>(c: Context, schema: S): Promise<z.o
 // ---- routes ------------------------------------------------------------------------------------------------------
 
 /** Middleware that answers 401 unless the request carries `Authorization: Bearer <userToken>`. */
-export function userAuth(config: ServerConfig): MiddlewareHandler {
-  return requireToken(config.userToken, 'missing or invalid user token');
+/** The user's routes: a key with the `admin` scope (the config's userToken, or an admin key made in the web UI). */
+export function userAuth(config: ServerConfig, db: DatabaseSync, clock: () => Date = () => new Date()): MiddlewareHandler {
+  return requireScope(db, config, clock, isAdmin, 'missing or invalid user token');
 }
 
 type Params = Record<string, string>;
@@ -107,7 +108,7 @@ type WriteMethod = 'POST' | 'PATCH' | 'PUT' | 'DELETE';
  * the user token is not accepted on `/ingest/*` (the config forbids the two overlapping).
  */
 export function mountDomainRoutes(app: Hono, db: DatabaseSync, config: ServerConfig, deps: DomainDeps): void {
-  const requireUser = userAuth(config);
+  const requireUser = userAuth(config, db, deps.now);
 
   const limitBody = bodyLimit({
     maxSize: MAX_BODY_BYTES,

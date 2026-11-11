@@ -158,6 +158,7 @@ export function reportMetadataArgs(paneId: string, tokens: SidebarTokens, ttlMs:
     'report-metadata',
     paneId,
     '--source',
+    // The source id herdr's sidebar config knows; kept from before the rename.
     'herdr-pm',
     '--token',
     `pm_sid=${tokens.pm_sid}`,

@@ -101,7 +101,7 @@ export class Scheduler {
   private readonly db: DatabaseSync;
   private readonly deps: DomainDeps;
   private readonly runner: LlmRunner;
-  private readonly models: { digest: string; curate: string };
+  private readonly modelsOf: () => { digest: string; curate: string; restage?: string };
 
   private inFlight: Promise<TickResult> | null = null;
   private running: 'digest' | 'curate' | 'restage' | null = null;
@@ -127,11 +127,17 @@ export class Scheduler {
   /** See `STATUS_CACHE_MS`. */
   private chunkCounts: ChunkCounts | null = null;
 
-  constructor(db: DatabaseSync, deps: DomainDeps, runner: LlmRunner, models: { digest: string; curate: string }) {
+  /** `models`: fixed, or read before every call (so a change in the settings applies to the next call). */
+  constructor(
+    db: DatabaseSync,
+    deps: DomainDeps,
+    runner: LlmRunner,
+    models: { digest: string; curate: string; restage?: string } | (() => { digest: string; curate: string; restage?: string }),
+  ) {
     this.db = db;
     this.deps = deps;
     this.runner = runner;
-    this.models = models;
+    this.modelsOf = typeof models === 'function' ? models : () => models;
   }
 
   /**
@@ -148,7 +154,7 @@ export class Scheduler {
         // Everything in here can throw too (logging, an exotic thrown value, the database); the timer must still never
         // see a rejection.
         try {
-          console.error('herdr-pm scheduler: tick failed:', err);
+          console.error('agent-pm scheduler: tick failed:', err);
         } catch {
           // Nowhere left to report it.
         }
@@ -163,7 +169,7 @@ export class Scheduler {
           return 'skipped';
         } catch (accountingErr) {
           try {
-            console.error('herdr-pm scheduler: recording the failure failed:', accountingErr);
+            console.error('agent-pm scheduler: recording the failure failed:', accountingErr);
           } catch {
             // As above.
           }
@@ -297,7 +303,7 @@ export class Scheduler {
   private async restage(now: number, ids: string[]): Promise<TickResult> {
     this.work = { kind: 'restage', ids, now };
     this.running = 'restage';
-    const outcome = await runRestage(this.db, this.deps, this.runner, ids, { model: this.models.curate });
+    const outcome = await runRestage(this.db, this.deps, this.runner, ids, { model: this.modelsOf().restage ?? this.modelsOf().curate });
     if (outcome.status === 'reviewed') {
       this.restageFailures = 0;
       this.restageWaitUntil = null;
@@ -332,7 +338,7 @@ export class Scheduler {
     const ids = pickCurateBatch(this.db);
     this.work = { kind: 'curate', ids, now };
     this.running = 'curate';
-    const outcome = await runCurate(this.db, this.deps, this.runner, ids, { model: this.models.curate });
+    const outcome = await runCurate(this.db, this.deps, this.runner, ids, { model: this.modelsOf().curate });
     if (outcome.status === 'curated') {
       this.curateFailures = 0;
       this.curateWaitUntil = null;
@@ -376,7 +382,7 @@ export class Scheduler {
     this.work = { kind: 'digest', window, now };
     this.running = 'digest';
     const outcome = await runDigest(this.db, this.deps, this.runner, window, {
-      model: this.models.digest,
+      model: this.modelsOf().digest,
       force: picked.force,
     });
     if (outcome.status !== 'failed') {

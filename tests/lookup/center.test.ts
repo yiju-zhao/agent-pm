@@ -117,8 +117,8 @@ test('asks the by-short-id endpoint with a timeout signal', async () => {
 
 test('keeps a path prefix on the server url', async () => {
   const { impl, calls } = fakeFetch(() => json([]));
-  await centerSessions(impl, 'http://proxy/herdr-pm', '0d67da1f');
-  expect(calls[0]!.url).toBe('http://proxy/herdr-pm/sessions/by-short-id/0d67da1f');
+  await centerSessions(impl, 'http://proxy/agent-pm', '0d67da1f');
+  expect(calls[0]!.url).toBe('http://proxy/agent-pm/sessions/by-short-id/0d67da1f');
 });
 
 test('an unreachable center gives null', async () => {

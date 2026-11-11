@@ -67,7 +67,7 @@ function addSession(key: string, over: Partial<{ agent_kind: string; machine: st
       `INSERT INTO sessions (key, agent_kind, machine, terminal_id, cwd, title, lifecycle, live_status, ignored, first_seen, last_seen)
        VALUES (?, ?, ?, 'term_1', ?, ?, 'live', 'working', 0, ?, ?)`,
     )
-    .run(key, over.agent_kind ?? 'claude', over.machine ?? 'laptop', over.cwd ?? '/work/herdr-pm', over.title ?? '写摘要员', NOW, NOW);
+    .run(key, over.agent_kind ?? 'claude', over.machine ?? 'laptop', over.cwd ?? '/work/agent-pm', over.title ?? '写摘要员', NOW, NOW);
 }
 
 function digestedFlags(ids: number[]): number[] {
@@ -505,8 +505,8 @@ test('force on a window that is big enough still calls the model', async () => {
 // ---- prompt ------------------------------------------------------------------------------------------------------
 
 test('the prompt wraps chunks in <chunk id> tags and includes linked project briefs and the project index', async () => {
-  addSession(KEY, { agent_kind: 'claude', machine: 'laptop', cwd: '/work/herdr-pm', title: '写摘要员' });
-  const linked = t.user('create_project', { title: '做 herdr-pm', stage: 'build', summary: '把分散的 agent 工作收拢成看板' }).id;
+  addSession(KEY, { agent_kind: 'claude', machine: 'laptop', cwd: '/work/agent-pm', title: '写摘要员' });
+  const linked = t.user('create_project', { title: '做 agent-pm', stage: 'build', summary: '把分散的 agent 工作收拢成看板' }).id;
   t.user('upsert_todo', { project: linked, title: '写摘要员' });
   const other = t.user('create_project', { title: '另一个想法', stage: 'idea', summary: '以后再说' }).id;
   const finished = t.user('create_project', { title: '已经做完的项目', stage: 'explore' }).id;
@@ -526,13 +526,13 @@ test('the prompt wraps chunks in <chunk id> tags and includes linked project bri
   // session metadata
   expect(prompt).toContain('claude');
   expect(prompt).toContain('laptop');
-  expect(prompt).toContain('/work/herdr-pm');
+  expect(prompt).toContain('/work/agent-pm');
   expect(prompt).toContain('写摘要员');
   // the linked project's brief
   expect(prompt).toContain(`ID：${linked}`);
   expect(prompt).toContain('把分散的 agent 工作收拢成看板');
   // the index lists unfinished projects only
-  expect(prompt).toContain(`- ${linked} · 做 herdr-pm`);
+  expect(prompt).toContain(`- ${linked} · 做 agent-pm`);
   expect(prompt).toContain(`- ${other} · 另一个想法`);
   expect(prompt).not.toContain(finished);
   // the unlinked project has an index line but no brief

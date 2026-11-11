@@ -5,7 +5,7 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 import type { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import type { DomainDeps } from '../domain/types.ts';
-import { requireToken } from '../server/bearer.ts';
+import { isMcp, requireScope } from '../server/keys.ts';
 import type { ServerConfig } from '../server/config.ts';
 import { readTools } from './read-tools.ts';
 
@@ -31,12 +31,12 @@ export function mountMcp(app: Hono, db: DatabaseSync, config: ServerConfig, deps
     onError: (c) =>
       c.json({ jsonrpc: '2.0', error: { code: -32000, message: `request body must be at most ${MAX_BODY_BYTES} bytes` }, id: null }, 413),
   });
-  app.all('/mcp', requireToken(config.mcpToken, 'missing or invalid mcp token'), limitBody, async (c) => {
+  app.all('/mcp', requireScope(db, config, deps.now, isMcp, 'missing or invalid mcp token'), limitBody, async (c) => {
     if (c.req.method !== 'POST') {
       c.header('Allow', 'POST');
       return c.json({ jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed.' }, id: null }, 405);
     }
-    const server = new McpServer({ name: 'herdr-pm', version: VERSION });
+    const server = new McpServer({ name: 'agent-pm', version: VERSION });
     for (const tool of readTools(db, deps)) {
       server.registerTool(tool.name, { description: tool.description, inputSchema: tool.input }, async (args) => {
         const out = await tool.handler(args);

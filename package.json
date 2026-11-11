@@ -1,5 +1,5 @@
 {
-  "name": "herdr-pm",
+  "name": "agent-pm",
   "version": "0.1.0",
   "scripts": {
     "build:web": "vite build",
@@ -10,6 +10,7 @@
   },
   "type": "module",
   "bin": {
+    "agent-pm": "src/cli.ts",
     "herdr-pm": "src/cli.ts"
   },
   "engines": {

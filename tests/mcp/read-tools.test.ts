@@ -140,7 +140,7 @@ test('pm_list_projects: a filter naming a closed stage is not emptied by the def
 });
 
 test('pm_list_projects: one line per project with id, title, stage, priority, summary and counts', async () => {
-  const p = t.user('create_project', { title: '做 herdr-pm', stage: 'build', priority: 'P1', summary: '把工作收拢\n成一张看板' }).id;
+  const p = t.user('create_project', { title: '做 agent-pm', stage: 'build', priority: 'P1', summary: '把工作收拢\n成一张看板' }).id;
   addSession('claude:live1111aaaabbbb');
   addSession('claude:gone2222aaaabbbb', { lifecycle: 'ended' });
   link('claude:live1111aaaabbbb', p);
@@ -163,7 +163,7 @@ test('pm_list_projects: one line per project with id, title, stage, priority, su
   const out = await call('pm_list_projects');
   const lines = linesOf(out);
   expect(lines).toHaveLength(1);
-  expect(lines[0]).toBe(`- ${p} · 做 herdr-pm · 构建 · P1 · 把工作收拢 成一张看板 · 活跃 session 1 · 待回答 1`);
+  expect(lines[0]).toBe(`- ${p} · 做 agent-pm · 构建 · P1 · 把工作收拢 成一张看板 · 活跃 session 1 · 待回答 1`);
 });
 
 test('pm_list_projects filters by stage and priority; says so when nothing matches', async () => {
@@ -184,7 +184,7 @@ test('pm_list_projects filters by stage and priority; says so when nothing match
 // ---- pm_get_project / pm_get_brief -------------------------------------------------------------------------------
 
 test('pm_get_project returns the project Markdown and isError for an unknown id', async () => {
-  const p = t.user('create_project', { title: '做 herdr-pm', stage: 'build' }).id;
+  const p = t.user('create_project', { title: '做 agent-pm', stage: 'build' }).id;
   t.user('upsert_todo', { project: p, title: '写摘要员' });
 
   const out = await call('pm_get_project', { project_id: p });
@@ -198,7 +198,7 @@ test('pm_get_project returns the project Markdown and isError for an unknown id'
 });
 
 test('pm_get_brief returns the rendered brief and isError for an unknown id', async () => {
-  const p = t.user('create_project', { title: '做 herdr-pm', stage: 'build' }).id;
+  const p = t.user('create_project', { title: '做 agent-pm', stage: 'build' }).id;
   t.user('record_decision', { project: p, text: '用 SQLite' });
 
   const out = await call('pm_get_brief', { project_id: p });
@@ -222,7 +222,7 @@ test('pm_get_project and pm_get_brief treat a deleted project as unknown', async
 // ---- pm_timeline -------------------------------------------------------------------------------------------------
 
 test('pm_timeline merges events and contributions newest first', async () => {
-  const p = t.user('create_project', { title: '做 herdr-pm', stage: 'build' }).id; // event at 12:00
+  const p = t.user('create_project', { title: '做 agent-pm', stage: 'build' }).id; // event at 12:00
   addSession('claude:live1111aaaabbbb');
   t.setNow('2026-10-29T13:00:00.000Z');
   link('claude:live1111aaaabbbb', p, { ts_end: '2026-10-29T12:30:00.000Z', summary: '写了摘要员' }); // event at 13:00
@@ -243,7 +243,7 @@ test('pm_timeline merges events and contributions newest first', async () => {
 });
 
 test('pm_timeline: a contribution without ts_end sits where it was recorded', async () => {
-  const p = t.user('create_project', { title: '做 herdr-pm' }).id;
+  const p = t.user('create_project', { title: '做 agent-pm' }).id;
   addSession('claude:live1111aaaabbbb');
   t.setNow('2026-10-29T13:00:00.000Z');
   link('claude:live1111aaaabbbb', p);
@@ -254,7 +254,7 @@ test('pm_timeline: a contribution without ts_end sits where it was recorded', as
 });
 
 test('pm_timeline marks events that were reverted', async () => {
-  const p = t.user('create_project', { title: '做 herdr-pm' }).id;
+  const p = t.user('create_project', { title: '做 agent-pm' }).id;
   const todo = t.user('upsert_todo', { project: p, title: '写错的 todo' });
   expect(t.user('revert_event', { event_id: todo.event_id }).status).toBe('applied');
 

@@ -415,7 +415,7 @@ test('the system prompt names the tool arguments the way the tools take them', (
 
 test('the prompt includes related briefs with tombstones, the unfinished index, vetoed projects and pending questions', () => {
   addSession(KEY);
-  const linked = t.user('create_project', { title: '做 herdr-pm', stage: 'build', summary: '把分散的 agent 工作收拢成看板' }).id;
+  const linked = t.user('create_project', { title: '做 agent-pm', stage: 'build', summary: '把分散的 agent 工作收拢成看板' }).id;
   const todo = t.user('upsert_todo', { project: linked, title: '一条被用户删掉的 todo' }).id;
   t.user('upsert_todo', { project: linked, title: '还在做的 todo' });
   t.user('delete_todo', { project: linked, id: todo });
@@ -433,7 +433,7 @@ test('the prompt includes related briefs with tombstones, the unfinished index, 
 
   expect(askUser(t.db, t.deps, {
     kind: 'confirm',
-    prompt: '要不要把 herdr-pm 的优先级调成 P0？',
+    prompt: '要不要把 agent-pm 的优先级调成 P0？',
     project_id: linked,
     evidence: ['chunk:1'],
     option: { label: '调成 P0', op: 'update_project', args: { project: linked, fields: { priority: 'P0' } } },
@@ -472,7 +472,7 @@ test('the prompt includes related briefs with tombstones, the unfinished index, 
   // pending questions: id, prompt, project or session
   const questions = rows(t.db, 'questions');
   expect(questions).toHaveLength(2);
-  expect(prompt).toContain(`${questions[0].id} · 要不要把 herdr-pm 的优先级调成 P0？ · 项目 ${linked}`);
+  expect(prompt).toContain(`${questions[0].id} · 要不要把 agent-pm 的优先级调成 P0？ · 项目 ${linked}`);
   expect(prompt).toContain(`${questions[1].id} · 这个 session 要不要追踪？ · session ${OTHER_KEY}`);
 });
 

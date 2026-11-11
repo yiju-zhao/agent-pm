@@ -7,7 +7,7 @@ import { expandHome, loadCollectorConfig } from '../../src/collector/config.ts';
 let dir: string;
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'herdr-pm-ccfg-'));
+  dir = await mkdtemp(join(tmpdir(), 'agent-pm-ccfg-'));
 });
 
 afterEach(async () => {

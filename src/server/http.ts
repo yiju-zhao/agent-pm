@@ -12,13 +12,15 @@ import type { OffsetResponse, SnapshotResponse } from '../shared/protocol.ts';
 import { parseSessionKey } from '../shared/session-key.ts';
 import type { Scheduler } from '../understand/scheduler.ts';
 import { disabledStatus } from '../understand/status.ts';
-import { bearerToken, tokenMatches } from './bearer.ts';
 import type { ServerConfig } from './config.ts';
+import { mountAdminRoutes } from './admin-routes.ts';
 import { mountDomainRoutes, userAuth } from './domain-routes.ts';
 import { mountIngestV2 } from './ingest-v2.ts';
+import { principalOf } from './keys.ts';
 import { applySnapshot, findByShortId, insertChunks, listSessions, maxOffset } from './sessions-repo.ts';
 import type { SessionView } from './sessions-repo.ts';
 import { herdrSourceId } from './sources-repo.ts';
+import { Settings } from './settings.ts';
 import { sidebarLabels } from './sidebar.ts';
 import { mountWeb } from './web.ts';
 
@@ -46,12 +48,12 @@ export function createApp(
 
   // Anything not handled below is a bug: say so on stderr, tell the client only that it happened.
   app.onError((err, c) => {
-    console.error(`herdr-pm server: unhandled error in ${c.req.method} ${c.req.path}:`, err);
+    console.error(`agent-pm server: unhandled error in ${c.req.method} ${c.req.path}:`, err);
     return c.json({ error: 'internal' }, 500);
   });
 
   app.post('/ingest/snapshot', async (c) => {
-    const push = await readPush(c, config, SnapshotPush, (p) => [
+    const push = await readPush(c, db, config, clock, SnapshotPush, (p) => [
       ...p.sessions.map((s, i) => checkKey(s.key, `sessions[${i}].key`, p.machine)),
       ...p.purged.map((key, i) => checkKey(key, `purged[${i}]`, p.machine)),
     ]);
@@ -63,14 +65,14 @@ export function createApp(
     try {
       labels = sidebarLabels(db, push.sessions.map((s) => s.key));
     } catch (err) {
-      console.error(`herdr-pm server: sidebar labels failed: ${err instanceof Error ? err.message : String(err)}`);
+      console.error(`agent-pm server: sidebar labels failed: ${err instanceof Error ? err.message : String(err)}`);
     }
     const response: SnapshotResponse = { ok: true, labels };
     return c.json(response);
   });
 
   app.post('/ingest/chunks', async (c) => {
-    const push = await readPush(c, config, ChunkPush, (p) =>
+    const push = await readPush(c, db, config, clock, ChunkPush, (p) =>
       p.chunks.map((chunk, i) => checkKey(chunk.session_key, `chunks[${i}].session_key`, p.machine)),
     );
     if (push instanceof Response) return push;
@@ -78,7 +80,7 @@ export function createApp(
   });
 
   app.get('/ingest/offset', (c) => {
-    const labels = authenticate(c, config);
+    const labels = authenticate(c, db, config, clock);
     if (labels instanceof Response) return labels;
     const machine = c.req.query('machine');
     if (!machine) return c.json({ error: 'query parameter "machine" is required' }, 400);
@@ -107,7 +109,7 @@ export function createApp(
   app.get('/sessions/by-short-id/:sid', (c) => c.json(findByShortId(db, c.req.param('sid'), clock())));
 
   // The conversation text behind a decision. It is raw, so unlike the other reads it needs the user token.
-  app.get('/evidence/:ref', userAuth(config), (c) => {
+  app.get('/evidence/:ref', userAuth(config, db, clock), (c) => {
     const ref = c.req.param('ref');
     if (parseEvidenceRef(ref) === null) return c.json({ error: 'invalid' }, 400);
     const evidence = getEvidence(db, clock(), ref);
@@ -116,13 +118,14 @@ export function createApp(
 
   app.get('/status', (c) => c.json({ understanding: scheduler?.status() ?? disabledStatus() }));
 
-  app.post('/sync', userAuth(config), (c) => {
+  app.post('/sync', userAuth(config, db, clock), (c) => {
     if (scheduler === null) return c.json({ error: 'understanding_disabled' }, 409);
     scheduler.requestSync();
     return c.json({ accepted: true }, 202);
   });
 
   mountDomainRoutes(app, db, config, deps);
+  mountAdminRoutes(app, db, config, deps, opts.settings ?? new Settings(db, config, null, clock));
   mountMcp(app, db, config, deps);
   mountWeb(app, opts.webDir ?? null);
 
@@ -132,7 +135,8 @@ export function createApp(
 /** One entry of `GET /sessions`: the session and the live projects it is linked to. */
 export type SessionListItem = SessionView & { linked_projects: Array<{ id: string; title: string }> };
 
-export type AppOptions = { scheduler?: Scheduler | null; webDir?: string | null };
+/** `settings`: the run-time settings (models, provider credential); without one, secrets cannot be set from the UI. */
+export type AppOptions = { scheduler?: Scheduler | null; webDir?: string | null; settings?: Settings };
 
 /**
  * Authenticates an ingest request, then reads and validates its JSON body. Order: bearer token
@@ -141,11 +145,13 @@ export type AppOptions = { scheduler?: Scheduler | null; webDir?: string | null 
  */
 async function readPush<T extends { machine: string }>(
   c: Context,
+  db: DatabaseSync,
   config: ServerConfig,
+  clock: () => Date,
   schema: ZodType<T>,
   keyErrors: (push: T) => Array<string | null>,
 ): Promise<T | Response> {
-  const labels = authenticate(c, config);
+  const labels = authenticate(c, db, config, clock);
   if (labels instanceof Response) return labels;
 
   let body: unknown;
@@ -168,19 +174,14 @@ async function readPush<T extends { machine: string }>(
   return parsed.data;
 }
 
-/** Labels of every collector whose token equals the presented bearer token, or a 401 response. */
-function authenticate(c: Context, config: ServerConfig): string[] | Response {
-  const unauthorized = () => {
+/** The machine a herdr collector key may push for (its `ingest:herdr:<machine>` scope), as a list, or a 401 response. */
+function authenticate(c: Context, db: DatabaseSync, config: ServerConfig, clock: () => Date): string[] | Response {
+  const p = principalOf(c, db, config, clock());
+  if (p === null || p.scope.kind !== 'ingest_herdr') {
     c.header('WWW-Authenticate', 'Bearer');
     return c.json({ error: 'missing or invalid bearer token' }, 401);
-  };
-  const presented = bearerToken(c.req.header('Authorization'));
-  if (presented === null) return unauthorized();
-  // Compare against every configured token (no early exit), each in constant time.
-  const labels = Object.entries(config.collectors)
-    .filter(([, token]) => tokenMatches(presented, token))
-    .map(([label]) => label);
-  return labels.length > 0 ? labels : unauthorized();
+  }
+  return [p.scope.machine];
 }
 
 /** 403 unless the authenticated token is the one configured for the declared machine. */

@@ -11,7 +11,7 @@ import type { Setup } from '../domain/helpers.ts';
 const MCP_TOKEN = 'mcp-token-0123456789abcdef';
 const USER_TOKEN = 'user-token-0123456789abcdef';
 const COLLECTOR_TOKEN = 'collector-token-laptop-0123456789';
-const MCP_URL = new URL('http://herdr-pm.test/mcp');
+const MCP_URL = new URL('http://agent-pm.test/mcp');
 
 const config: ServerConfig = {
   port: 1,
@@ -28,7 +28,7 @@ let client: Client;
 beforeEach(async () => {
   t = setup();
   app = createApp(t.db, config, t.deps.now, t.deps.newId);
-  client = new Client({ name: 'herdr-pm-test', version: '0.0.0' });
+  client = new Client({ name: 'agent-pm-test', version: '0.0.0' });
   // No port: the client's fetch goes straight into the Hono app.
   const transport = new StreamableHTTPClientTransport(MCP_URL, {
     fetch: async (url, init) => app.request(url, init),
@@ -71,7 +71,7 @@ test('without the mcp token the endpoint answers 401', async () => {
   // The right token gets through to MCP.
   const ok = await initialize(`Bearer ${MCP_TOKEN}`);
   expect(ok.status).toBe(200);
-  expect(((await ok.json()) as { result: { serverInfo: { name: string } } }).result.serverInfo.name).toBe('herdr-pm');
+  expect(((await ok.json()) as { result: { serverInfo: { name: string } } }).result.serverInfo.name).toBe('agent-pm');
 });
 
 test('the user token and collector tokens are not accepted on /mcp', async () => {
@@ -100,7 +100,7 @@ test('a client lists exactly the read tools and pm_report', async () => {
 });
 
 test('calling pm_get_brief over HTTP returns the brief text', async () => {
-  const p = t.user('create_project', { title: '做 herdr-pm', stage: 'build', why: '一个地方看清所有项目' }).id;
+  const p = t.user('create_project', { title: '做 agent-pm', stage: 'build', why: '一个地方看清所有项目' }).id;
   t.user('upsert_todo', { project: p, title: '接上 MCP' });
 
   const result = await client.callTool({ name: 'pm_get_brief', arguments: { project_id: p } });

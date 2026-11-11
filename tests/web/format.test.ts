@@ -148,10 +148,10 @@ test('describeOption: an operation without args and an unknown operation name st
 test('middleEllipsis leaves short text alone and cuts a long one in the middle, keeping the end', () => {
   expect(middleEllipsis('/srv/app', 20)).toBe('/srv/app');
   expect(middleEllipsis('a'.repeat(20), 20)).toBe('a'.repeat(20));
-  const cut = middleEllipsis('/Users/eason/Documents/nasa718/herdr-pm-web', 24);
+  const cut = middleEllipsis('/Users/eason/Documents/nasa718/agent-pm-web', 24);
   expect(Array.from(cut)).toHaveLength(24);
   expect(cut.startsWith('/Users/')).toBe(true);
-  expect(cut.endsWith('herdr-pm-web')).toBe(true);
+  expect(cut.endsWith('agent-pm-web')).toBe(true);
   expect(cut).toContain('…');
 });
 

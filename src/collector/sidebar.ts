@@ -56,7 +56,7 @@ export class SidebarReporter {
           const message = err instanceof Error ? err.message : String(err);
           if (state.error !== message) {
             state.error = message;
-            this.log(`herdr-pm collect: sidebar metadata for ${paneId} failed: ${message}`);
+            this.log(`agent-pm collect: sidebar metadata for ${paneId} failed: ${message}`);
           }
         }
       }),

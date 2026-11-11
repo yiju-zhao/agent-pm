@@ -7,7 +7,7 @@ import { loadServerConfig, understandingSettings } from '../../src/server/config
 let dir: string;
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'herdr-pm-config-'));
+  dir = await mkdtemp(join(tmpdir(), 'agent-pm-config-'));
 });
 
 afterEach(async () => {
@@ -26,14 +26,14 @@ async function configFile(content: unknown): Promise<string> {
 test('loads a valid config', async () => {
   const path = await configFile({
     port: 8787,
-    dbPath: '/var/lib/herdr-pm/pm.db',
+    dbPath: '/var/lib/agent-pm/pm.db',
     userToken: USER_TOKEN,
     mcpToken: MCP_TOKEN,
     collectors: { 'gx10-090e': 'tok-1', laptop: 'tok-2' },
   });
   expect(loadServerConfig(path)).toEqual({
     port: 8787,
-    dbPath: '/var/lib/herdr-pm/pm.db',
+    dbPath: '/var/lib/agent-pm/pm.db',
     userToken: USER_TOKEN,
     mcpToken: MCP_TOKEN,
     collectors: { 'gx10-090e': 'tok-1', laptop: 'tok-2' },
@@ -195,8 +195,8 @@ test('understanding settings are optional and oauthTokenFile resolves relative t
   });
   expect(understandingSettings(custom)).toEqual(custom.understanding);
 
-  const absolute = loadServerConfig(await configFile({ ...base, understanding: { oauthTokenFile: '/etc/herdr-pm/token' } }));
-  expect(absolute.understanding).toEqual({ oauthTokenFile: '/etc/herdr-pm/token' });
+  const absolute = loadServerConfig(await configFile({ ...base, understanding: { oauthTokenFile: '/etc/agent-pm/token' } }));
+  expect(absolute.understanding).toEqual({ oauthTokenFile: '/etc/agent-pm/token' });
 
   const bad = await configFile({ ...base, understanding: { enabled: 'yes', digestModel: '' } });
   expect(() => loadServerConfig(bad)).toThrow(/understanding\.enabled/);

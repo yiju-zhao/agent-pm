@@ -22,7 +22,7 @@ function indexColumns(db: DatabaseSync, table: string): string[] {
 }
 
 test('a v1 database (ingestion only) upgrades to v2 and keeps its sessions', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'herdr-pm-db-'));
+  const dir = await mkdtemp(join(tmpdir(), 'agent-pm-db-'));
   const path = join(dir, 'pm.db');
   try {
     const v1 = new DatabaseSync(path);
@@ -49,7 +49,7 @@ test('a v1 database (ingestion only) upgrades to v2 and keeps its sessions', asy
 });
 
 test('a v2 database upgrades to v3 and keeps its data', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'herdr-pm-db-'));
+  const dir = await mkdtemp(join(tmpdir(), 'agent-pm-db-'));
   const path = join(dir, 'pm.db');
   try {
     const v2 = new DatabaseSync(path);
@@ -165,7 +165,7 @@ test('lookup indexes exist', () => {
 });
 
 test('a v3 database upgrades to v4: existing projects await a stage review, new ones do not', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'herdr-pm-db-'));
+  const dir = await mkdtemp(join(tmpdir(), 'agent-pm-db-'));
   const path = join(dir, 'pm.db');
   try {
     const v3 = new DatabaseSync(path);

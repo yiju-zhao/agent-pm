@@ -130,7 +130,7 @@ const REMINDER = '必须同时给 reason（一句话原因）和 evidence（本�
 const WRITE_OPS = [
   {
     op: 'create_project',
-    description: '新建项目（AI 只能建在 idea 阶段）。先看项目索引确认没有重复，用户删除过的项目不要重建。可用 from_session 同时关联 session。',
+    description: '新建项目（AI 只能建在 idea 阶段）。按优先级定义填好 priority。先看项目索引确认没有重复，用户删除过的项目不要重建。可用 from_session 同时关联 session。',
   },
   {
     op: 'update_project',

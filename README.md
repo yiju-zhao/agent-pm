@@ -1,6 +1,6 @@
-# herdr-pm
+# agent-pm
 
-在多台机器上同时跑十几个 coding agent（Claude Code、Codex）时，herdr 能告诉你"哪个 agent 在跑、哪个在等我"。herdr-pm 补上 project 层面的视图。它的第一步（计划 1：采集地基；项目领域操作和 HTTP API 是计划 2，见「项目 API」）是把所有机器上的 agent session 和对话汇总到一个中心：
+在多台机器上同时跑十几个 coding agent（Claude Code、Codex）时，herdr 能告诉你"哪个 agent 在跑、哪个在等我"。agent-pm 补上 project 层面的视图。它的第一步（计划 1：采集地基；项目领域操作和 HTTP API 是计划 2，见「项目 API」）是把所有机器上的 agent session 和对话汇总到一个中心：
 
 - 每台机器上跑一个**采集器**，只读本机的 herdr 快照和 Claude / Codex 的对话文件，每 10 秒把变化推送到中心。
 - 一台机器（mac-mini）上跑一个**中心服务**，用 SQLite 存所有机器的 session 和对话 chunk，对外提供 HTTP API。
@@ -8,15 +8,25 @@
 
 设计见 `docs/superpowers/specs/2026-10-29-project-manager-design.md`，本阶段的实施计划见 `docs/superpowers/plans/2026-10-29-01-ingestion-foundation.md`。
 
+## 名字
+
+产品名是 **agent-pm**（原名 herdr-pm）：命令 `agent-pm`、MCP 服务名 `agent-pm`、skill `agent-pm`、launchd 标签 `ai.agent-pm.*`、日志目录 `~/Library/Logs/agent-pm`。为了不打断已部署的机器，这些保留旧名：
+
+- 命令 `herdr-pm` 仍可用（`package.json` 的 bin 两个名字都有；各机器上已装的 `~/.local/bin/herdr-pm` 二进制照常运行）。
+- 数据和配置路径：`~/.config/herdr-pm/`、`~/.local/state/herdr-pm/`、`herdr-pm.db`。
+- 浏览器里保存 key 和视图用的存储名；herdr 侧边栏的 metadata source `herdr-pm`。
+- 环境变量 `HERDR_PM_SERVER` 仍认（新名 `AGENT_PM_SERVER`）。
+- 已经用 `herdr-pm` 这个名字注册的 MCP 服务照常能用（名字只是本机的标签）；重新注册时用 `agent-pm`。
+
 ## 两个进程
 
 | 进程 | 命令 | 跑在哪 | 运行方式 |
 |---|---|---|---|
-| 中心服务 | `herdr-pm server --config <path>` | mac-mini（一台） | `node src/cli.ts`（需要 Node >= 26，用到 `node:sqlite`） |
-| 采集器 | `herdr-pm collect --config <path>` | 每台机器各一个：笔记本、mac-mini、gx10-090e、gx10-c757 | bun 编译出的单文件二进制，目标机器不需要装 node / bun |
-| Paseo 采集器 | `herdr-pm collect-paseo --config <path>` | 每个 Paseo daemon 一个（可与 daemon 同机或远程连接） | `node src/cli.ts`（Node 26，从仓库运行），见「Paseo 采集器（计划 6）」 |
+| 中心服务 | `agent-pm server --config <path>` | mac-mini（一台） | `node src/cli.ts`（需要 Node >= 26，用到 `node:sqlite`） |
+| 采集器 | `agent-pm collect --config <path>` | 每台机器各一个：笔记本、mac-mini、gx10-090e、gx10-c757 | bun 编译出的单文件二进制，目标机器不需要装 node / bun |
+| Paseo 采集器 | `agent-pm collect-paseo --config <path>` | 每个 Paseo daemon 一个（可与 daemon 同机或远程连接） | `node src/cli.ts`（Node 26，从仓库运行），见「Paseo 采集器（计划 6）」 |
 
-另有一个查询命令：`herdr-pm sessions [--server <url>] [--machine <m>]`，列出中心已知的 session。
+另有一个查询命令：`agent-pm sessions [--server <url>] [--machine <m>]`，列出中心已知的 session。
 
 中心监听 `config.port` 的所有网卡，目的是让其他机器通过 Tailscale 访问。所有 `GET`（`/sessions*`、`/projects*`、`/questions`）目前**没有鉴权**，只靠网络隔离，所以不要把这个端口暴露到公网；`/ingest/*` 要求每台机器自己的 bearer token；项目 API 的写操作要求 `userToken`（见下文「项目 API」）。
 
@@ -45,9 +55,9 @@ hook 在 agent 启动时加载，所以装之前就在跑的 agent 要重启一�
 ### 0. 在笔记本上准备
 
 ```bash
-git clone <本仓库> ~/Developer/repos/herdr-pm && cd ~/Developer/repos/herdr-pm
+git clone <本仓库> ~/Developer/repos/agent-pm && cd ~/Developer/repos/agent-pm
 npm ci                                  # 需要 Node >= 26
-scripts/build-collector.sh              # 生成 dist/herdr-pm-bun-darwin-arm64 和 dist/herdr-pm-bun-linux-arm64
+scripts/build-collector.sh              # 生成 dist/agent-pm-bun-darwin-arm64 和 dist/agent-pm-bun-linux-arm64
 ```
 
 `scripts/build-collector.sh [bun-darwin-arm64|bun-linux-arm64]` 可以只构建一个目标（需要先装 bun：`brew install oven-sh/bun/bun`）。`dist/` 不进 git。脚本里有两个不能删的细节，原因写在脚本注释里：必须加 `--splitting`（否则 bun 会在启动时就加载 `node:sqlite` 然后崩溃），darwin 二进制构建后要重新做 ad-hoc 签名（否则 Apple silicon 直接把进程 kill 掉，退出码 137）。
@@ -94,16 +104,16 @@ openssl rand -hex 32   # 每台机器跑一次，记下来
    | `__HOME__` | 你的家目录，`echo $HOME` |
 
    ```bash
-   mkdir -p ~/Library/Logs/herdr-pm ~/Library/LaunchAgents
+   mkdir -p ~/Library/Logs/agent-pm ~/Library/LaunchAgents
    sed -e "s|__NODE_BIN__|$(command -v node)|g" \
-       -e "s|__REPO_DIR__|$HOME/Developer/repos/herdr-pm|g" \
+       -e "s|__REPO_DIR__|$HOME/Developer/repos/agent-pm|g" \
        -e "s|__CONFIG_PATH__|$HOME/.config/herdr-pm/server.json|g" \
        -e "s|__HOME__|$HOME|g" \
-       deploy/launchd/ai.herdr-pm.server.plist > ~/Library/LaunchAgents/ai.herdr-pm.server.plist
-   launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/ai.herdr-pm.server.plist
+       deploy/launchd/ai.agent-pm.server.plist > ~/Library/LaunchAgents/ai.agent-pm.server.plist
+   launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/ai.agent-pm.server.plist
    ```
 
-   日志在 `~/Library/Logs/herdr-pm/server.log` 和 `server.err.log`。`KeepAlive` 保证崩溃后自动拉起，`RunAtLoad` 保证登录后自动启动。停止：`launchctl bootout "gui/$(id -u)/ai.herdr-pm.server"`；改了配置后重启：`launchctl kickstart -k "gui/$(id -u)/ai.herdr-pm.server"`。
+   日志在 `~/Library/Logs/agent-pm/server.log` 和 `server.err.log`。`KeepAlive` 保证崩溃后自动拉起，`RunAtLoad` 保证登录后自动启动。停止：`launchctl bootout "gui/$(id -u)/ai.agent-pm.server"`；改了配置后重启：`launchctl kickstart -k "gui/$(id -u)/ai.agent-pm.server"`。
 
    `gui/<uid>` 域里的 LaunchAgent 只在该用户**已登录**时运行：mac-mini 重启后如果停在登录界面，中心服务和采集器都不会起来。所以在 mac-mini 上打开自动登录（系统设置 → 用户与群组 → 自动登录；开了 FileVault 时 macOS 不允许自动登录，要么关掉 FileVault，要么每次重启后手动登录一次）。另一种做法是把中心服务改成 `/Library/LaunchDaemons` 下带 `UserName` 键的 LaunchDaemon（系统域，开机即运行，不需要登录）；但采集器读的是本机 herdr，herdr 本身跑在用户会话里，所以采集器仍然需要用户登录。
 
@@ -137,26 +147,26 @@ openssl rand -hex 32   # 每台机器跑一次，记下来
 
 ```bash
 # 笔记本本机
-mkdir -p ~/.local/bin ~/.config/herdr-pm ~/Library/Logs/herdr-pm ~/Library/LaunchAgents
-cp dist/herdr-pm-bun-darwin-arm64 ~/.local/bin/herdr-pm
+mkdir -p ~/.local/bin ~/.config/herdr-pm ~/Library/Logs/agent-pm ~/Library/LaunchAgents
+cp dist/agent-pm-bun-darwin-arm64 ~/.local/bin/agent-pm
 
-# mac-mini：把同一个 dist/herdr-pm-bun-darwin-arm64 拷过去放到 ~/.local/bin/herdr-pm（scp / AirDrop / 共享目录均可）
-# 如果文件是通过浏览器 / AirDrop 传来的，去掉隔离标记：xattr -d com.apple.quarantine ~/.local/bin/herdr-pm
+# mac-mini：把同一个 dist/agent-pm-bun-darwin-arm64 拷过去放到 ~/.local/bin/agent-pm（scp / AirDrop / 共享目录均可）
+# 如果文件是通过浏览器 / AirDrop 传来的，去掉隔离标记：xattr -d com.apple.quarantine ~/.local/bin/agent-pm
 
-~/.local/bin/herdr-pm sessions --server http://100.111.225.68:7718   # 先确认二进制能跑、中心能通
+~/.local/bin/agent-pm sessions --server http://100.111.225.68:7718   # 先确认二进制能跑、中心能通
 ```
 
 launchd 常驻（占位符：`__COLLECTOR_BIN__` = 二进制的绝对路径，`__CONFIG_PATH__` = `collector.json` 的绝对路径，`__HOME__` = 家目录）：
 
 ```bash
-sed -e "s|__COLLECTOR_BIN__|$HOME/.local/bin/herdr-pm|g" \
+sed -e "s|__COLLECTOR_BIN__|$HOME/.local/bin/agent-pm|g" \
     -e "s|__CONFIG_PATH__|$HOME/.config/herdr-pm/collector.json|g" \
     -e "s|__HOME__|$HOME|g" \
-    deploy/launchd/ai.herdr-pm.collector.plist > ~/Library/LaunchAgents/ai.herdr-pm.collector.plist
-launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/ai.herdr-pm.collector.plist
+    deploy/launchd/ai.agent-pm.collector.plist > ~/Library/LaunchAgents/ai.agent-pm.collector.plist
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/ai.agent-pm.collector.plist
 ```
 
-launchd 起的进程 PATH 很短，plist 里已经把 `~/.local/bin`（herdr 装在这里）和 `/opt/homebrew/bin` 加进了 `PATH`；如果 herdr 在别处，把 `herdrBin` 写成绝对路径。日志在 `~/Library/Logs/herdr-pm/collector.log`、`collector.err.log`。
+launchd 起的进程 PATH 很短，plist 里已经把 `~/.local/bin`（herdr 装在这里）和 `/opt/homebrew/bin` 加进了 `PATH`；如果 herdr 在别处，把 `herdrBin` 写成绝对路径。日志在 `~/Library/Logs/agent-pm/collector.log`、`collector.err.log`。
 
 部署后确认采集器在 launchd 的环境里能跑 `herdr api snapshot`，而且只看到**本机**的 pane。先用和 plist 一样的最小环境手动跑一次（`env -i` 清掉交互 shell 的环境变量；`herdrBin` 写了绝对路径就用那个路径）：
 
@@ -165,50 +175,50 @@ env -i HOME="$HOME" USER="$USER" PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/l
   herdr api snapshot | jq '[.result.snapshot.panes[] | {pane_id, agent, cwd}]'
 ```
 
-列出的应该正好是这台机器上 herdr 里的 pane。再看 launchd 起的采集器本身：`~/Library/Logs/herdr-pm/collector.err.log` 里不应出现 `herdr api snapshot failed`，`herdr-pm sessions --server <中心> --machine <本机 label>` 列出的就是本机的 agent，没有别的机器的。
+列出的应该正好是这台机器上 herdr 里的 pane。再看 launchd 起的采集器本身：`~/Library/Logs/agent-pm/collector.err.log` 里不应出现 `herdr api snapshot failed`，`agent-pm sessions --server <中心> --machine <本机 label>` 列出的就是本机的 agent，没有别的机器的。
 
 **Linux（gx10-090e、gx10-c757）**
 
 ```bash
 # 在笔记本上
-scp dist/herdr-pm-bun-linux-arm64 gx10-090e:~/herdr-pm                # 没有 ssh 别名就写 用户@Tailscale-IP
-scp dist/herdr-pm-bun-linux-arm64 bz@100.87.40.81:~/herdr-pm          # gx10-c757
+scp dist/agent-pm-bun-linux-arm64 gx10-090e:~/agent-pm                # 没有 ssh 别名就写 用户@Tailscale-IP
+scp dist/agent-pm-bun-linux-arm64 bz@100.87.40.81:~/agent-pm          # gx10-c757
 # 在 gx10 上
 mkdir -p ~/.local/bin ~/.config/herdr-pm ~/.config/systemd/user
-mv ~/herdr-pm ~/.local/bin/herdr-pm && chmod +x ~/.local/bin/herdr-pm
+mv ~/agent-pm ~/.local/bin/agent-pm && chmod +x ~/.local/bin/agent-pm
 # 写 ~/.config/herdr-pm/collector.json（machine 分别是 gx10-090e / gx10-c757）
-~/.local/bin/herdr-pm sessions --server http://100.111.225.68:7718   # 确认能通
+~/.local/bin/agent-pm sessions --server http://100.111.225.68:7718   # 确认能通
 ```
 
-systemd 用户服务常驻（`deploy/systemd/herdr-pm-collector.service` 里假定二进制在 `~/.local/bin/herdr-pm`、配置在 `~/.config/herdr-pm/collector.json`）：
+systemd 用户服务常驻（`deploy/systemd/agent-pm-collector.service` 里假定二进制在 `~/.local/bin/agent-pm`、配置在 `~/.config/herdr-pm/collector.json`）：
 
 ```bash
-cp deploy/systemd/herdr-pm-collector.service ~/.config/systemd/user/     # 或先 scp 到 gx10 再 cp
+cp deploy/systemd/agent-pm-collector.service ~/.config/systemd/user/     # 或先 scp 到 gx10 再 cp
 systemctl --user daemon-reload
-systemctl --user enable --now herdr-pm-collector
+systemctl --user enable --now agent-pm-collector
 loginctl enable-linger "$USER"        # 没有登录会话时也保持运行
-journalctl --user -u herdr-pm-collector -f
+journalctl --user -u agent-pm-collector -f
 ```
 
-同样要确认 systemd 用户服务的环境里能跑 `herdr api snapshot`、只看到本机的 pane。`systemd-run --user` 在和采集器相同的用户服务管理器里起一个临时单元，`PATH` 和 `deploy/systemd/herdr-pm-collector.service` 里的一致：
+同样要确认 systemd 用户服务的环境里能跑 `herdr api snapshot`、只看到本机的 pane。`systemd-run --user` 在和采集器相同的用户服务管理器里起一个临时单元，`PATH` 和 `deploy/systemd/agent-pm-collector.service` 里的一致：
 
 ```bash
 systemd-run --user --wait --pipe -p Environment=PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin" \
   herdr api snapshot | head -c 2000
-journalctl --user -u herdr-pm-collector -n 20     # 不应出现 "herdr api snapshot failed"
+journalctl --user -u agent-pm-collector -n 20     # 不应出现 "herdr api snapshot failed"
 ```
 
-快照里应该只有这台机器的 pane；`herdr-pm sessions --server <中心> --machine <本机 label>` 也应列出本机的 agent。
+快照里应该只有这台机器的 pane；`agent-pm sessions --server <中心> --machine <本机 label>` 也应列出本机的 agent。
 
 ### 升级
 
-改了代码后：笔记本上重新 `scripts/build-collector.sh`，把新二进制覆盖到各机器的 `~/.local/bin/herdr-pm`，然后重启服务（macOS：`launchctl kickstart -k "gui/$(id -u)/ai.herdr-pm.collector"`；Linux：`systemctl --user restart herdr-pm-collector`）。中心服务 `git pull` 后同样 `kickstart -k`；网页有改动时先 `npm run build:web`（见「网页界面（计划 4）」）。
+改了代码后：笔记本上重新 `scripts/build-collector.sh`，把新二进制覆盖到各机器的 `~/.local/bin/agent-pm`，然后重启服务（macOS：`launchctl kickstart -k "gui/$(id -u)/ai.agent-pm.collector"`；Linux：`systemctl --user restart agent-pm-collector`）。中心服务 `git pull` 后同样 `kickstart -k`；网页有改动时先 `npm run build:web`（见「网页界面（计划 4）」）。
 
 ## 验证
 
 ```bash
-herdr-pm sessions --server http://100.111.225.68:7718
-herdr-pm sessions --server http://100.111.225.68:7718 --machine gx10-090e
+agent-pm sessions --server http://100.111.225.68:7718
+agent-pm sessions --server http://100.111.225.68:7718 --machine gx10-090e
 ```
 
 不带 `--server` 时默认 `http://localhost:7718`。输出是一张纯文本表：
@@ -293,8 +303,8 @@ curl -s -XPOST $S/events/2/revert -H "Authorization: Bearer $T"
 
 ### 模型和费用
 
-- 摘要用 `claude-haiku-5-5`，整理用 `claude-sonnet-5-5`，可以在 `understanding.digestModel` / `understanding.curateModel` 里换。
-- 调用走 Claude Agent SDK，用的是 **Claude 订阅**的额度，不是 API key（环境里的 `ANTHROPIC_API_KEY` 会被忽略），没有设额度上限。同一时刻最多一个模型调用；实时 session 先处理，历史导入（采集器第一次看到的旧对话）只在空闲时做。
+- 摘要用 `claude-haiku-5-5`，整理用 `claude-sonnet-5-5`（复核默认跟整理一样）。配置里的 `understanding.digestModel` / `understanding.curateModel` 是默认值；网页 **设置 → 模型** 可以按角色（摘要员、整理员、复核）改，从下一次调用开始生效，不用重启。
+- 调用走 Claude Agent SDK，默认用 **Claude 订阅**的额度（环境里继承来的 `ANTHROPIC_API_KEY` 等一律忽略），没有设额度上限。网页 **设置 → 模型凭据** 可以改成 Claude OAuth token（订阅）或 Anthropic API key（按 token 计费到 API 账户，只有在这里明确选了才会用）。同一时刻最多一个模型调用；实时 session 先处理，历史导入（采集器第一次看到的旧对话）只在空闲时做。
 - 遇到限流或额度用完，调度器暂停并指数退避，`GET /status` 里能看到暂停原因和恢复时间；没处理完的 chunk 和摘要保持"未处理"，恢复后接着做。
 - 每次模型调用（成功或失败）在 `llm_runs` 表里写一行：角色（`digest` / `curate`）、模型、token 数、耗时、是否成功、错误类型。按天汇总用量：
 
@@ -321,6 +331,8 @@ ls -l ~/.config/herdr-pm/claude-oauth-token         # 应为 -rw-------
 ```json
 "understanding": { "oauthTokenFile": "claude-oauth-token" }
 ```
+
+也可以不改配置，在网页 **设置 → 模型凭据** 里粘贴 OAuth token 或 API key：它们写在配置文件旁的 `secrets/` 目录（权限 600），不进数据库，网页上之后只显示末四位。网页里选了凭据就用它；没选时用 `oauthTokenFile`；都没有时用本机登录。
 
 token 只放在这个文件里，**不要写进 launchd plist 或配置 JSON**。没有 `oauthTokenFile` 时，中心用这台机器上 Claude Code 自己的登录（环境变量 `CLAUDE_CODE_OAUTH_TOKEN` 也行），启动时会打印一行提示。整个理解层可以用 `"understanding": { "enabled": false }` 关掉，关掉后 `/status` 显示 `enabled: false`，`/sync` 返回 409。
 
@@ -351,28 +363,50 @@ curl -s -XPOST http://<mac-mini>:7718/sync -H "Authorization: Bearer <userToken>
 
 `/sync` 只立即跑摘要和整理，不会让采集器马上采集（中心没有到采集器的命令通道），所以最新的几秒对话要等采集器下一轮推上来。
 
+### API key：一种凭据，按权限范围区分
+
+中心的所有调用方都出示同一种凭据（Bearer API key），能做什么由它的**权限范围**决定，一个 key 只有一个范围：
+
+| 范围 | 给谁 | 能做什么 |
+|---|---|---|
+| 管理员（`admin`） | 你自己的浏览器或脚本 | 网页上的修改、查看对话原文、立即同步、管理 key 和设置 |
+| Agent（`mcp`） | 各机器上的 coding agent | 只在 `/mcp` 上：读看板、`pm_report` 上报 |
+| herdr 采集器（`ingest:herdr:<机器>`） | 那台机器的 herdr 采集器 | 只能上报那台机器的数据 |
+| Paseo 采集器（`ingest:paseo:<来源>`） | 那个 Paseo 采集器 | 只能写那个来源（来源的机器和 daemon 身份仍在配置里） |
+
+在网页 **API Keys** 页（或 设置 → API Keys）新建、吊销 key：新 key 只在创建时显示一次，中心只存它的哈希，列表里显示前缀和最近使用时间。配置文件里的 `userToken`、`mcpToken`、`collectors`、`paseoCollectors` 照常有效，就是对应范围的 key，在列表里显示为只读（改它们要改配置文件）。所以已经部署的采集器和 agent 不用改；给新机器发 key 时，建议每台机器单独建一个，丢了只吊销那一个。
+
 ### 各台机器上的 agent 接入 MCP
 
 中心在 `http://<mac-mini>:7718/mcp` 提供 MCP（Streamable HTTP，无状态）。工具：`pm_list_projects`、`pm_get_project`、`pm_get_brief`、`pm_timeline`、`pm_search`、`pm_list_sessions`（只读）和 `pm_report`（上报进展：内容存成一段对话片段，下一轮整理时由整理员处理，不会直接改项目）。没有写工具。
 
-每个请求必须带 `Authorization: Bearer <mcpToken>`，否则 401；请求体最大 64 KB，超过返回 413；`userToken` 和采集器的 token 在这里无效，`mcpToken` 在别处也无效。`mcpToken` 会放在每台跑 agent 的机器上，泄露后的影响只是能读项目和上报。
+每个请求必须带 Agent 范围的 key（`mcpToken`，或在 API Keys 页新建的 Agent key；新建时页面会给出下面这条 `claude mcp add` 命令）：`Authorization: Bearer <key>`，否则 401；请求体最大 64 KB，超过返回 413；`userToken` 和采集器的 token 在这里无效，`mcpToken` 在别处也无效。`mcpToken` 会放在每台跑 agent 的机器上，泄露后的影响只是能读项目和上报。
 
 **Claude Code**（每台机器跑一次；默认只对当前目录的项目生效，加 `--scope user` 对这台机器上的所有项目生效）：
 
 ```bash
-claude mcp add --transport http herdr-pm http://<mac-mini>:7718/mcp --header "Authorization: Bearer <mcpToken>"
-claude mcp list        # herdr-pm 应显示 connected
+claude mcp add --transport http agent-pm http://<mac-mini>:7718/mcp --header "Authorization: Bearer <mcpToken>"
+claude mcp list        # agent-pm 应显示 connected
 ```
 
-**Codex**（`~/.codex/config.toml`，按 Codex 的 MCP 文档；Codex 从环境变量读 bearer token，`codex mcp add` 没有传 token 的参数）：
+**Codex**（`~/.codex/config.toml`）：把 key 直接写成请求头。这样不依赖 shell 环境变量，Paseo（daemon 由 launchd 启动，读不到 `~/.zshrc`）起的 Codex 也能连上；配置文件保持 `chmod 600`：
 
 ```toml
-[mcp_servers.herdr-pm]
+[mcp_servers.agent-pm]
 url = "http://<mac-mini>:7718/mcp"
-bearer_token_env_var = "HERDR_PM_MCP_TOKEN"
+http_headers = { Authorization = "Bearer <Agent key>" }
 ```
 
-再在启动 Codex 的 shell 里 `export HERDR_PM_MCP_TOKEN=<mcpToken>`（例如写进 `~/.zshrc` / `~/.bashrc`）。
+`codex mcp add` 只能用环境变量传 token（`--bearer-token-env-var`），那样只对从 shell 启动的 Codex 有效。
+
+**Skill**：仓库的 `skills/agent-pm/SKILL.md` 告诉 agent 什么时候查看板、什么时候用 `pm_report` 上报（开工前读项目简报；做出决定、达到完成标准、被阻塞、发现新课题时上报）。每台机器装一次（Claude Code 和 Codex 共用一份，指向仓库里的文件，更新随仓库走）：
+
+```bash
+mkdir -p ~/.agents/skills ~/.claude/skills ~/.codex/skills
+ln -sfn <仓库>/skills/agent-pm ~/.agents/skills/agent-pm
+ln -sfn ~/.agents/skills/agent-pm ~/.claude/skills/agent-pm
+ln -sfn ~/.agents/skills/agent-pm ~/.codex/skills/agent-pm
+```
 
 手工检查端点（不用任何 agent）：
 
@@ -381,6 +415,12 @@ curl -s http://<mac-mini>:7718/mcp -H "Authorization: Bearer <mcpToken>" \
   -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
+
+### 优先级与阶段：AI 预填，你在同一个字段上改
+
+项目的阶段和优先级都只能取固定选项。优先级 **P0 最高、P3 最低**：P0 阻塞其他工作或有硬期限，现在就要做；P1 当前主线，本周要推进；P2 重要但不紧急，排进计划；P3 可选，有空再做（定义在 `src/shared/vocab.ts`，整理员、复核、网页和 skill 共用）。
+
+整理员新建项目时按定义预填优先级，往前推进阶段；还没有优先级的老项目由一次性复核补上（规则版本 `BOARD_RULES_VERSION` 变了时，所有进行中的项目各复核一次）。网页上它们就是那个字段本身：旁边标「AI 预填」，你直接在同一个下拉框里改。你改过的优先级被锁定（显示锁），AI 之后只能向你提议；阶段的回退、完成、搁置、放弃、合并始终要你确认。阶段下拉框选了新值后先显示为待确认，点「确定」才生效。
 
 ## 网页界面（计划 4）
 
@@ -393,12 +433,12 @@ npm ci
 npm run build:web      # 写到 dist/web，已在 .gitignore 里
 ```
 
-部署到 mac-mini 之后、重启服务之前都要跑一次 `npm run build:web`（`git pull` 带来了网页的改动，`dist/web` 才会更新；只重启不构建，用户看到的还是旧页面）。构建完再 `launchctl kickstart -k "gui/$(id -u)/ai.herdr-pm.server"`。
+部署到 mac-mini 之后、重启服务之前都要跑一次 `npm run build:web`（`git pull` 带来了网页的改动，`dist/web` 才会更新；只重启不构建，用户看到的还是旧页面）。构建完再 `launchctl kickstart -k "gui/$(id -u)/ai.agent-pm.server"`。
 
 **使用**：
 
 - 浏览器打开 `http://<中心机器>:<port>/`（`<port>` 是配置里的 `port`，通过 Tailscale 访问就是 `http://<mac-mini 的 Tailscale 名或 IP>:<port>/`）。读页面不需要 token。
-- 第一次做写操作（改字段、回答问题、关联 session……）时页面会弹出输入框，填配置里的 `userToken`；它存在这个浏览器的 `localStorage` 里（`herdr-pm.userToken`），不会发给别的地方。也可以随时点顶栏的"设置 token"换掉或清除。token 填错了（服务返回 401），页面会再弹出输入框。
+- 第一次做写操作（改字段、回答问题、关联 session……）时页面会弹出输入框，填配置里的 `userToken`；它存在这个浏览器的 `localStorage` 里（`agent-pm.userToken`），不会发给别的地方。也可以随时点顶栏的"设置 token"换掉或清除。token 填错了（服务返回 401），页面会再弹出输入框。
 - 页面通过 `WS /stream` 自动刷新：服务只推"哪里变了"的信号，页面收到后重新读对应的接口，所以别的地方（curator、`curl`、另一个浏览器）做的改动几秒内就会出现在页面上，不用手动刷新。顶栏的点表示这条连接的状态：绿色 `已连接`，黄色 `重连中`（服务重启或网络断了，会按 1、2、4、8、10 秒的间隔自动重连，连上后把所有数据重新读一遍）。
 - 页面是用 `http://` 打开的（Tailscale 下没有 HTTPS），浏览器不开放剪贴板接口时，点 session 标签复制短 ID 会退回到旧的复制方式；两种都不行时，提示条里会直接显示短 ID，手动选中复制。
 - 宽度小于 900px（手机）时右栏排到主列表下面，页面不会出现横向滚动。
@@ -423,24 +463,24 @@ node src/cli.ts server --config /tmp/demo-server.json
 
 ## 在 herdr 里按短 ID 打开（计划 5）
 
-`herdr-pm sessions`、网页和 herdr 侧边栏里看到的都是 8 位短 ID。`herdr-pm open <短ID>` 把它变成一个动作：本机的 agent 直接切过去；其他机器上的 agent 通过 ssh attach 上去：在 herdr 里默认在当前 pane 右边分屏打开，不在 herdr 里（或加 `--remote inline`）就直接在当前终端里 attach。
+`agent-pm sessions`、网页和 herdr 侧边栏里看到的都是 8 位短 ID。`agent-pm open <短ID>` 把它变成一个动作：本机的 agent 直接切过去；其他机器上的 agent 通过 ssh attach 上去：在 herdr 里默认在当前 pane 右边分屏打开，不在 herdr 里（或加 `--remote inline`）就直接在当前终端里 attach。
 
 查找**不依赖中心服务**（mac-mini 没开也能用）：它向本机 herdr 和 `herdr machine list` 里每台已启用的机器各问一次 `agent list`，所有机器同时问，每台最多等 8 秒，所以某台机器关机或网络不通只会多等 8 秒，并提示 `连不上：<机器>（<原因>）`，其他机器上的 agent 照样找得到。中心只在**一个都没找到**时用来补一句说明（"这个 session 已结束""那台机器的采集器离线"），连不上中心就直接说没找到。一个例外：herdr 有时不给 codex pane 报 session ID，而采集器会从 rollout 里读出来，所以网页上的短 ID 在 herdr 里查不到；这时如果中心知道这个 session 还在、并且记着它的 terminal，就用 terminal 在 herdr 自己的列表里找到那个 pane（打开的仍是 herdr 列出的 pane，不是中心的数据）。
 
 **命令行**：
 
 ```bash
-herdr-pm open 0d67da1f                  # 找到并打开
-herdr-pm open                           # 在终端里不带参数：会问"短 ID："
-herdr-pm open 0d67da1f --dry-run        # 只打印"将执行：…"，什么都不动，用来排查
-herdr-pm open 0d67da1f --remote inline  # 远程 agent 就在当前终端里 attach，不分屏
+agent-pm open 0d67da1f                  # 找到并打开
+agent-pm open                           # 在终端里不带参数：会问"短 ID："
+agent-pm open 0d67da1f --dry-run        # 只打印"将执行：…"，什么都不动，用来排查
+agent-pm open 0d67da1f --remote inline  # 远程 agent 就在当前终端里 attach，不分屏
 ```
 
 | 选项 | 默认 | 说明 |
 | --- | --- | --- |
 | `<短ID>` | 交互时询问 | 粘贴也行：前后的空白、换行、引号会去掉，大写会转成小写，整串 key（`claude:0d67da1f-…`）会取冒号后面的部分 |
 | `--remote split\|inline` | `split` | 远程 agent 的打开方式，见下。不在 herdr 里运行（环境变量 `HERDR_ENV` 不是 `1`）时一律 `inline` |
-| `--server <url>` | `$HERDR_PM_SERVER`，再默认 `http://localhost:7718` | 只用于一个都没找到时向中心要说明（或找 herdr 没报 session ID 的 pane） |
+| `--server <url>` | `$AGENT_PM_SERVER`（旧名 `$HERDR_PM_SERVER` 也认），再默认 `http://localhost:7718` | 只用于一个都没找到时向中心要说明（或找 herdr 没报 session ID 的 pane） |
 | `--herdr <path>` | `herdr` | herdr 可执行文件 |
 | `--dry-run` | | 只打印计划，不执行 |
 
@@ -448,21 +488,21 @@ herdr-pm open 0d67da1f --remote inline  # 远程 agent 就在当前终端里 att
 
 退出码：`0` 已打开（`inline` 时是 ssh 的退出码）；`1` 没找到、有歧义、取消或打开失败；`2` 用法错误（短 ID 格式不对、选项不对、非交互又没给短 ID）。输出都是中文。
 
-**安装**：`open` 是同一个 `herdr-pm` 二进制里的一个命令（`scripts/build-collector.sh` 打出来的那个，见「2. 每台机器上的采集器」），只需要放在你**按快捷键的那台机器**上（一般是笔记本）。升级到带 `open` 的版本后，重新构建并覆盖 `~/.local/bin/herdr-pm`；被 attach 的远程机器上不用装它，只要有 herdr。
+**安装**：`open` 是同一个 `agent-pm` 二进制里的一个命令（`scripts/build-collector.sh` 打出来的那个，见「2. 每台机器上的采集器」），只需要放在你**按快捷键的那台机器**上（一般是笔记本）。升级到带 `open` 的版本后，重新构建并覆盖 `~/.local/bin/agent-pm`；被 attach 的远程机器上不用装它，只要有 herdr。
 
-**快捷键**：herdr 的 `[[keys.command]]` 支持 `type = "popup"`（弹出一个会话内的终端），所以直接弹出终端运行 `herdr-pm open`，不用写插件。写进 `~/.config/herdr/config.toml`，然后 `herdr server reload-config`：
+**快捷键**：herdr 的 `[[keys.command]]` 支持 `type = "popup"`（弹出一个会话内的终端），所以直接弹出终端运行 `agent-pm open`，不用写插件。写进 `~/.config/herdr/config.toml`，然后 `herdr server reload-config`：
 
 ```toml
 [[keys.command]]
 key = "prefix+g"
 type = "popup"
-command = "/Users/<你>/.local/bin/herdr-pm open --server http://<mac-mini 地址>:7718"
+command = "/Users/<你>/.local/bin/agent-pm open --server http://<mac-mini 地址>:7718"
 width = "80%"
 height = "60%"
-description = "herdr-pm: 按短 ID 打开 agent"
+description = "agent-pm: 按短 ID 打开 agent"
 ```
 
-命令里要把中心服务显式带上：不带 `--server`（或环境变量 `HERDR_PM_SERVER`）时默认连 `http://localhost:7718`，笔记本上没有中心服务，"已结束 / 采集器离线"这类说明就不会出现。
+命令里要把中心服务显式带上：不带 `--server`（或环境变量 `AGENT_PM_SERVER`）时默认连 `http://localhost:7718`，笔记本上没有中心服务，"已结束 / 采集器离线"这类说明就不会出现。
 
 按 `prefix+g`，弹窗里输入（或粘贴）短 ID，回车。
 
@@ -535,27 +575,27 @@ node src/cli.ts collect-paseo --config ~/.config/herdr-pm/paseo-mac-mini.json
 macOS（每个来源一个 job，和 herdr 采集器的 job 分开）：
 
 ```bash
-mkdir -p ~/Library/Logs/herdr-pm
+mkdir -p ~/Library/Logs/agent-pm
 sed -e "s#__SOURCE_ID__#paseo-mac-mini#g" -e "s#__NODE_BIN__#$(command -v node)#g" -e "s#__REPO__#$PWD#g" \
     -e "s#__CONFIG_PATH__#$HOME/.config/herdr-pm/paseo-mac-mini.json#g" -e "s#__HOME__#$HOME#g" \
-    deploy/launchd/ai.herdr-pm.paseo-collector.plist > ~/Library/LaunchAgents/ai.herdr-pm.paseo-collector.paseo-mac-mini.plist
-launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/ai.herdr-pm.paseo-collector.paseo-mac-mini.plist
-# 停用：launchctl bootout "gui/$(id -u)/ai.herdr-pm.paseo-collector.paseo-mac-mini"
+    deploy/launchd/ai.agent-pm.paseo-collector.plist > ~/Library/LaunchAgents/ai.agent-pm.paseo-collector.paseo-mac-mini.plist
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/ai.agent-pm.paseo-collector.paseo-mac-mini.plist
+# 停用：launchctl bootout "gui/$(id -u)/ai.agent-pm.paseo-collector.paseo-mac-mini"
 ```
 
-Linux（systemd 用户服务模板，实例名就是 sourceId，配置在 `~/.config/herdr-pm/<sourceId>.json`，仓库默认在 `~/herdr-pm`，别处用 `systemctl --user edit` 设 `HERDR_PM_REPO`）：
+Linux（systemd 用户服务模板，实例名就是 sourceId，配置在 `~/.config/herdr-pm/<sourceId>.json`，仓库默认在 `~/agent-pm`，别处用 `systemctl --user edit` 设 `AGENT_PM_REPO`）：
 
 ```bash
-cp deploy/systemd/herdr-pm-paseo-collector@.service ~/.config/systemd/user/
-systemctl --user daemon-reload && systemctl --user enable --now herdr-pm-paseo-collector@paseo-gx10
-# 停用：systemctl --user disable --now herdr-pm-paseo-collector@paseo-gx10
+cp deploy/systemd/agent-pm-paseo-collector@.service ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now agent-pm-paseo-collector@paseo-gx10
+# 停用：systemctl --user disable --now agent-pm-paseo-collector@paseo-gx10
 ```
 
 ### 上线顺序与回退
 
 1. **备份中心数据库**（中心停着时复制 `herdr-pm.db*`，或 `sqlite3 herdr-pm.db ".backup herdr-pm.pre-v5.db"`）。
 2. 升级中心代码并重启。启动时自动做 v5 迁移（只追加表和列：已有 session、chunk、digest 的 ID 和项目引用不变；每台机器成为 `herdr:<machine>` 来源，已有 session 回填为它的观察，字节游标从已有 chunk 初始化）。旧 herdr 采集器**不用改配置、不用重装**，`/ingest/snapshot`、`/ingest/chunks`、`/ingest/offset` 照旧。
-3. 确认 herdr 数据照常更新（`herdr-pm sessions`、网页）。
+3. 确认 herdr 数据照常更新（`agent-pm sessions`、网页）。
 4. 在中心配置里加 `paseoCollectors` 并重启中心，再启动 Paseo 采集器。网页的会话行会出现来源标签（herdr / Paseo、主内容 / 备用、离线或滞后原因）。
 5. 回退：停用 Paseo 采集器即可回到只采 herdr。中心要继续用支持 v5 的版本；**不要**用迁移前的旧中心程序打开迁移后的数据库（要回到旧程序，就连同第 1 步的备份一起回退）。
 
@@ -565,13 +605,13 @@ systemctl --user daemon-reload && systemctl --user enable --now herdr-pm-paseo-c
 - 不读未加载的 agent（见上）；Claude / Codex 以外的 provider 只保证状态，未知的时间线行只计数，不当作正文。
 - 同一原生 ID 出现在两台机器上时保守地保留为两个会话（键带 `@<machine>`，并标「身份待核对」）；身份迟到、两边都已有内容时，后到一边的内容只作证据保存，不自动拼接。
 - 时间线是 provider 的投影，不等于原始 transcript；daemon 自身丢失的历史（`gap`、窗口外的历史）记为缺口。
-- `herdr-pm open` 对只由 Paseo 看到的会话只提示「请在 Paseo 中打开」，不伪造 herdr pane。
+- `agent-pm open` 对只由 Paseo 看到的会话只提示「请在 Paseo 中打开」，不伪造 herdr pane。
 
 ## 部署验收（计划 1 完成的标志）
 
 - [ ] 四台机器上本地执行 `herdr integration status`，claude 和 codex integration 都已安装。
 - [ ] mac-mini 上用 launchd 跑中心服务；笔记本、mac-mini、gx10-090e、gx10-c757 各跑一个采集器。
-- [ ] `herdr-pm sessions --server http://<mac-mini 的 Tailscale IP>:7718` 列出四台机器上的全部活跃 session。
+- [ ] `agent-pm sessions --server http://<mac-mini 的 Tailscale IP>:7718` 列出四台机器上的全部活跃 session。
 - [ ] 让笔记本休眠超过 3 分钟：它的 session 显示 `offline`；唤醒后恢复 `live` 状态（`working` / `idle` 等），chunk 继续增长，没有重复。
 - [ ] 在 herdr 里关掉一个 agent：下一轮（约 10 秒）它的状态变成 `ended`。
 
@@ -583,6 +623,6 @@ npx vitest run     # 测试
 npx tsc            # 类型检查（不产出文件）
 ```
 
-Node 26 直接运行 `.ts`：`node src/cli.ts <command> ...`；`npm link` 之后 `herdr-pm` 命令可直接用（`package.json` 的 `bin` 指向 `src/cli.ts`）。本地配置写成 `config/*.local.json`（已在 `.gitignore` 里）。
+Node 26 直接运行 `.ts`：`node src/cli.ts <command> ...`；`npm link` 之后 `agent-pm` 命令可直接用（`package.json` 的 `bin` 指向 `src/cli.ts`）。本地配置写成 `config/*.local.json`（已在 `.gitignore` 里）。
 
 `src/cli.ts` 只在 `server` 命令里动态 `import()` 服务端模块（`node:sqlite`、hono）：采集器二进制是 bun 编译的，bun 没有 `node:sqlite`，所以 `collect`、`sessions` 和 `open` 路径不能加载它们（`open` 的代码在 `src/lookup/`，只能 import node 内置模块、`src/shared/` 和 zod）。Paseo 采集器（`src/paseo-collector/`）同理只由 `collect-paseo` 动态加载，SDK 只在 `sdk.ts` 里动态 `import()`；`tests/cli.test.ts` 守着这些边界。Paseo 的故障路径测试用 `tests/helpers/fake-paseo.ts`（可控的假 daemon）和 `tests/helpers/center.ts`（临时数据库上的真实中心）；对真实 daemon 的只读契约测试：`PASEO_CONTRACT_URL=ws://<listen>/ws npx vitest run tests/paseo-collector/sdk.test.ts`。

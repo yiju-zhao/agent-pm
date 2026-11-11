@@ -186,12 +186,12 @@ test('a row has the session tag, the title, the cwd and when it was last seen', 
   await renderPage();
   const line = row('接入 cannbench 数据');
   expect(within(line).getByRole('button', { name: /gx10-090e · claude · ●运行中 · 0d67da1f/ })).toBeTruthy();
-  expect(within(line).getByText('/home/eason/projects/herdr-pm')).toBeTruthy();
+  expect(within(line).getByText('/home/eason/projects/agent-pm')).toBeTruthy();
   expect(within(line).getByText('5 分钟前')).toBeTruthy();
 });
 
 test('a long cwd is cut in the middle and keeps the full path in its title', async () => {
-  const cwd = '/Users/eason/Documents/nasa718/experiments/2026-10/very-long-directory-name/herdr-pm-web';
+  const cwd = '/Users/eason/Documents/nasa718/experiments/2026-10/very-long-directory-name/agent-pm-web';
   sessions = [sessionItem({ cwd })];
   await renderPage();
   const shown = row('接入 cannbench 数据').querySelector('.cwd') as HTMLElement;
@@ -199,7 +199,7 @@ test('a long cwd is cut in the middle and keeps the full path in its title', asy
   expect(shown.textContent).toContain('…');
   expect(shown.textContent!.length).toBeLessThan(cwd.length);
   expect(shown.textContent!.startsWith('/Users/')).toBe(true);
-  expect(shown.textContent!.endsWith('herdr-pm-web')).toBe(true);
+  expect(shown.textContent!.endsWith('agent-pm-web')).toBe(true);
 });
 
 test('a short cwd is shown whole', async () => {

@@ -245,7 +245,7 @@ describe('identities', () => {
 describe('legacy compatibility', () => {
   let dir: string;
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'herdr-pm-mig-'));
+    dir = await mkdtemp(join(tmpdir(), 'agent-pm-mig-'));
   });
   afterEach(async () => {
     await rm(dir, { recursive: true, force: true });

@@ -11,7 +11,7 @@ const session = {
   machine: 'gx10-090e',
   agent_kind: 'claude',
   effective_status: 'working',
-  title: '修 herdr-pm 的采集器',
+  title: '修 agent-pm 的采集器',
 };
 
 function renderTag(over: Partial<typeof session> = {}) {
@@ -43,7 +43,7 @@ test('shows machine · agent · ●status · short id, with the session title as
   renderTag();
   const button = screen.getByRole('button');
   expect(button.textContent).toBe('gx10-090e · claude · ●运行中 · 0d67da1f');
-  expect(button.getAttribute('title')).toBe('修 herdr-pm 的采集器');
+  expect(button.getAttribute('title')).toBe('修 agent-pm 的采集器');
   expect(button.getAttribute('type')).toBe('button');
 });
 

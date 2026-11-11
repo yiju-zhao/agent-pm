@@ -86,7 +86,7 @@ export class PaseoCollector {
   }
 
   private log(msg: string): void {
-    this.deps.log(`${this.deps.now().toISOString()} herdr-pm collect-paseo [${this.cfg.sourceId}]: ${msg}`);
+    this.deps.log(`${this.deps.now().toISOString()} agent-pm collect-paseo [${this.cfg.sourceId}]: ${msg}`);
   }
 
   private connected(): boolean {

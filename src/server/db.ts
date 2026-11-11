@@ -372,6 +372,28 @@ export const MIGRATIONS: string[] = [
     WHERE c.kind = 'transcript' AND s.machine IS NOT NULL AND s.machine != '' AND c.offset_end IS NOT NULL
     GROUP BY c.session_key;
   `,
+  // v6: API keys and settings. One kind of key for everyone (the user, agents, collectors), told apart by its scope;
+  // only a key's hash is stored. Tokens in the server config keep working beside these (see server/keys.ts).
+  // `settings` holds what the web UI may change at run time (models; which provider credential is in use), never a
+  // secret: provider secrets live in files next to the config.
+  `
+  CREATE TABLE api_keys (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    prefix TEXT NOT NULL,
+    hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    created_by TEXT,
+    last_used_at TEXT,
+    revoked_at TEXT
+  );
+  CREATE TABLE settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  `,
 ];
 
 /** Opens (creating if needed) the central database in WAL mode and applies pending migrations. */

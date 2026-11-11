@@ -162,7 +162,7 @@ test('the header has priority, title, stage, and when it was created and last ac
   await renderPage();
   expect((screen.getByRole('combobox', { name: '优先级' }) as HTMLSelectElement).value).toBe('P1');
   expect(screen.getByRole('button', { name: 'dLLM 评测框架' })).toBeTruthy();
-  expect(screen.getByText('当前阶段：验证')).toBeTruthy();
+  expect((screen.getByRole('combobox', { name: '阶段' }) as HTMLSelectElement).value).toBe('verify');
   expect(screen.getByText('创建于 10/02 · 最近活动 2 小时前')).toBeTruthy();
 });
 
@@ -171,7 +171,17 @@ test('a project without priority shows 未定 in the menu', async () => {
   await renderPage();
   const menu = screen.getByRole('combobox', { name: '优先级' }) as HTMLSelectElement;
   expect(menu.value).toBe('');
-  expect(within(menu).getAllByRole('option').map((o) => o.textContent)).toEqual(['未定', 'P0', 'P1', 'P2', 'P3']);
+  expect(within(menu).getAllByRole('option').map((o) => o.textContent)).toEqual(['未定', 'P0 · 最高', 'P1 · 高', 'P2 · 中', 'P3 · 低']);
+});
+
+test('a priority the AI pre-filled says so next to the same menu; one the user set shows the lock instead', async () => {
+  project = detail({ priority: 'P2', field_sources: { stage: 'ai', priority: 'ai' } });
+  await renderPage();
+  expect(within(screen.getByRole('combobox', { name: '优先级' }).parentElement!).getByText('AI 预填')).toBeTruthy();
+  cleanup();
+  project = detail({ priority: 'P2', locks: ['priority'], field_sources: { stage: 'user', priority: 'user' } });
+  await renderPage();
+  expect(within(screen.getByRole('combobox', { name: '优先级' }).parentElement!).queryByText('AI 预填')).toBeNull();
 });
 
 test('picking a priority sends it; 未定 sends null; the page reads the project again', async () => {
@@ -323,7 +333,7 @@ test('a todo that points to a deleted milestone is still on the page, under 未�
 
 test('the stage menu offers the other projects as merge targets, not the project itself', async () => {
   await renderPage();
-  fireEvent.change(screen.getByRole('combobox', { name: '新阶段' }), { target: { value: 'merged' } });
+  fireEvent.change(screen.getByRole('combobox', { name: '阶段' }), { target: { value: 'merged' } });
   const target = screen.getByRole('combobox', { name: '合并到' });
   expect(within(target).getAllByRole('option').map((o) => o.textContent)).toEqual(['选择目标项目', 'loopwm']);
   fireEvent.change(target, { target: { value: 'p_2' } });
@@ -483,7 +493,7 @@ test('the merge menu says 读不到项目列表 when the project list cannot be 
   });
   await renderPage();
   await waitFor(() => expect(reads('/projects')).toBe(1));
-  fireEvent.change(screen.getByRole('combobox', { name: '新阶段' }), { target: { value: 'merged' } });
+  fireEvent.change(screen.getByRole('combobox', { name: '阶段' }), { target: { value: 'merged' } });
   expect(await screen.findByText('读不到项目列表')).toBeTruthy();
   expect(screen.queryByText('没有可以合并进去的项目')).toBeNull();
 });

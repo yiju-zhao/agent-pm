@@ -18,7 +18,7 @@ const SESSIONS = [
 let dir: string;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'herdr-pm-cli-'));
+  dir = mkdtempSync(join(tmpdir(), 'agent-pm-cli-'));
 });
 
 afterEach(() => {
@@ -133,7 +133,7 @@ test('unknown command prints usage and exits 2', async () => {
   expect(code).toBe(2);
   expect(stdout).toBe('');
   expect(stderr).toContain('frobnicate');
-  for (const command of ['herdr-pm server', 'herdr-pm collect', 'herdr-pm sessions']) expect(stderr).toContain(command);
+  for (const command of ['agent-pm server', 'agent-pm collect', 'agent-pm sessions']) expect(stderr).toContain(command);
 });
 
 test('no command and unknown options print usage and exit 2; --help prints usage and exits 0', async () => {
@@ -141,18 +141,18 @@ test('no command and unknown options print usage and exit 2; --help prints usage
   const badOption = await run(['sessions', '--bogus']);
   expect(badOption.code).toBe(2);
   expect(badOption.stderr).toContain('--bogus');
-  expect(badOption.stderr).toContain('herdr-pm sessions');
+  expect(badOption.stderr).toContain('agent-pm sessions');
 
   const help = await run(['--help']);
   expect(help.code).toBe(0);
-  expect(help.stdout).toContain('herdr-pm collect');
+  expect(help.stdout).toContain('agent-pm collect');
   expect(help.stderr).toBe('');
 });
 
 test('help lists open', async () => {
   const help = await run(['help']);
   expect(help.code).toBe(0);
-  expect(help.stdout).toContain('herdr-pm open [<短ID>] [--remote split|inline] [--dry-run]');
+  expect(help.stdout).toContain('agent-pm open [<短ID>] [--remote split|inline] [--dry-run]');
   expect(help.stdout).toContain('open an agent by short id in herdr');
 });
 
@@ -175,7 +175,7 @@ test('open without a short id outside a terminal is a usage error', async () => 
   expect(code).toBe(2);
   expect(stdout).toBe('');
   expect(stderr).toContain('缺少短 ID');
-  expect(stderr).toContain('herdr-pm open');
+  expect(stderr).toContain('agent-pm open');
   expect(urls).toEqual([]);
 });
 

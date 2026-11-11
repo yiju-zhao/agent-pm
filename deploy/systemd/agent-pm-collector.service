@@ -1,17 +1,17 @@
 # Collector (run on every Linux machine: gx10-090e, gx10-c757). systemd *user* service, see README.md:
 #   mkdir -p ~/.config/systemd/user ~/.config/herdr-pm ~/.local/bin
-#   cp herdr-pm-collector.service ~/.config/systemd/user/
-#   systemctl --user daemon-reload && systemctl --user enable --now herdr-pm-collector
+#   cp agent-pm-collector.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now agent-pm-collector
 #   loginctl enable-linger "$USER"        # keep it running without an open login session
-# %h is the home directory. Binary: ~/.local/bin/herdr-pm. Config: ~/.config/herdr-pm/collector.json.
-# Logs: journalctl --user -u herdr-pm-collector -f
+# %h is the home directory. Binary: ~/.local/bin/agent-pm. Config: ~/.config/herdr-pm/collector.json.
+# Logs: journalctl --user -u agent-pm-collector -f
 [Unit]
-Description=herdr-pm collector
+Description=agent-pm collector
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=%h/.local/bin/herdr-pm collect --config %h/.config/herdr-pm/collector.json
+ExecStart=%h/.local/bin/agent-pm collect --config %h/.config/herdr-pm/collector.json
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Restart=always
 RestartSec=5

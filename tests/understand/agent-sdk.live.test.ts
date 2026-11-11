@@ -62,7 +62,7 @@ test.skipIf(!live)(
 test.skipIf(!live)(
   'a digest call returns output that matches DigestSchema',
   async () => {
-    const text = '用户：帮我把 herdr-pm 的摘要员写完，先做窗口切分。\n助手：好的，我先写 nextWindow，再补测试。已完成窗口切分，测试通过。\n用户：下一步接调度器。';
+    const text = '用户：帮我把 agent-pm 的摘要员写完，先做窗口切分。\n助手：好的，我先写 nextWindow，再补测试。已完成窗口切分，测试通过。\n用户：下一步接调度器。';
     const { system, prompt } = buildDigestPrompt(
       {
         sessionKey: 'claude:live1111aaaabbbb',
@@ -76,9 +76,9 @@ test.skipIf(!live)(
         hasReport: false,
       },
       {
-        session: { agent_kind: 'claude', machine: 'laptop', cwd: '/work/herdr-pm', title: '写摘要员' },
+        session: { agent_kind: 'claude', machine: 'laptop', cwd: '/work/agent-pm', title: '写摘要员' },
         linkedBriefs: [],
-        projectIndex: '- p_1 · 做 herdr-pm · 构建 · P1 · 把分散的 agent 工作收拢成看板',
+        projectIndex: '- p_1 · 做 agent-pm · 构建 · P1 · 把分散的 agent 工作收拢成看板',
       },
     );
     const r = await agentSdkRunner({ oauthToken })({

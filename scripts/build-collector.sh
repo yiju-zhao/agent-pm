@@ -4,13 +4,13 @@
 #   scripts/build-collector.sh                          # both targets
 #   scripts/build-collector.sh bun-linux-arm64          # one target
 #
-# Output: dist/herdr-pm-<target>   (dist/ is gitignored)
+# Output: dist/agent-pm-<target>   (dist/ is gitignored)
 #   bun-darwin-arm64  laptop, mac-mini (macOS, Apple silicon)
 #   bun-linux-arm64   gx10-090e, gx10-c757 (Linux, `uname -m` = aarch64)
 #
 # --splitting is required: cli.ts loads the server (node:sqlite, which bun does not have) with a dynamic
 # import, and without splitting bun hoists that import to the top of the single bundle, so even
-# `herdr-pm collect` would die at startup with "No such built-in module: node:sqlite". With splitting the
+# `agent-pm collect` would die at startup with "No such built-in module: node:sqlite". With splitting the
 # server code is a separate chunk that only the `server` command loads (run the server with node, not this binary).
 #
 # The Claude Agent SDK (used only by the server's understanding layer, behind dynamic imports) is marked --external:
@@ -46,14 +46,14 @@ for target in "${targets[@]}"; do
       exit 2
       ;;
   esac
-  echo "building dist/herdr-pm-$target"
-  bun build src/cli.ts --compile --splitting --external @anthropic-ai/claude-agent-sdk --external @getpaseo/client --target="$target" --outfile "dist/herdr-pm-$target"
+  echo "building dist/agent-pm-$target"
+  bun build src/cli.ts --compile --splitting --external @anthropic-ai/claude-agent-sdk --external @getpaseo/client --target="$target" --outfile "dist/agent-pm-$target"
   if [ "$target" = bun-darwin-arm64 ]; then
     if ! command -v codesign >/dev/null 2>&1; then
-      echo "build-collector: codesign not found; dist/herdr-pm-$target will be killed by macOS until it is signed on a Mac" >&2
+      echo "build-collector: codesign not found; dist/agent-pm-$target will be killed by macOS until it is signed on a Mac" >&2
       exit 1
     fi
-    codesign --remove-signature "dist/herdr-pm-$target"
-    codesign --force --sign - "dist/herdr-pm-$target"
+    codesign --remove-signature "dist/agent-pm-$target"
+    codesign --force --sign - "dist/agent-pm-$target"
   fi
 done

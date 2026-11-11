@@ -132,7 +132,7 @@ export function card(over: Partial<ProjectCard> = {}): ProjectCard {
 
 /** A project as the detail page reads it: the card plus nothing in any list unless a test fills it. */
 export function detail(over: Partial<ProjectDetail> = {}): ProjectDetail {
-  return { ...card(), milestones: [], todos: [], decisions: [], blockers: [], contributions: [], events: [], tombstones: [], ...over };
+  return { ...card(), milestones: [], todos: [], decisions: [], blockers: [], contributions: [], events: [], tombstones: [], field_sources: { stage: 'user', priority: null }, ...over };
 }
 
 /** A session's contribution to the project as the detail carries it: the session is `tag()` unless a test says `null` (purged). */
@@ -186,7 +186,7 @@ export function sessionItem(over: Partial<SessionListItem> = {}): SessionListIte
     terminal_id: 't1',
     workspace_id: 'w1',
     tab_id: 'tab1',
-    cwd: '/home/eason/projects/herdr-pm',
+    cwd: '/home/eason/projects/agent-pm',
     title: '接入 cannbench 数据',
     live_status: 'working',
     lifecycle: 'live',

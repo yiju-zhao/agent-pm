@@ -9,7 +9,7 @@ let claudeDir: string;
 let codexDir: string;
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'herdr-pm-locate-'));
+  root = await mkdtemp(join(tmpdir(), 'agent-pm-locate-'));
   claudeDir = join(root, 'claude');
   codexDir = join(root, 'codex');
 });

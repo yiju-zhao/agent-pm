@@ -73,9 +73,9 @@ afterEach(() => {
 });
 
 test('shows the prompt, the project it is about, and one button per option', () => {
-  render(<QuestionCard question={question()} projectTitle="herdr-pm" />);
+  render(<QuestionCard question={question()} projectTitle="agent-pm" />);
   expect(screen.getByText('这个项目可以收尾了吗？')).toBeTruthy();
-  expect(screen.getByText('herdr-pm')).toBeTruthy();
+  expect(screen.getByText('agent-pm')).toBeTruthy();
   for (const label of ['标记完成', '搁置', '都不是']) expect(screen.getByRole('button', { name: label })).toBeTruthy();
 });
 

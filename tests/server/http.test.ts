@@ -226,7 +226,7 @@ test('a sidebar label failure does not fail the snapshot push: it is stored and 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, labels: [] });
     expect(logged).toHaveBeenCalledTimes(1);
-    expect(String(logged.mock.calls[0]![0])).toContain('herdr-pm server: sidebar labels failed');
+    expect(String(logged.mock.calls[0]![0])).toContain('agent-pm server: sidebar labels failed');
   } finally {
     logged.mockRestore();
   }
