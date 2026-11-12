@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useCallback, useMemo, useState, useSyncExternalStore } from 'react';
 import type { SchedulerStatus } from '../../src/understand/status.ts';
-import { AUTH_EVENT, apiSend, errorText } from './api.ts';
+import { apiSend, errorText } from './api.ts';
 import { SettingsModal } from './components/settings-modal.tsx';
 import type { SettingsTab } from './components/settings-modal.tsx';
 import { Icon } from './components/icon.tsx';
@@ -112,13 +112,6 @@ export function App() {
   const route = useMemo(() => parseHash(hash), [hash]);
   const [settingsTab, setSettingsTab] = useState<SettingsTab | null>(null);
   const closeSettings = useCallback(() => setSettingsTab(null), []);
-
-  // A write without a key, or with one the server refused, asks for the key here.
-  useEffect(() => {
-    const open = () => setSettingsTab('access');
-    window.addEventListener(AUTH_EVENT, open);
-    return () => window.removeEventListener(AUTH_EVENT, open);
-  }, []);
 
   return (
     <>

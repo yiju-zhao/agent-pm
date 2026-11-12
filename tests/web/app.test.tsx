@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 import type { SchedulerStatus } from '../../src/understand/status.ts';
-import { AUTH_EVENT, TOKEN_KEY, setToken } from '../../web/src/api.ts';
+import { setToken } from '../../web/src/api.ts';
 import { App } from '../../web/src/app.tsx';
 import { ToastProvider, useToast } from '../../web/src/components/toast.tsx';
 import type { StreamState, Topic } from '../../web/src/stream.ts';
@@ -192,7 +192,7 @@ test('立即同步 posts /sync with the token and says 已开始同步', async (
   expect(await screen.findByText('已开始同步')).toBeTruthy();
   const sync = fetchMock.mock.calls.find(([url]) => url === '/sync');
   expect(sync?.[1]?.method).toBe('POST');
-  expect(sync?.[1]?.headers).toEqual({ Authorization: 'Bearer tok-1' });
+  expect(sync?.[1]?.headers).toEqual({ Authorization: 'Bearer tok-1', 'X-Agent-PM': 'browser' });
 });
 
 test('立即同步 shows the rejection in Chinese', async () => {
@@ -204,89 +204,32 @@ test('立即同步 shows the rejection in Chinese', async () => {
   expect(await screen.findByText('理解层没有开启')).toBeTruthy();
 });
 
-test('立即同步 without a token opens the token dialog and says why', async () => {
+test('立即同步 uses a browser session without requiring a key', async () => {
   serve(understanding());
   renderApp();
   await screen.findByText('空闲');
   fireEvent.click(screen.getByRole('button', { name: '立即同步' }));
-  expect(await screen.findByRole('dialog')).toBeTruthy();
-  expect(screen.getByText('需要先设置 token')).toBeTruthy();
-  expect(fetchMock.mock.calls.some(([url]) => url === '/sync')).toBe(false);
-});
-
-test('AUTH_EVENT opens the token dialog and saving stores the token', async () => {
-  serve(understanding());
-  renderApp();
-  await screen.findByText('空闲');
-  expect(screen.queryByRole('dialog')).toBeNull();
-
-  act(() => {
-    window.dispatchEvent(new Event(AUTH_EVENT));
-  });
-  const dialog = await screen.findByRole('dialog');
-  const input = within(dialog).getByLabelText('API key');
-  fireEvent.change(input, { target: { value: '  my-secret-token ' } });
-  fireEvent.click(within(dialog).getByRole('button', { name: '保存' }));
-
-  expect(localStorage.getItem(TOKEN_KEY)).toBe('my-secret-token');
+  expect(await screen.findByText('已开始同步')).toBeTruthy();
+  expect(fetchMock.mock.calls.find(([url]) => url === '/sync')?.[1]?.credentials).toBe('same-origin');
   expect(screen.queryByRole('dialog')).toBeNull();
 });
 
-test('a token the browser will not store keeps the dialog open and says so', async () => {
-  serve(understanding());
-  renderApp();
-  await screen.findByText('空闲');
-  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-    throw new Error('blocked');
-  });
+test('设置 shows account and password controls, with no browser API key field', async () => {
+  serve(understanding()); renderApp(); await screen.findByText('空闲');
   fireEvent.click(screen.getByRole('button', { name: '设置' }));
   const dialog = await screen.findByRole('dialog');
-  fireEvent.change(within(dialog).getByLabelText('API key'), { target: { value: 'my-secret-token' } });
-  fireEvent.click(within(dialog).getByRole('button', { name: '保存' }));
-  expect(await screen.findByText('无法保存 key（浏览器禁止了本地存储）')).toBeTruthy();
-  expect(screen.getByRole('dialog')).toBeTruthy();
-});
-
-test('the 设置 button opens the dialog; 清除 removes the stored key', async () => {
-  serve(understanding());
-  setToken('old-token');
-  renderApp();
-  await screen.findByText('空闲');
-  fireEvent.click(screen.getByRole('button', { name: '设置' }));
-  const dialog = await screen.findByRole('dialog');
-  fireEvent.click(within(dialog).getByRole('button', { name: '清除' }));
-  expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
+  expect(within(dialog).getByLabelText('当前密码')).toBeTruthy();
+  expect(within(dialog).queryByLabelText('API key')).toBeNull();
+  expect((within(dialog).getByRole('button', { name: '保存密码' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }));
   expect(screen.queryByRole('dialog')).toBeNull();
 });
 
-test('closing the token dialog with 取消 or Escape keeps the stored token', async () => {
-  serve(understanding());
-  setToken('keep-me');
-  renderApp();
-  await screen.findByText('空闲');
-
+test('Escape closes account settings', async () => {
+  serve(understanding()); renderApp(); await screen.findByText('空闲');
   fireEvent.click(screen.getByRole('button', { name: '设置' }));
-  let dialog = await screen.findByRole('dialog');
-  fireEvent.change(within(dialog).getByLabelText('API key'), { target: { value: 'typed-but-not-saved' } });
-  fireEvent.click(within(dialog).getByRole('button', { name: '取消' }));
+  fireEvent.keyDown(await screen.findByRole('dialog'), { key: 'Escape' });
   expect(screen.queryByRole('dialog')).toBeNull();
-
-  fireEvent.click(screen.getByRole('button', { name: '设置' }));
-  dialog = await screen.findByRole('dialog');
-  fireEvent.keyDown(dialog, { key: 'Escape' });
-  expect(screen.queryByRole('dialog')).toBeNull();
-  expect(localStorage.getItem(TOKEN_KEY)).toBe('keep-me');
-});
-
-test('保存 does nothing for an empty token', async () => {
-  serve(understanding());
-  renderApp();
-  await screen.findByText('空闲');
-  fireEvent.click(screen.getByRole('button', { name: '设置' }));
-  const dialog = await screen.findByRole('dialog');
-  const save = within(dialog).getByRole('button', { name: '保存' }) as HTMLButtonElement;
-  expect(save.disabled).toBe(true);
-  expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
 });
 
 test('the connection dot reads 已连接, 重连中 or 已断开', async () => {

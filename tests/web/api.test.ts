@@ -32,12 +32,11 @@ async function rejection(promise: Promise<unknown>): Promise<ApiError> {
   throw new Error('expected the promise to reject');
 }
 
-test('apiSend without a token does not fetch', async () => {
-  const err = await rejection(apiSend('POST', '/sync'));
-  expect(fetchMock).not.toHaveBeenCalled();
-  expect(err.status).toBe(401);
-  expect(err.code).toBe('no_token');
-  expect(onAuth).toHaveBeenCalledTimes(1);
+test('apiSend without a bearer key uses the browser session cookie', async () => {
+  fetchMock.mockResolvedValue(json({ accepted: true }, 202));
+  await apiSend('POST', '/sync');
+  expect(fetchMock.mock.calls[0][1]).toMatchObject({ credentials: 'same-origin', headers: { 'X-Agent-PM': 'browser' } });
+  expect(onAuth).not.toHaveBeenCalled();
 });
 
 test('apiSend sends the bearer token and JSON body', async () => {
@@ -48,7 +47,7 @@ test('apiSend sends the bearer token and JSON body', async () => {
   const [url, init] = fetchMock.mock.calls[0];
   expect(url).toBe('/projects');
   expect(init?.method).toBe('POST');
-  expect(init?.headers).toEqual({ Authorization: 'Bearer tok-123', 'Content-Type': 'application/json' });
+  expect(init?.headers).toEqual({ Authorization: 'Bearer tok-123', 'Content-Type': 'application/json', 'X-Agent-PM': 'browser' });
   expect(init?.body).toBe(JSON.stringify({ title: '新项目' }));
   expect(onAuth).not.toHaveBeenCalled();
 });
@@ -58,7 +57,7 @@ test('apiSend without a body sends no body and no content type', async () => {
   fetchMock.mockResolvedValue(json({ accepted: true }, 202));
   await apiSend('POST', '/sync');
   const [, init] = fetchMock.mock.calls[0];
-  expect(init?.headers).toEqual({ Authorization: 'Bearer tok-123' });
+  expect(init?.headers).toEqual({ Authorization: 'Bearer tok-123', 'X-Agent-PM': 'browser' });
   expect(init?.body).toBeUndefined();
 });
 
@@ -81,7 +80,7 @@ test('401 dispatches AUTH_EVENT', async () => {
   const err = await rejection(apiSend('POST', '/sync'));
   expect(err.status).toBe(401);
   expect(err.code).toBe('unauthorized');
-  expect(errorText(err)).toBe('需要先设置 token');
+  expect(errorText(err)).toBe('请先登录管理员账号');
   expect(onAuth).toHaveBeenCalledTimes(1);
 });
 
@@ -138,12 +137,11 @@ test('apiGet with auth sends the bearer token', async () => {
   expect(fetchMock.mock.calls[0][1]?.headers).toEqual({ Authorization: 'Bearer tok' });
 });
 
-test('apiGet with auth and no token does not fetch, dispatches AUTH_EVENT and throws no_token', async () => {
-  const err = await rejection(apiGet('/evidence/digest:3', { auth: true }));
-  expect(fetchMock).not.toHaveBeenCalled();
-  expect(err.status).toBe(401);
-  expect(err.code).toBe('no_token');
-  expect(onAuth).toHaveBeenCalledTimes(1);
+test('authenticated reads use the browser session without a bearer key', async () => {
+  fetchMock.mockResolvedValue(json({ ref: 'digest:3' }));
+  await apiGet('/evidence/digest:3', { auth: true });
+  expect(fetchMock.mock.calls[0][1]).toMatchObject({ credentials: 'same-origin', headers: {} });
+  expect(onAuth).not.toHaveBeenCalled();
 });
 
 test('a stored empty token counts as no token', async () => {
@@ -190,8 +188,8 @@ test('sessionPath encodes the colons in a session key', () => {
 
 test('errorText maps the known codes to Chinese and passes other server messages through', () => {
   const table: Array<[number, string, string]> = [
-    [401, 'no_token', '需要先设置 token'],
-    [401, 'unauthorized', '需要先设置 token'],
+    [401, 'no_token', '请先登录管理员账号'],
+    [401, 'unauthorized', '请先登录管理员账号'],
     [0, 'network', '连不上服务器'],
     [409, 'not_pending', '这个问题已经处理过了'],
     [409, 'stale', '情况已变，这个问题已撤回'],

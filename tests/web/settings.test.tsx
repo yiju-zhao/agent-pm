@@ -52,12 +52,12 @@ const modal = (tab: 'access' | 'models' | 'provider' | 'keys') =>
     </ToastProvider>,
   );
 
-test('the center tabs need an admin key first, and point back at 访问', () => {
+test('center settings use the signed-in session and never request a browser API key', async () => {
+  fetchMock.mockResolvedValue(json(view()));
   modal('models');
-  expect(screen.getByText('这一项是中心的设置，需要管理员 API key。')).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: '先设置访问 key' }));
-  expect(screen.getByLabelText('API key')).toBeTruthy();
-  expect(fetchMock).not.toHaveBeenCalled();
+  expect(await screen.findByLabelText('整理员')).toBeTruthy();
+  expect(screen.queryByLabelText('API key')).toBeNull();
+  expect(fetchMock.mock.calls[0][1]?.credentials).toBe('same-origin');
 });
 
 test('models: one menu per role; saving sends only what changed; another model id can be typed in', async () => {

@@ -161,8 +161,9 @@ test('a conflict with a later change is told in a toast', async () => {
   expect(await screen.findByText('和后来的改动冲突，没法撤销')).toBeTruthy();
 });
 
-test('without a token nothing is sent and the page is told to ask for it', async () => {
+test('an expired session asks for login when a write returns 401', async () => {
   setToken(null);
+  fetchMock.mockResolvedValue(json({ error: 'unauthorized' }, 401));
   const asked = vi.fn();
   window.addEventListener('herdr-pm:auth', asked);
   show([eventView({ id: 7 })]);
@@ -170,7 +171,7 @@ test('without a token nothing is sent and the page is told to ask for it', async
   fireEvent.click(screen.getByRole('button', { name: '确定撤销？' }));
   await waitFor(() => expect(asked).toHaveBeenCalled());
   window.removeEventListener('herdr-pm:auth', asked);
-  expect(fetchMock).not.toHaveBeenCalled();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(reload).not.toHaveBeenCalled();
 });
 

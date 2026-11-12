@@ -13,6 +13,7 @@ import { parseSessionKey } from '../shared/session-key.ts';
 import type { Scheduler } from '../understand/scheduler.ts';
 import { disabledStatus } from '../understand/status.ts';
 import type { ServerConfig } from './config.ts';
+import { mountAuthRoutes } from './auth-routes.ts';
 import { mountAdminRoutes } from './admin-routes.ts';
 import { mountDomainRoutes, userAuth } from './domain-routes.ts';
 import { mountIngestV2 } from './ingest-v2.ts';
@@ -124,6 +125,7 @@ export function createApp(
     return c.json({ accepted: true }, 202);
   });
 
+  mountAuthRoutes(app, db, clock);
   mountDomainRoutes(app, db, config, deps);
   mountAdminRoutes(app, db, config, deps, opts.settings ?? new Settings(db, config, null, clock));
   mountMcp(app, db, config, deps);

@@ -233,12 +233,13 @@ test('after a successful answer the card stays disabled, so the same question is
   expect((screen.getByRole('button', { name: '搁置' }) as HTMLButtonElement).disabled).toBe(true);
 });
 
-test('without a token nothing is sent; the card says why and the token dialog is asked for', async () => {
+test('an expired session rejects an answer and returns the person to login', async () => {
   localStorage.clear();
+  fetchMock.mockResolvedValue(json({ error: 'unauthorized' }, 401));
   render(<QuestionCard question={question()} onDone={onDone} />);
   fireEvent.click(screen.getByRole('button', { name: '标记完成' }));
-  expect(await screen.findByText('需要先设置 token')).toBeTruthy();
-  expect(fetchMock).not.toHaveBeenCalled();
+  expect(await screen.findByText('请先登录管理员账号')).toBeTruthy();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(onAuth).toHaveBeenCalledTimes(1);
   expect(onDone).not.toHaveBeenCalled();
 });

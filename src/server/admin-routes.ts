@@ -5,6 +5,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
 import type { DomainDeps } from '../domain/types.ts';
 import type { ServerConfig } from './config.ts';
+import { browserAdmin } from './admin-auth.ts';
 import { userAuth } from './domain-routes.ts';
 import { createKey, KeyError, listKeys, principalOf, revokeKey } from './keys.ts';
 import { CREDENTIAL_MODES, LLM_ROLES, SettingsError } from './settings.ts';
@@ -49,7 +50,7 @@ export function mountAdminRoutes(app: Hono, db: DatabaseSync, config: ServerConf
     if (args instanceof Response) return args;
     const by = principalOf(c, db, config, deps.now());
     try {
-      const made = createKey(db, config, { ...args, createdBy: by?.id ?? 'unknown' }, deps.now(), () => `k_${randomBytes(6).toString('hex')}`);
+      const made = createKey(db, config, { ...args, createdBy: by?.id ?? `account:${browserAdmin(c, db, deps.now())!.username}` }, deps.now(), () => `k_${randomBytes(6).toString('hex')}`);
       return c.json({ key: made.key, ...made.view }, 201);
     } catch (err) {
       if (err instanceof KeyError) return c.json({ error: 'invalid', message: err.message }, 400);

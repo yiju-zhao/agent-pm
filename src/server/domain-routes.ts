@@ -10,6 +10,7 @@ import { getProject, listProjects, listQuestions } from '../domain/read.ts';
 import type { QuestionView } from '../domain/read.ts';
 import { PRIORITIES, STAGES } from '../domain/types.ts';
 import type { DomainDeps, OpResult, RejectCode } from '../domain/types.ts';
+import { browserAdmin, sameOriginBrowser } from './admin-auth.ts';
 import { isAdmin, requireScope } from './keys.ts';
 import type { ServerConfig } from './config.ts';
 
@@ -93,10 +94,17 @@ async function readBody<S extends z.ZodType>(c: Context, schema: S): Promise<z.o
 
 // ---- routes ------------------------------------------------------------------------------------------------------
 
-/** Middleware that answers 401 unless the request carries `Authorization: Bearer <userToken>`. */
-/** The user's routes: a key with the `admin` scope (the config's userToken, or an admin key made in the web UI). */
+/** Administrator browser sessions or legacy admin keys; machine scopes are never promoted to administrator. */
 export function userAuth(config: ServerConfig, db: DatabaseSync, clock: () => Date = () => new Date()): MiddlewareHandler {
-  return requireScope(db, config, clock, isAdmin, 'missing or invalid user token');
+  const legacyKey = requireScope(db, config, clock, isAdmin, 'missing or invalid user token');
+  return async (c, next) => {
+    if (c.req.header('Authorization') !== undefined) return legacyKey(c, next);
+    const session = browserAdmin(c, db, clock());
+    if (!session) { c.header('WWW-Authenticate', 'Bearer'); return c.json({ error: 'unauthorized', message: '请先登录管理员账号' }, 401); }
+    if (session.must_change_password) return c.json({ error: 'password_change_required', message: '请先更改初始密码' }, 403);
+    if (!['GET', 'HEAD'].includes(c.req.method) && !sameOriginBrowser(c)) return c.json({ error: 'forbidden' }, 403);
+    await next();
+  };
 }
 
 type Params = Record<string, string>;

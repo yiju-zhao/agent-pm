@@ -198,7 +198,7 @@ test('every write route refuses a missing, wrong, collector and malformed token 
 test('the table of write routes above is the complete set of write routes the app registers', () => {
   const registered = new Set(
     app.routes
-      .filter((r) => r.method !== 'GET' && r.method !== 'ALL' && !r.path.startsWith('/ingest/'))
+      .filter((r) => r.method !== 'GET' && r.method !== 'ALL' && !r.path.startsWith('/ingest/') && !r.path.startsWith('/auth/'))
       .map((r) => `${r.method} ${r.path}`),
   );
   expect(registered).toEqual(new Set(WRITE_ROUTES.map(([method, pattern]) => `${method} ${pattern}`)));

@@ -234,14 +234,14 @@ test('unsubscribes on unmount and ignores a response that arrives afterwards', a
   });
 });
 
-test('auth sends the token; without one it fails with no_token and does not fetch', async () => {
+test('auth uses a cookie without a key and supports legacy bearer keys', async () => {
   const view = render(tree({ path: '/secret', topics: [], auth: true }));
-  await waitFor(() => expect(text('error')).toBe('no_token'));
-  expect(calls).toHaveLength(0);
+  expect(calls).toHaveLength(1);
+  expect(calls[0].headers).toEqual({});
   view.unmount();
 
   setToken('tok');
   render(tree({ path: '/secret', topics: [], auth: true }));
-  expect(calls).toHaveLength(1);
-  expect(calls[0].headers).toEqual({ Authorization: 'Bearer tok' });
+  expect(calls).toHaveLength(2);
+  expect(calls[1].headers).toEqual({ Authorization: 'Bearer tok' });
 });

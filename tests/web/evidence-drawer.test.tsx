@@ -250,33 +250,35 @@ test('a 401 says a token is needed and offers to open the token dialog', async (
   render(<EvidenceLink evidence="digest:3" />);
   open('摘要 #3');
   const dialog = await screen.findByRole('dialog');
-  expect(await within(dialog).findByText('需要先设置 token')).toBeTruthy();
+  expect(await within(dialog).findByText('请先登录管理员账号')).toBeTruthy();
   const before = onAuth.mock.calls.length;
-  fireEvent.click(within(dialog).getByRole('button', { name: '设置 token' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: '重新登录' }));
   expect(onAuth.mock.calls.length).toBe(before + 1);
 });
 
-test('with no token at all nothing is requested, and the drawer says what to do', async () => {
+test('an expired cookie asks for login after a 401', async () => {
   localStorage.clear();
+  fetchMock.mockResolvedValue(json({ error: 'unauthorized' }, 401));
   render(<EvidenceLink evidence="digest:3" />);
   open('摘要 #3');
-  expect(await screen.findByText('需要先设置 token')).toBeTruthy();
-  expect(fetchMock).not.toHaveBeenCalled();
-  expect(screen.getByRole('button', { name: '设置 token' })).toBeTruthy();
+  expect(await screen.findByText('请先登录管理员账号')).toBeTruthy();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('button', { name: '重新登录' })).toBeTruthy();
 });
 
 test('重试 asks again, for example after the token was set', async () => {
   localStorage.clear();
+  fetchMock.mockResolvedValue(json({ error: 'unauthorized' }, 401));
   render(<EvidenceLink evidence="digest:3" />);
   open('摘要 #3');
-  await screen.findByText('需要先设置 token');
+  await screen.findByText('请先登录管理员账号');
   setToken('tok-2');
   serve(digestView());
   fireEvent.click(screen.getByRole('button', { name: '重试' }));
   expect(await screen.findByText('采集器掉线')).toBeTruthy();
-  expect(fetchMock).toHaveBeenCalledTimes(1);
-  expect((fetchMock.mock.calls[0][1]?.headers as Record<string, string>).Authorization).toBe('Bearer tok-2');
-  expect(screen.queryByText('需要先设置 token')).toBeNull();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect((fetchMock.mock.calls[1][1]?.headers as Record<string, string>).Authorization).toBe('Bearer tok-2');
+  expect(screen.queryByText('请先登录管理员账号')).toBeNull();
 });
 
 test('a reference the server does not know says so in Chinese', async () => {
@@ -284,7 +286,7 @@ test('a reference the server does not know says so in Chinese', async () => {
   render(<EvidenceLink evidence="digest:3" />);
   open('摘要 #3');
   expect(await screen.findByText('找不到这条证据（可能已被清除）')).toBeTruthy();
-  expect(screen.queryByText('需要先设置 token')).toBeNull();
+  expect(screen.queryByText('请先登录管理员账号')).toBeNull();
 });
 
 test('a network failure is shown', async () => {

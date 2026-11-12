@@ -165,7 +165,7 @@ function Body({ view }: { view: EvidenceView }) {
 
 /**
  * The source of a decision: who said it (session, time) and the conversation text, from `GET /evidence/:ref`. That
- * text is raw conversation, so the request carries the token; without one the drawer says so and offers the token dialog.
+ * text is raw conversation, so the request needs an administrator session; expiry returns to login.
  * `Esc`, 关闭 or a click beside the drawer closes it.
  */
 export function EvidenceDrawer({ evidenceRef, onClose }: { evidenceRef: string; onClose: () => void }) {
@@ -193,7 +193,7 @@ export function EvidenceDrawer({ evidenceRef, onClose }: { evidenceRef: string; 
         <div className="drawer-actions">
           {error.status === 401 ? (
             <button type="button" onClick={() => window.dispatchEvent(new Event(AUTH_EVENT))}>
-              设置 token
+              重新登录
             </button>
           ) : null}
           <button type="button" disabled={loading} onClick={reload}>

@@ -1,26 +1,24 @@
 import { useEffect, useId, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { CredentialMode, LlmRole, SettingsView } from '../../../src/server/settings.ts';
-import { apiGet, apiSend, errorText, getToken, setToken } from '../api.ts';
+import { apiGet, apiSend, errorText } from '../api.ts';
 import { useToast } from './toast.tsx';
+import { authRequest, PasswordForm, useAdmin } from '../auth.tsx';
 
 export type SettingsTab = 'access' | 'models' | 'provider' | 'keys';
 
 const TABS: Array<{ id: SettingsTab; label: string }> = [
-  { id: 'access', label: '访问' },
+  { id: 'access', label: '账号' },
   { id: 'models', label: '模型' },
   { id: 'provider', label: '模型凭据' },
   { id: 'keys', label: 'API Keys' },
 ];
 
 /**
- * The settings, one modal with a tab per concern: which key this browser uses, the model of each LLM role, the
- * credential model calls run under, and a way to the API key page. Everything but the first tab is the center's and
- * needs an admin key; without one, those tabs say so and point at the first.
+ * The signed-in administrator's account, model settings and machine API keys.
  */
 export function SettingsModal({ initialTab = 'access', onClose }: { initialTab?: SettingsTab; onClose: () => void }) {
   const [tab, setTab] = useState<SettingsTab>(initialTab);
-  const [hasToken, setHasToken] = useState(getToken() !== null);
   const titleId = useId();
 
   useEffect(() => {
@@ -49,16 +47,7 @@ export function SettingsModal({ initialTab = 'access', onClose }: { initialTab?:
             ))}
           </div>
           <div className="settings-panel" role="tabpanel" aria-label={TABS.find((t) => t.id === tab)!.label}>
-            {tab === 'access' ? <AccessTab onSaved={() => setHasToken(getToken() !== null)} onClose={onClose} /> : null}
-            {tab !== 'access' && !hasToken ? (
-              <div className="settings-note">
-                <p>这一项是中心的设置，需要管理员 API key。</p>
-                <button type="button" onClick={() => setTab('access')}>
-                  先设置访问 key
-                </button>
-              </div>
-            ) : null}
-            {tab !== 'access' && hasToken ? <CenterTabs tab={tab} onClose={onClose} /> : null}
+            {tab === 'access' ? <AccountTab onClose={onClose} /> : <CenterTabs tab={tab} onClose={onClose} />}
           </div>
         </div>
       </div>
@@ -66,52 +55,20 @@ export function SettingsModal({ initialTab = 'access', onClose }: { initialTab?:
   );
 }
 
-function AccessTab({ onSaved, onClose }: { onSaved: () => void; onClose: () => void }) {
+function AccountTab({ onClose }: { onClose(): void }) {
+  const admin = useAdmin();
   const toast = useToast();
-  const [value, setValue] = useState('');
-  const inputId = useId();
-  const current = getToken();
-  const token = value.trim();
-
-  const save = (e: FormEvent) => {
-    e.preventDefault();
-    if (token === '') return;
-    // Blocked site data: closing as if saved would leave the person wondering why the next write asks again.
-    if (!setToken(token)) {
-      toast('无法保存 key（浏览器禁止了本地存储）');
-      return;
-    }
-    onSaved();
-    onClose();
-  };
-  const clear = () => {
-    setToken(null);
-    onSaved();
-    onClose();
-  };
-
-  return (
-    <form className="settings-section" onSubmit={save}>
-      <p className="dim">
-        这个浏览器访问中心用的 key，只存在本浏览器里。网页上的修改、查看对话原文和这里的中心设置都需要<b>管理员</b>权限的 key：
-        配置文件里的 userToken，或在 API Keys 页新建的管理员 key。
-      </p>
-      <p>{current === null ? '当前：未设置' : `当前：已设置（…${current.slice(-4)}）`}</p>
-      <label htmlFor={inputId}>API key</label>
-      <input id={inputId} type="password" autoComplete="off" autoFocus value={value} onChange={(e) => setValue(e.target.value)} />
-      <div className="modal-actions">
-        <button type="submit" disabled={token === ''}>
-          保存
-        </button>
-        <button type="button" onClick={clear}>
-          清除
-        </button>
-        <button type="button" onClick={onClose}>
-          取消
-        </button>
-      </div>
-    </form>
-  );
+  const [busy, setBusy] = useState(false);
+  return <div className="settings-section">
+    <p>当前账号：{admin?.session.username ?? '管理员'}</p>
+    <PasswordForm onSaved={(session) => { admin?.update(session); toast('密码已更新'); }} />
+    <button type="button" disabled={busy} onClick={async () => {
+      setBusy(true);
+      try { await authRequest('logout', {}); onClose(); admin?.update({ configured: true, username: null, must_change_password: false }); }
+      catch (error) { toast(errorText(error)); }
+      finally { setBusy(false); }
+    }}>退出登录</button>
+  </div>;
 }
 
 /** The tabs that read and change the center's settings. */

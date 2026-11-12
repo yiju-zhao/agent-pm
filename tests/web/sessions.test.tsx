@@ -367,16 +367,18 @@ test('an ignored session is faded, has 恢复追踪, and clicking it is PUT .../
   expect(writesMade()[0]).toEqual({ url: '/sessions/claude%3Aabc/ignored', method: 'PUT', body: { ignored: false } });
 });
 
-test('a write without a token asks for one and sends nothing', async () => {
+test('a write with an expired browser session asks for login', async () => {
   setToken(null);
+  const original = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation((input, init) => init?.method && init.method !== 'GET' ? Promise.resolve(json({ error: 'unauthorized' }, 401)) : original(input, init));
   const asked = vi.fn();
   window.addEventListener('herdr-pm:auth', asked);
   await renderPage();
   fireEvent.click(within(row('接入 cannbench 数据')).getByRole('button', { name: '不追踪' }));
   await waitFor(() => expect(asked).toHaveBeenCalled());
   window.removeEventListener('herdr-pm:auth', asked);
-  expect(writesMade()).toEqual([]);
-  expect(await screen.findByText('需要先设置 token')).toBeTruthy();
+  expect(writesMade()).toHaveLength(1);
+  expect(await screen.findByText('请先登录管理员账号')).toBeTruthy();
 });
 
 // ---- live updates ------------------------------------------------------------------------------------------------

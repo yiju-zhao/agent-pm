@@ -1,5 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { AuthBoundary } from './auth.tsx';
 import { App } from './app.tsx';
 import { ToastProvider } from './components/toast.tsx';
 import { StreamClient, streamUrl } from './stream.ts';
@@ -20,7 +21,7 @@ createRoot(root).render(
   <StrictMode>
     <StreamContext.Provider value={stream}>
       <ToastProvider>
-        <App />
+        <AuthBoundary><App /></AuthBoundary>
       </ToastProvider>
     </StreamContext.Provider>
   </StrictMode>,

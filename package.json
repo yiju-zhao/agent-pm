@@ -6,7 +6,8 @@
     "dev:web": "vite",
     "seed:demo": "node scripts/seed-demo.ts",
     "typecheck": "tsc && tsc -p web",
-    "test": "vitest run"
+    "test": "vitest run",
+    "setup:admin": "node scripts/setup-admin.ts"
   },
   "type": "module",
   "bin": {

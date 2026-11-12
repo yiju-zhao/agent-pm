@@ -28,7 +28,7 @@
 
 另有一个查询命令：`agent-pm sessions [--server <url>] [--machine <m>]`，列出中心已知的 session。
 
-中心监听 `config.port` 的所有网卡，目的是让其他机器通过 Tailscale 访问。所有 `GET`（`/sessions*`、`/projects*`、`/questions`）目前**没有鉴权**，只靠网络隔离，所以不要把这个端口暴露到公网；`/ingest/*` 要求每台机器自己的 bearer token；项目 API 的写操作要求 `userToken`（见下文「项目 API」）。
+中心监听 `config.port` 的所有网卡，目的是让其他机器通过 Tailscale 访问。所有 `GET`（`/sessions*`、`/projects*`、`/questions`）目前**没有鉴权**，只靠网络隔离，所以不要把这个端口暴露到公网；`/ingest/*` 要求每台机器自己的 bearer token；项目 API 的写操作要求管理员浏览器会话或兼容客户端的 `userToken`（见下文「项目 API」）。
 
 ## 已确认的环境事实
 
@@ -244,7 +244,7 @@ Claude session 的 `fidelity` 应为 `full`（有对话文件，`chunk_count` �
 
 计划 2 在中心加了项目的领域层：项目、阶段、里程碑、todo、决策、阻塞、session 关联、问题，以及对任何改动的撤销。对项目状态的修改只有一个入口 `execute()`，HTTP 只是把请求翻译成操作，每个操作写一条 event（谁、什么时候、改了什么）。
 
-**鉴权**：所有 `GET` 开放（和 `/sessions` 一样，靠 Tailscale 隔离）；其余请求必须带 `Authorization: Bearer <userToken>`，没有或不对返回 401。采集器的 token 在这里无效，`userToken` 在 `/ingest/*` 也无效（配置里两者不能相同）。写入口不是给 coding agent 用的：同一个 Tailscale 里的 agent 一旦拿到 `userToken`，就能以"用户"身份绕过 AI 的信任边界（AI 的写入口是计划 3 的 MCP，那里的每个写操作都必须带理由和证据）。
+**鉴权**：所有 `GET` 开放（和 `/sessions` 一样，靠 Tailscale 隔离）；其余请求需要管理员浏览器会话，或兼容客户端的 `Authorization: Bearer <userToken>`，没有或不对返回 401。采集器的 token 在这里无效，`userToken` 在 `/ingest/*` 也无效（配置里两者不能相同）。写入口不是给 coding agent 用的：同一个 Tailscale 里的 agent 一旦拿到 `userToken`，就能以"用户"身份绕过 AI 的信任边界（AI 的写入口是计划 3 的 MCP，那里的每个写操作都必须带理由和证据）。
 
 生成 token 并写进中心配置的 `userToken`，改完重启中心：
 
@@ -365,11 +365,11 @@ curl -s -XPOST http://<mac-mini>:7718/sync -H "Authorization: Bearer <userToken>
 
 ### API key：一种凭据，按权限范围区分
 
-中心的所有调用方都出示同一种凭据（Bearer API key），能做什么由它的**权限范围**决定，一个 key 只有一个范围：
+机器端调用方使用 Bearer API key；网页使用管理员用户名、密码与浏览器会话。机器端凭据能做什么由它的**权限范围**决定，一个 key 只有一个范围：
 
 | 范围 | 给谁 | 能做什么 |
 |---|---|---|
-| 管理员（`admin`） | 你自己的浏览器或脚本 | 网页上的修改、查看对话原文、立即同步、管理 key 和设置 |
+| 管理员（`admin`） | 兼容旧客户端的管理脚本 | 项目修改、查看对话原文、立即同步、管理 key 和设置 |
 | Agent（`mcp`） | 各机器上的 coding agent | 只在 `/mcp` 上：读看板、`pm_report` 上报 |
 | herdr 采集器（`ingest:herdr:<机器>`） | 那台机器的 herdr 采集器 | 只能上报那台机器的数据 |
 | Paseo 采集器（`ingest:paseo:<来源>`） | 那个 Paseo 采集器 | 只能写那个来源（来源的机器和 daemon 身份仍在配置里） |
@@ -439,8 +439,10 @@ npm run build:web      # 写到 dist/web，已在 .gitignore 里
 
 **使用**：
 
-- 浏览器打开 `http://<中心机器>:<port>/`（`<port>` 是配置里的 `port`，通过 Tailscale 访问就是 `http://<mac-mini 的 Tailscale 名或 IP>:<port>/`）。读页面不需要 token。
-- 第一次做写操作（改字段、回答问题、关联 session……）时页面会弹出输入框，填配置里的 `userToken`；它存在这个浏览器的 `localStorage` 里（`agent-pm.userToken`），不会发给别的地方。也可以随时点顶栏的"设置 token"换掉或清除。token 填错了（服务返回 401），页面会再弹出输入框。
+- 浏览器打开 `http://<中心机器>:<port>/`（`<port>` 是配置里的 `port`，通过 Tailscale 访问就是 `http://<mac-mini 的 Tailscale 名或 IP>:<port>/`）。浏览器打开后先登录管理员账号（底层项目只读 API 仍依赖 Tailscale 网络隔离）。
+- 网页使用**管理员用户名和密码登录**，不再要求填写 API key。中心机器先运行 `npm run setup:admin -- --config ~/.config/herdr-pm/server.json`（可加 `--username <用户名>`，默认 `admin`）。命令生成随机初始密码，保存在配置文件旁的 `admin-initial-password`（权限 600），不会输出密码、覆盖现有账号或重置密码。首次登录需将初始密码改为自己的密码（至少12个字符）。
+- 浏览器通过 HttpOnly、SameSite=Strict cookie 保持7天登录；HTTPS 下同时使用 Secure。密码采用带随机盐的 scrypt 哈希，会话只保存 SHA-256 哈希。设置 → 账号可改密或退出；改密会撤销其他浏览器的登录。修改请求同时校验本站 Origin 和自定义请求头，登录有失败限流。
+- `userToken` 和现有 API key 仍供受信任的旧客户端使用；Agent（MCP）和采集器仍使用各自范围的 API key，浏览器登录不会赋予它们管理员权限。
 - 页面通过 `WS /stream` 自动刷新：服务只推"哪里变了"的信号，页面收到后重新读对应的接口，所以别的地方（curator、`curl`、另一个浏览器）做的改动几秒内就会出现在页面上，不用手动刷新。顶栏的点表示这条连接的状态：绿色 `已连接`，黄色 `重连中`（服务重启或网络断了，会按 1、2、4、8、10 秒的间隔自动重连，连上后把所有数据重新读一遍）。
 - 页面是用 `http://` 打开的（Tailscale 下没有 HTTPS），浏览器不开放剪贴板接口时，点 session 标签复制短 ID 会退回到旧的复制方式；两种都不行时，提示条里会直接显示短 ID，手动选中复制。
 - 宽度小于 900px（手机）时右栏排到主列表下面，页面不会出现横向滚动。

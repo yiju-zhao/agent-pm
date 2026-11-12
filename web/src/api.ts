@@ -1,11 +1,14 @@
-// The page's only way to talk to the server. Reads are open; writes (and reads of raw evidence) carry the user token,
-// which the person types once and the page keeps in localStorage. A missing or rejected token never fails silently: it
-// raises AUTH_EVENT on `window`, which opens the token dialog.
+// Browser requests use a same-origin HttpOnly session. Existing token helpers remain for legacy clients;
+// the account login clears old browser keys and 401 returns the person to the login screen.
 
-// Storage keys kept from before the rename, so a key saved in the browser survives it.
+// Legacy storage key, cleared when the account flow starts.
 export const TOKEN_KEY = 'herdr-pm.userToken';
-/** Dispatched on `window` when a request needs a token that is missing, or the server refused it (401). */
+/** Dispatched on `window` when the server requires a fresh administrator login (401). */
 export const AUTH_EVENT = 'herdr-pm:auth';
+
+let cookieAuthentication = false;
+/** The account flow never reads or sends a legacy key, even if storage cannot be cleared. */
+export function enableCookieAuthentication(): void { cookieAuthentication = true; }
 
 export class ApiError extends Error {
   /** HTTP status, or 0 when the server could not be reached at all. */
@@ -42,25 +45,16 @@ export function setToken(token: string | null): boolean {
   }
 }
 
-/** The stored token, or: tell the page (AUTH_EVENT) and throw `no_token` without any request being made. */
-function requireToken(): string {
-  const token = getToken();
-  if (token === null) {
-    window.dispatchEvent(new Event(AUTH_EVENT));
-    throw new ApiError(401, 'no_token', '需要先设置 token');
-  }
-  return token;
-}
-
-/** `auth: true` sends the user token (and, like a write, refuses to go out without one). Without it the token is never sent. */
+/** Protected reads use the browser cookie; auth also supports a bearer key for legacy consumers. */
 export async function apiGet<T>(path: string, opts: { auth?: boolean } = {}): Promise<T> {
   const headers: Record<string, string> = {};
-  if (opts.auth) headers.Authorization = `Bearer ${requireToken()}`;
+  if (opts.auth && !cookieAuthentication && getToken()) headers.Authorization = `Bearer ${getToken()}`;
   return request<T>(path, { method: 'GET', headers, cache: 'no-store' });
 }
 
 export async function apiSend<T>(method: 'POST' | 'PATCH' | 'PUT' | 'DELETE', path: string, body?: unknown): Promise<T> {
-  const headers: Record<string, string> = { Authorization: `Bearer ${requireToken()}` };
+  const headers: Record<string, string> = { 'X-Agent-PM': 'browser' };
+  if (!cookieAuthentication && getToken()) headers.Authorization = `Bearer ${getToken()}`;
   const init: RequestInit = { method, headers };
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
@@ -73,7 +67,7 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
   let res: Response;
   let text: string;
   try {
-    res = await fetch(path, init);
+    res = await fetch(path, { ...init, credentials: 'same-origin' });
     text = await res.text();
   } catch {
     throw new ApiError(0, 'network', '连不上服务器');
@@ -106,7 +100,7 @@ export function sessionPath(key: string): string {
 
 // Every code the operation layer can refuse with (RejectCode in src/domain/types.ts), plus the ones this client raises.
 const CODE_TEXT: Record<string, string> = {
-  no_token: '需要先设置 token',
+  no_token: '请先登录管理员账号',
   network: '连不上服务器',
   not_found: '找不到对象，可能已被删除',
   merged: '项目已合并到别的项目',
