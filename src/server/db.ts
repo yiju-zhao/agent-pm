@@ -419,6 +419,25 @@ export const MIGRATIONS: string[] = [
     created_at TEXT NOT NULL
   );
   `,
+  // v9: durable project-wide reorganization requested by a user's structural edit.
+  `
+  CREATE TABLE project_reviews (
+    id INTEGER PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    event_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    chunk_cutoff INTEGER NOT NULL,
+    digest_cutoff INTEGER,
+    cursor INTEGER NOT NULL DEFAULT 0,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    retry_at TEXT,
+    last_error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(project_id,event_id)
+  );
+  CREATE INDEX idx_project_reviews_pending ON project_reviews(status,retry_at,id);
+  `,
 ];
 
 /** Opens (creating if needed) the central database in WAL mode and applies pending migrations. */

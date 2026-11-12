@@ -6,6 +6,7 @@ import { ITEM_HANDLERS } from './items-ops.ts';
 import { LINK_HANDLERS } from './links-ops.ts';
 import { EVIDENCE_RE, OP_SCHEMAS } from './ops.ts';
 import type { OpInput, OpName } from './ops.ts';
+import { enqueueProjectReviews } from './project-reviews.ts';
 import { PROJECT_HANDLERS } from './projects-ops.ts';
 import { REVERT_HANDLERS } from './revert.ts';
 import { createQuestion, USER_ONLY_OPS, withdrawStale } from './questions.ts';
@@ -131,8 +132,9 @@ export function runOp(db: DatabaseSync, deps: DomainDeps, input: OpInput): OpRes
       reverts: ctx.reverts ?? undefined,
       is_veto: ctx.isVeto,
     });
+    const queued = !ai && enqueueProjectReviews(db,eventId,changes,deps.now().toISOString()) > 0;
     withdrawStale(db, deps, changes);
-    return applied(ctx, eventId, out.id);
+    return { ...applied(ctx, eventId, out.id), ...(queued ? { project_review_queued: true } : {}) };
   }
   if (ctx.questionIds.length > 0) return { status: 'proposed', question_ids: ctx.questionIds };
   if (ctx.proposalErrors.length > 0) throw ctx.proposalErrors[0];

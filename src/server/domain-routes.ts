@@ -115,7 +115,7 @@ type WriteMethod = 'POST' | 'PATCH' | 'PUT' | 'DELETE';
  * the user through `execute()`, and answers with the operation's result. The collectors' tokens are not accepted here, and
  * the user token is not accepted on `/ingest/*` (the config forbids the two overlapping).
  */
-export function mountDomainRoutes(app: Hono, db: DatabaseSync, config: ServerConfig, deps: DomainDeps): void {
+export function mountDomainRoutes(app: Hono, db: DatabaseSync, config: ServerConfig, deps: DomainDeps, onProjectReviewQueued?: () => void): void {
   const requireUser = userAuth(config, db, deps.now);
 
   const limitBody = bodyLimit({
@@ -124,10 +124,14 @@ export function mountDomainRoutes(app: Hono, db: DatabaseSync, config: ServerCon
   });
 
   const asUser = (op: OpName, args: unknown): OpResult => execute(db, deps, { op, args, actor: 'user' });
+  const reply = (c: Context, result: OpResult, created: boolean): Response => {
+    if (result.status === 'applied' && result.project_review_queued) onProjectReviewQueued?.();
+    return respond(c,result,created);
+  };
 
   /** A write route that takes no body. */
   const act = (method: WriteMethod, path: string, run: (params: Params) => OpResult): void => {
-    app.on(method, path, requireUser, limitBody, (c) => respond(c, run(c.req.param()), false));
+    app.on(method, path, requireUser, limitBody, (c) => reply(c, run(c.req.param()), false));
   };
 
   /** A write route whose JSON body must match `schema`. */
@@ -140,7 +144,7 @@ export function mountDomainRoutes(app: Hono, db: DatabaseSync, config: ServerCon
   ): void => {
     app.on(method, path, requireUser, limitBody, async (c) => {
       const body = await readBody(c, schema);
-      return body instanceof Response ? body : respond(c, run(c.req.param(), body), created);
+      return body instanceof Response ? body : reply(c, run(c.req.param(), body), created);
     });
   };
 

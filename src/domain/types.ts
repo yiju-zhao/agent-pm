@@ -55,6 +55,6 @@ export class OpRejected extends Error {
 }
 
 export type OpResult =
-  | { status: 'applied'; event_id: number | null; id?: string; question_ids: string[]; warnings: string[] }
+  | { status: 'applied'; event_id: number | null; id?: string; project_review_queued?: boolean; question_ids: string[]; warnings: string[] }
   | { status: 'proposed'; question_ids: string[] }
   | { status: 'rejected'; code: RejectCode; message: string };

@@ -7,6 +7,8 @@ import { MIN_DIGEST_CHARS, nextWindow, runDigest, skipWindow } from './digest.ts
 import type { DigestWindow } from './digest.ts';
 import { isPausing } from './llm.ts';
 import type { LlmErrorKind, LlmRunner } from './llm.ts';
+import { pickProjectReview, reviewDigestDependency, reviewFailure, runProjectReview } from './project-review.ts';
+import type { ProjectReview } from './project-review.ts';
 import { markStageReviewed, pickRestageBatch, runRestage } from './restage.ts';
 import type { SchedulerStatus } from './status.ts';
 
@@ -77,7 +79,8 @@ type Picked = { window: DigestWindow; force: boolean };
 type Work =
   | { kind: 'curate'; ids: number[]; now: number }
   | { kind: 'digest'; window: DigestWindow; now: number }
-  | { kind: 'restage'; ids: string[]; now: number };
+  | { kind: 'restage'; ids: string[]; now: number }
+  | { kind: 'review'; job: ProjectReview; now: number };
 /**
  * A session whose window keeps failing: the window's first chunk, how many cooldowns it has caused, and the cap its
  * windows are cut to once those pass `STALL_GRACE_CYCLES` (unset until then).
@@ -87,7 +90,7 @@ type Stall = { firstChunk: number; cycles: number; cap?: number };
  * The success that makes `lastError` stale: a digest of that session, or a curate run. Unset when the error recorded
  * something that a later success does not undo (a skipped chunk, a given-up batch, a half-finished curate run).
  */
-type Recovery = { kind: 'digest'; key: string } | { kind: 'curate' };
+type Recovery = { kind: 'digest'; key: string } | { kind: 'curate' } | { kind: 'review'; project: string };
 /** Realtime chunks with ids up to `chunk` existed when the sync was requested; only they get the sync treatment. */
 type SyncMarks = { chunk: number };
 
@@ -165,6 +168,7 @@ export class Scheduler {
           if (work === null) return 'idle';
           if (work.kind === 'curate') this.curateFailed(work.now, work.ids, 'other', message);
           else if (work.kind === 'restage') this.restageFailed(work.now, work.ids, 'other', message);
+          else if (work.kind === 'review') reviewFailure(this.db,this.deps.now(),work.job,message,true);
           else this.digestFailed(work.now, work.window, 'other', message);
           return 'skipped';
         } catch (accountingErr) {
@@ -198,6 +202,11 @@ export class Scheduler {
     this.sync = { chunk: max };
   }
 
+  /** Wake promptly after a committed structural edit; the existing one-call-at-a-time gate still applies. */
+  requestProjectReview(): void {
+    queueMicrotask(() => void this.tick());
+  }
+
   start(): void {
     if (this.timer !== null) return;
     this.timer = setInterval(() => void this.tick(), TICK_MS);
@@ -223,11 +232,17 @@ export class Scheduler {
       enabled: true,
       paused_until: paused ? new Date(this.pausedUntil!).toISOString() : null,
       pause_reason: paused ? this.pauseReason : null,
-      last_error: this.lastError,
+      last_error: this.lastError ?? (() => {
+        const failed=this.db.prepare("SELECT project_id,last_error FROM project_reviews WHERE status='failed' ORDER BY updated_at DESC,id DESC LIMIT 1").get() as {project_id:string;last_error:string}|undefined;
+        return failed ? `项目重新整理失败（${failed.project_id}）：${failed.last_error}` : null;
+      })(),
       blocked_reason: refusal,
       blocked_sessions: blocked.length,
       running: this.running,
       waiting_sessions: counts.waiting_sessions,
+      reviewing_project: this.work?.kind === 'review' ? this.work.job.project_id : null,
+      pending_project_reviews: scalar("SELECT count(*) n FROM project_reviews WHERE status='pending'"),
+      failed_project_reviews: scalar("SELECT count(*) n FROM project_reviews WHERE status='failed'"),
       uncurated_digests: scalar('SELECT count(*) AS n FROM digests WHERE curated = 0'),
       backfill: { ...counts.backfill },
       last_digest_at: latest('SELECT max(created_at) AS at FROM digests WHERE skipped = 0'),
@@ -281,6 +296,21 @@ export class Scheduler {
 
     if (this.sync !== null && this.syncDone(this.sync, now)) this.sync = null;
 
+    const deferred: number[] = [];
+    for (;;) {
+      const job = pickProjectReview(this.db,this.deps.now(),deferred);
+      if (!job) break;
+      this.work = { kind: 'review', job, now };
+      const dependency = reviewDigestDependency(this.db,job);
+      if (dependency) {
+        if (this.cooling(dependency.key,now)) { deferred.push(job.id); continue; }
+        const window = nextWindow(this.db,dependency.key,dependency.mode,this.stalls.get(dependency.key)?.cap);
+        if (window) return this.digest(now,{window,force:false});
+      }
+      return this.projectReview(now,job);
+    }
+    this.work = null;
+
     const uncurated = this.db
       .prepare('SELECT count(*) AS n, min(created_at) AS oldest FROM digests WHERE curated = 0')
       .get() as { n: number; oldest: string | null };
@@ -304,6 +334,22 @@ export class Scheduler {
       if (projects.length > 0) return this.restage(now, projects);
     }
     return 'idle';
+  }
+
+  private async projectReview(now: number, job: ProjectReview): Promise<TickResult> {
+    this.work = {kind:'review',job,now};
+    this.running = 'curate';
+    const result = await runProjectReview(this.db,this.deps,this.runner,job,this.modelsOf().curate);
+    if (result.ok) {
+      this.backoffMs = BACKOFF_START_MS;
+      this.recovered({kind:'review',project:job.project_id});
+      return 'curated';
+    }
+    if ((this.db.prepare('SELECT status FROM project_reviews WHERE id=?').get(job.id) as {status:string})?.status === 'cancelled') { this.recovered({kind:'review',project:job.project_id}); return 'skipped'; }
+    this.setLastError(`项目重新整理失败（${job.project_id}）：${result.message}${result.partial?'；已写入部分保留，停止自动重试':''}`,{kind:'review',project:job.project_id});
+    if (isPausing(result.kind) && !result.partial) return this.pause(now,result.kind);
+    reviewFailure(this.db,this.deps.now(),job,result.message,result.partial || result.kind==='refused');
+    return isPausing(result.kind) ? this.pause(now,result.kind) : 'skipped';
   }
 
   private async restage(now: number, ids: string[]): Promise<TickResult> {
@@ -475,6 +521,7 @@ export class Scheduler {
   private recovered(success: Recovery): void {
     const pending = this.lastErrorRecovery;
     if (pending === null || pending.kind !== success.kind) return;
+    if (pending.kind === 'review' && success.kind === 'review' && pending.project !== success.project) return;
     if (pending.kind === 'digest' && success.kind === 'digest' && pending.key !== success.key) return;
     this.lastError = null;
     this.lastErrorRecovery = null;

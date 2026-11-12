@@ -34,11 +34,12 @@ function understandingText(s: SchedulerStatus): string {
     return `整理已暂停（${detail}）`;
   }
   if (s.running === 'digest') return '摘要中…';
-  if (s.running === 'curate') return '整理中…';
+  if (s.running === 'curate') return s.reviewing_project ? '项目重新整理中…' : '整理中…';
   if (s.running === 'restage') return '复核阶段中…';
   let text = '空闲';
   if (s.waiting_sessions > 0) text += ` · 待摘要 ${s.waiting_sessions} 个 session`;
   if (s.uncurated_digests > 0) text += ` · 待整理 ${s.uncurated_digests} 条`;
+  if ((s.pending_project_reviews ?? 0) > 0) text += ` · 待整理 ${s.pending_project_reviews} 个项目`;
   return text;
 }
 

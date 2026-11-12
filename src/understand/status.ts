@@ -13,6 +13,9 @@ export type SchedulerStatus = {
   /** Review information, separate from the last runtime failure. */
   blocked_reason?: string | null;
   uncurated_digests: number;
+  pending_project_reviews?: number;
+  reviewing_project?: string | null;
+  failed_project_reviews?: number;
   backfill: { sessions_total: number; sessions_done: number };
   last_digest_at: string | null;
   last_curate_at: string | null;

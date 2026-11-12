@@ -126,7 +126,7 @@ export function createApp(
   });
 
   mountAuthRoutes(app, db, clock);
-  mountDomainRoutes(app, db, config, deps);
+  mountDomainRoutes(app, db, config, deps, () => scheduler?.requestProjectReview?.());
   mountAdminRoutes(app, db, config, deps, opts.settings ?? new Settings(db, config, null, clock));
   mountMcp(app, db, config, deps);
   mountWeb(app, opts.webDir ?? null);

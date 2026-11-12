@@ -18,7 +18,8 @@ export function useWrite(reload?: () => void): Writer {
   const write = useCallback(
     async (send: () => Promise<unknown>) => {
       try {
-        await send();
+        const result = await send();
+        if (typeof result === 'object' && result !== null && 'project_review_queued' in result && result.project_review_queued === true) toast('已保存，项目重新整理已排队');
       } catch (err) {
         toast(errorText(err));
         throw err;

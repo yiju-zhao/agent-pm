@@ -334,3 +334,14 @@ test('a new runtime error still warns alongside a paused digest', async () => {
   expect(await screen.findByRole('link', { name: '1 个会话摘要已暂停' })).toBeTruthy();
   expect(screen.getByRole('img', { name: '最近一次出错' }).getAttribute('title')).toBe('新的连接故障');
 });
+
+
+test('queued structural changes show project review progress separately from digest backlog', async () => {
+  serve(understanding({ pending_project_reviews: 2 }));
+  const view=renderApp();
+  expect(await screen.findByText('空闲 · 待整理 2 个项目')).toBeTruthy();
+  view.unmount();
+  serve(understanding({ running: 'curate', pending_project_reviews: 1, reviewing_project: 'p_1' }));
+  renderApp();
+  expect(await screen.findByText('项目重新整理中…')).toBeTruthy();
+});

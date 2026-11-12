@@ -170,7 +170,7 @@ const WRITE_OPS = [
   },
 ] as const satisfies ReadonlyArray<{ op: OpName; description: string }>;
 
-function writeTool(db: DatabaseSync, deps: DomainDeps, run: RunState, spec: (typeof WRITE_OPS)[number]): ToolDef {
+function writeTool(db: DatabaseSync, deps: DomainDeps, run: RunState, spec: { op: OpName; description: string }): ToolDef {
   const { op } = spec;
   // Every entry of OP_SCHEMAS used here is a plain z.object(...).strict(), so its fields can be reused as they are.
   const input: z.ZodRawShape = { ...OP_SCHEMAS[op].shape, ...WRITE_ENVELOPE };
@@ -272,7 +272,11 @@ function getProjectTool(db: DatabaseSync, deps: DomainDeps, run: RunState): Tool
  * `delete_*` or `unlink_session`. Evidence may only cite digests in `batch` and chunks that exist. The tools update
  * `batch.landedWrites` and stop working once `batch.closed` is set (see `CuratorBatch`).
  */
-export function curatorTools(db: DatabaseSync, deps: DomainDeps, batch: CuratorBatch): ToolDef[] {
+export function curatorTools(db: DatabaseSync, deps: DomainDeps, batch: CuratorBatch, opts: { reconcile?: boolean } = {}): ToolDef[] {
   const run: RunState = { ids: new Set(batch.digestIds), batch };
-  return [...WRITE_OPS.map((spec) => writeTool(db, deps, run, spec)), askTool(db, deps, run), getProjectTool(db, deps, run)];
+  const writes: Array<{ op: OpName; description: string }> = [...WRITE_OPS];
+  if (opts.reconcile) for (const op of ['delete_todo','delete_milestone','delete_decision','delete_blocker'] as const) {
+    writes.push({ op, description: '项目重新整理时去掉重复或已失效的条目；用户创建或编辑过的条目仍须用户确认，不能用删除伪造完成。' });
+  }
+  return [...writes.map((spec) => writeTool(db, deps, run, spec)), askTool(db, deps, run), getProjectTool(db, deps, run)];
 }

@@ -973,6 +973,9 @@ test('backfill progress counts sessions with backfill chunks and those fully dig
     enabled: true,
     blocked_sessions: 0,
     blocked_reason: null,
+    pending_project_reviews: 0,
+    reviewing_project: null,
+    failed_project_reviews: 0,
     paused_until: null,
     pause_reason: null,
     last_error: null,
@@ -1049,7 +1052,8 @@ function unreviewedProject(): string {
   addSession(A);
   const id = t.user('create_project', { title: 'old project' }).id;
   t.db.prepare('UPDATE projects SET stage_rules_seen = 0 WHERE id = ?').run(id);
-  t.user('link_session', { session: A, project: id });
+  // Historical association predates the automatic project review queue.
+  t.db.prepare("INSERT INTO contributions(id,session_key,project_id,actor,created_at) VALUES ('c_old',?,?,'user',?)").run(A,id,NOW);
   const digest = addDigest();
   t.db.prepare('UPDATE digests SET curated = 1 WHERE id = ?').run(digest);
   return id;
