@@ -595,6 +595,23 @@ systemctl --user daemon-reload && systemctl --user enable --now agent-pm-paseo-c
 # 停用：systemctl --user disable --now agent-pm-paseo-collector@paseo-gx10
 ```
 
+### GX10 实机部署（2026-11-11）
+
+090e 和 c757 已通过各自的 Paseo 专用临时终端部署并启用独立的 systemd 用户服务，没有修改 SSH 授权，也没有重启 Paseo daemon 或改动 herdr 采集器。
+
+| 机器 / 用户 | 来源 | daemon serverId | 服务 |
+|---|---|---|---|
+| gx10-090e / yubaifeng | `paseo-gx10-090e` | `srv_Z45uIMACHAjG` | `agent-pm-paseo-collector@paseo-gx10-090e.service` |
+| gx10-c757 / bz | `paseo-gx10-c757` | `srv_SyyfHCkc1tYm` | `agent-pm-paseo-collector@paseo-gx10-c757.service` |
+
+两台 daemon 均为 0.16.0-beta.1，采集器沿用锁定的 SDK 0.15.0，目录读取、心跳、快照和内容上报已实测通过。首次验收中心分别收到 10 / 2 个会话，其中未加载的 5 / 1 个只上报状态。
+
+- 运行代码及 SDK 的纯 JavaScript 运行依赖来自提交 `76d7164`，位于 `~/.local/share/agent-pm-paseo/releases/76d7164`；没有拷贝 Mac 原生模块，也没有安装中心服务的模型依赖。
+- 专用 Node 位于 `~/.local/opt/node-v26.13.0-linux-arm64/bin/node`，官方包的 SHA-256 已校验。各服务的 `runtime.conf` 单独设置 `AGENT_PM_REPO` 和 `PATH`，不替换系统或 Paseo 使用的 Node。
+- 配置为 `~/.config/herdr-pm/<sourceId>.json`，独立 token 为同目录 `<sourceId>.token`，权限均为 600；状态目录为 `~/.local/state/herdr-pm/<sourceId>`。
+- 两个用户的 `Linger=yes`，服务均已 `enable`；herdr 的 `herdr-pm-collector.service` 继续独立运行。
+- 维护时在对应机器执行 `systemctl --user status agent-pm-paseo-collector@<sourceId>`，日志用 `journalctl --user -u agent-pm-paseo-collector@<sourceId> -n 30`。回退只需 `systemctl --user disable --now agent-pm-paseo-collector@<sourceId>`，无需停 herdr 或 Paseo。
+
 ### 上线顺序与回退
 
 1. **备份中心数据库**（中心停着时复制 `herdr-pm.db*`，或 `sqlite3 herdr-pm.db ".backup herdr-pm.pre-v5.db"`）。
@@ -605,7 +622,7 @@ systemctl --user daemon-reload && systemctl --user enable --now agent-pm-paseo-c
 
 ### 已知限制
 
-- 第一版不自动发现 Paseo 的远程 hosts、不建 SSH 隧道、不配 relay；多个 daemon 就起多个实例。没有在真实跨机 daemon 上验收过。
+- 第一版不自动发现 Paseo 的远程 hosts、不建 SSH 隧道、不配 relay；多个 daemon 就起多个实例。090e 和 c757 的独立实例已通过实机验收，见上面的部署记录。
 - 不读未加载的 agent（见上）；Claude / Codex 以外的 provider 只保证状态，未知的时间线行只计数，不当作正文。
 - 同一原生 ID 出现在两台机器上时保守地保留为两个会话（键带 `@<machine>`，并标「身份待核对」）；身份迟到、两边都已有内容时，后到一边的内容只作证据保存，不自动拼接。
 - 时间线是 provider 的投影，不等于原始 transcript；daemon 自身丢失的历史（`gap`、窗口外的历史）记为缺口。
