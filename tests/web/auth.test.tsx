@@ -2,6 +2,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { AuthBoundary, useAdmin, authRequest } from '../../web/src/auth.tsx';
+import { SettingsModal } from '../../web/src/components/settings-modal.tsx';
+import { ToastProvider } from '../../web/src/components/toast.tsx';
 import { AUTH_EVENT, setToken, getToken } from '../../web/src/api.ts';
 const fetchMock = vi.fn<typeof fetch>();
 const anonymous = { configured: true, username: null, must_change_password: false };
@@ -67,4 +69,15 @@ test('unconfigured and network error states offer recovery', async () => {
 test('logout requests always carry the browser anti-CSRF header', async () => {
   fetchMock.mockResolvedValue(json({ ok: true })); await authRequest('logout', {});
   expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST', credentials: 'same-origin', headers: { 'X-Agent-PM': 'browser' } });
+});
+
+
+test('account settings logout returns to the login screen', async () => {
+  fetchMock.mockImplementation(async (path) => json(path === '/auth/logout' ? { ok: true } : signedIn));
+  const closed = vi.fn();
+  render(<AuthBoundary><ToastProvider><SettingsModal onClose={closed} /></ToastProvider></AuthBoundary>);
+  fireEvent.click(await screen.findByRole('button', { name: '退出登录' }));
+  expect(await screen.findByRole('heading', { name: '管理员登录' })).toBeTruthy();
+  expect(closed).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole('dialog')).toBeNull();
 });
