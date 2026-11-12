@@ -972,6 +972,7 @@ test('backfill progress counts sessions with backfill chunks and those fully dig
   expect(scheduler(runner).status()).toEqual({
     enabled: true,
     blocked_sessions: 0,
+    blocked_reason: null,
     paused_until: null,
     pause_reason: null,
     last_error: null,
@@ -1118,14 +1119,16 @@ test('a refused digest is durably isolated, never consumed, and other sessions c
   expect(t.db.prepare('SELECT count(*) n FROM digests WHERE session_key=?').get(A)).toEqual({ n: 0 });
   expect(t.db.prepare('SELECT chunk_ids,run_id FROM digest_blocks WHERE session_key=?').get(A)).toEqual({ chunk_ids: JSON.stringify([refused]), run_id: 1 });
   expect(s.status()).toMatchObject({ blocked_sessions: 1, paused_until: null });
-  expect(s.status().last_error).toContain('上游拒绝摘要');
+  expect(s.status().last_error).toBeNull();
+  expect(s.status().blocked_reason).toContain('上游拒绝摘要');
   expect(await s.tick()).toBe('digested'); expect(digested(healthy)).toBe(1);
   advance(SESSION_COOLDOWN_MS * 20);
   const restarted = scheduler(runner);
   for (let i=0; i<4; i++) expect(await restarted.tick()).toBe('idle');
   expect(calls).toHaveLength(2); expect(digested(refused)).toBe(0);
   expect(restarted.status().blocked_sessions).toBe(1);
-  expect(restarted.status().last_error).toContain(A);
+  expect(restarted.status().last_error).toBeNull();
+  expect(restarted.status().blocked_reason).toContain(A);
 });
 
 test('sync and new content do not resubmit a provider-refused session; history remains incomplete', async () => {

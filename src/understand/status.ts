@@ -10,6 +10,8 @@ export type SchedulerStatus = {
   waiting_sessions: number;
   /** Sessions awaiting review after the provider refused a digest; not queued for automatic retry. */
   blocked_sessions?: number;
+  /** Review information, separate from the last runtime failure. */
+  blocked_reason?: string | null;
   uncurated_digests: number;
   backfill: { sessions_total: number; sessions_done: number };
   last_digest_at: string | null;
