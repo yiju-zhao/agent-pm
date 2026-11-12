@@ -1,7 +1,8 @@
-import { afterEach,beforeEach,expect,test } from 'vitest';
+import { afterEach,beforeEach,expect,test,vi } from 'vitest';
 import { setup,NOW } from '../domain/helpers.ts';
 import type { Setup } from '../domain/helpers.ts';
 import { pickProjectReview,runProjectReview,reviewFamily,reviewDigestDependency,REVIEW_BATCH } from '../../src/understand/project-review.ts';
+import { createApp } from '../../src/server/http.ts';
 import { Scheduler } from '../../src/understand/scheduler.ts';
 import type { LlmCall,LlmResult,LlmRunner } from '../../src/understand/llm.ts';
 let t:Setup;
@@ -140,4 +141,16 @@ test('a failed review backs off durably while another project can still be reorg
  expect(await s.tick()).toBe('idle');expect(calls).toBe(2);
  t.setNow(new Date(Date.parse(NOW)+61000).toISOString());
  expect(await s.tick()).toBe('curated');expect(calls).toBe(3);expect(s.status().pending_project_reviews).toBe(0);
+});
+
+
+test('the authenticated HTTP association wakes the project curator immediately',async()=>{
+ session();const p=project();digest();let calls=0;
+ const s=new Scheduler(t.db,t.deps,async()=>{calls++;return ok();},{digest:'m',curate:'m'});
+ const cfg={port:1,dbPath:':memory:',userToken:'test-admin-key-123456',mcpToken:'test-mcp-key-123456',collectors:{}};
+ const app=createApp(t.db,cfg,t.deps.now,t.deps.newId,{scheduler:s});
+ const response=await app.request('http://localhost/sessions/'+encodeURIComponent(A)+'/links',{method:'POST',headers:{Authorization:'Bearer '+cfg.userToken,'Content-Type':'application/json'},body:JSON.stringify({project_id:p})});
+ expect(response.status).toBe(200);expect((await response.json()).project_review_queued).toBe(true);
+ await vi.waitFor(()=>expect(t.db.prepare("SELECT status FROM project_reviews WHERE project_id=?").get(p)).toEqual({status:'done'}));
+ expect(calls).toBe(1);await s.stop();
 });
