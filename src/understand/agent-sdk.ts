@@ -35,9 +35,22 @@ function kindFromStatus(status: unknown): LlmErrorKind | undefined {
   return undefined;
 }
 
+/** Explicit provider stop metadata; these are refusals even when HTTP/result status says success. */
+function refusalStop(value: unknown): boolean {
+  return isRecord(value) && (value.stop_reason === 'refusal' || (isRecord(value.stop_details) && value.stop_details.type === 'refusal'));
+}
+
+/** Legacy Claude Code error rendering. Inspect errored responses only, never prompts or ordinary output. */
+function refusalError(value: unknown): boolean {
+  return typeof value === 'string' && /API Error:/i.test(value) && /can['’]t help with this/i.test(value) && /https:\/\/www\.anthropic\.com\/legal\/aup\b/i.test(value);
+}
+
 /** `error` field of an assistant message to error kind; other values (server_error, ...) are not classified here. */
 function kindFromAssistantError(error: unknown): LlmErrorKind | undefined {
   switch (error) {
+    case 'refusal':
+    case 'content_filter':
+      return 'refused';
     case 'rate_limit':
       return 'rate_limit';
     case 'overloaded':
@@ -66,11 +79,17 @@ export function mapSdkMessages(messages: unknown[], opts: { expectStructured?: b
   for (const m of messages) {
     if (!isRecord(m)) continue;
     if (m.type === 'result') result = m;
-    else if (m.type === 'assistant' && assistantKind === undefined) assistantKind = kindFromAssistantError(m.error);
+    else if (m.type === 'assistant' && (assistantKind === undefined || refusalStop(m.message))) {
+      assistantKind = refusalStop(m.message) ? 'refused' : kindFromAssistantError(m.error);
+    }
   }
 
   if (result === undefined) {
     return { ok: false, kind: assistantKind ?? 'other', message: 'the model run ended without a result message' };
+  }
+
+  if (refusalStop(result) || assistantKind === 'refused') {
+    return { ok: false, kind: 'refused', message: typeof result.result === 'string' && result.result ? result.result : 'provider declined to process this request' };
   }
 
   if (result.subtype === 'success' && result.is_error !== true) {
@@ -100,7 +119,7 @@ export function mapSdkMessages(messages: unknown[], opts: { expectStructured?: b
   const kind: LlmErrorKind =
     kindFromStatus(result.api_error_status) ??
     assistantKind ??
-    (result.subtype === 'error_max_structured_output_retries' || structuredTurnsOut ? 'bad_output' : 'other');
+    (refusalError(message) ? 'refused' : (result.subtype === 'error_max_structured_output_retries' || structuredTurnsOut) ? 'bad_output' : 'other');
   return { ok: false, kind, message };
 }
 
@@ -199,7 +218,7 @@ export function agentSdkRunner(opts: RunnerAuth): LlmRunner {
       options.abortController = controller;
       for await (const message of sdk.query({ prompt: call.prompt, options })) {
         // Only these two kinds matter for the outcome; skip the rest instead of holding the whole transcript.
-        if (message.type === 'result' || (message.type === 'assistant' && message.error !== undefined)) collected.push(message);
+        if (message.type === 'result' || (message.type === 'assistant' && (message.error !== undefined || refusalStop(message.message)))) collected.push(message);
       }
     };
     // The abort tells the SDK to kill its subprocess; racing against the timer as well means a stream that does
@@ -230,7 +249,9 @@ export function agentSdkRunner(opts: RunnerAuth): LlmRunner {
     const mapped = mapSdkMessages(collected, { expectStructured: call.outputSchema !== undefined });
     if (thrown !== undefined && !hasResult) {
       // The call died before a result arrived; keep an error kind the assistant message already gave us.
-      return { ok: false, kind: mapped.ok ? 'other' : mapped.kind, message: errMessage(thrown), durationMs };
+      const message = errMessage(thrown);
+      const kind = !mapped.ok && mapped.kind !== 'other' ? mapped.kind : refusalError(message) ? 'refused' : 'other';
+      return { ok: false, kind, message, durationMs };
     }
     return { ...mapped, durationMs };
   };

@@ -409,6 +409,16 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX admin_sessions_expiry ON admin_sessions (expires_at);
   `,
+  // v8: provider-refused digest windows await review; never retry, skip, or mark their content digested.
+  `
+  CREATE TABLE digest_blocks (
+    session_key TEXT PRIMARY KEY,
+    chunk_ids TEXT NOT NULL,
+    message TEXT NOT NULL,
+    run_id INTEGER,
+    created_at TEXT NOT NULL
+  );
+  `,
 ];
 
 /** Opens (creating if needed) the central database in WAL mode and applies pending migrations. */

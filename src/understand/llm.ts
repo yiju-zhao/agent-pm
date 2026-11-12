@@ -18,7 +18,7 @@ export type LlmCall = {
 };
 
 /** `rate_limit`, `overloaded` and `auth` pause the scheduler; the rest only fail this one call. */
-export type LlmErrorKind = 'rate_limit' | 'overloaded' | 'auth' | 'bad_output' | 'other';
+export type LlmErrorKind = 'rate_limit' | 'overloaded' | 'auth' | 'refused' | 'bad_output' | 'other';
 
 export type LlmResult =
   | {

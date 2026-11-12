@@ -8,6 +8,8 @@ export type SchedulerStatus = {
   last_error: string | null;
   running: 'digest' | 'curate' | 'restage' | null;
   waiting_sessions: number;
+  /** Sessions awaiting review after the provider refused a digest; not queued for automatic retry. */
+  blocked_sessions?: number;
   uncurated_digests: number;
   backfill: { sessions_total: number; sessions_done: number };
   last_digest_at: string | null;

@@ -115,3 +115,16 @@ test('the timer is cleared when the call finishes in time', async () => {
   expect(await agentSdkRunner({})({ ...call, timeoutMs: 5000 })).toMatchObject({ ok: true });
   expect(vi.getTimerCount()).toBe(0);
 });
+
+test('the runner retains an assistant refusal stop even without an assistant error field', async () => {
+  sdk.query.mockImplementation(async function* () {
+    yield { type: 'assistant', message: { stop_reason: 'refusal' } };
+    yield { ...successMsg, result: 'provider declined' };
+  });
+  expect(await agentSdkRunner({})({ ...call, outputSchema: { type: 'object' } })).toMatchObject({ ok: false, kind: 'refused' });
+});
+
+test('a provider AUP error thrown before result is a refusal', async () => {
+  sdk.query.mockImplementation(() => { throw new Error("API Error: Haiku 5.5 can't help with this. https://www.anthropic.com/legal/aup"); });
+  expect(await agentSdkRunner({})(call)).toMatchObject({ ok: false, kind: 'refused' });
+});

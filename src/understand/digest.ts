@@ -278,6 +278,12 @@ export function skipWindow(db: DatabaseSync, deps: DomainDeps, window: DigestWin
   );
 }
 
+/** Persist the refusal without consuming any content; explicit review is required before this session can resume. */
+export function blockDigest(db: DatabaseSync, deps: DomainDeps, window: DigestWindow, message: string, runId: number): void {
+  db.prepare(`INSERT INTO digest_blocks (session_key, chunk_ids, message, run_id, created_at)
+    VALUES (?, ?, ?, ?, ?) ON CONFLICT(session_key) DO NOTHING`).run(window.sessionKey, JSON.stringify(window.chunkIds), message, runId, deps.now().toISOString());
+}
+
 /**
  * Digests one window. With `force` and a window under `MIN_DIGEST_CHARS` nothing is sent: a skipped digest is stored
  * and the chunks are marked done, except for a window with a report chunk, which always goes to the model (a report
@@ -292,6 +298,8 @@ export async function runDigest(
   window: DigestWindow,
   opts: { model: string; force: boolean },
 ): Promise<DigestOutcome> {
+  const blocked = db.prepare('SELECT message FROM digest_blocks WHERE session_key = ?').get(window.sessionKey) as { message: string } | undefined;
+  if (blocked) return { status: 'failed', kind: 'refused', message: blocked.message };
   if (opts.force && window.totalChars < MIN_DIGEST_CHARS && !window.hasReport) {
     return { status: 'skipped', digestId: skipWindow(db, deps, window) };
   }
@@ -308,6 +316,10 @@ export async function runDigest(
   const result = await runner(call);
   if (!result.ok) {
     recordRun(db, deps, call, result);
+    if (result.kind === 'refused') {
+      const row = db.prepare('SELECT last_insert_rowid() AS id').get() as { id: number };
+      blockDigest(db, deps, window, result.message, row.id);
+    }
     return { status: 'failed', kind: result.kind, message: result.message };
   }
 

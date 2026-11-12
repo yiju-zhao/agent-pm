@@ -216,11 +216,15 @@ export class Scheduler {
     const scalar = (sql: string): number => (this.db.prepare(sql).get() as { n: number }).n;
     const latest = (sql: string): string | null => (this.db.prepare(sql).get() as { at: string | null }).at;
     const counts = this.readChunkCounts(now);
+    const blocked = this.db.prepare(`SELECT b.session_key FROM digest_blocks b LEFT JOIN sessions s ON s.key=b.session_key
+      WHERE coalesce(s.ignored,0)=0 ORDER BY b.created_at`).all() as Array<{ session_key: string }>;
+    const refusal = blocked.length ? `上游拒绝摘要：${blocked.map((b) => b.session_key).join('、')}；已暂停这些会话的自动摘要，原文保留，其他会话正常处理` : null;
     return {
       enabled: true,
       paused_until: paused ? new Date(this.pausedUntil!).toISOString() : null,
       pause_reason: paused ? this.pauseReason : null,
-      last_error: this.lastError,
+      last_error: this.lastError ?? refusal,
+      blocked_sessions: blocked.length,
       running: this.running,
       waiting_sessions: counts.waiting_sessions,
       uncurated_digests: scalar('SELECT count(*) AS n FROM digests WHERE curated = 0'),
@@ -242,7 +246,8 @@ export class Scheduler {
       at: now,
       waiting_sessions: scalar(
         `SELECT count(DISTINCT c.session_key) AS n FROM chunks c LEFT JOIN sessions s ON s.key = c.session_key
-         WHERE c.digested = 0 AND c.backfill = 0 AND coalesce(s.ignored, 0) = 0`,
+         WHERE c.digested = 0 AND c.backfill = 0 AND coalesce(s.ignored, 0) = 0
+         AND NOT EXISTS (SELECT 1 FROM digest_blocks b WHERE b.session_key = c.session_key)`,
       ),
       // Ignored sessions are never digested, so they are left out like in `waiting_sessions`.
       backfill: {
@@ -394,6 +399,14 @@ export class Scheduler {
       this.stalls.delete(key);
       return outcome.status;
     }
+    if (outcome.kind === 'refused') {
+      this.sessionFailures.delete(key);
+      this.cooldownUntil.delete(key);
+      this.stalls.delete(key);
+      // The durable block, visible in status(), replaces the transient retry error for this session.
+      this.recovered({ kind: 'digest', key });
+      return 'skipped';
+    }
     if (isPausing(outcome.kind)) return this.pause(now, outcome.kind);
     this.digestFailed(now, window, outcome.kind, outcome.message);
     return 'skipped';
@@ -481,7 +494,8 @@ export class Scheduler {
     const keys = this.db
       .prepare(
         `SELECT DISTINCT c.session_key AS key FROM chunks c LEFT JOIN sessions s ON s.key = c.session_key
-         WHERE c.digested = 0 AND c.backfill = 0 AND c.id <= ? AND coalesce(s.ignored, 0) = 0`,
+         WHERE c.digested = 0 AND c.backfill = 0 AND c.id <= ? AND coalesce(s.ignored, 0) = 0
+         AND NOT EXISTS (SELECT 1 FROM digest_blocks b WHERE b.session_key = c.session_key)`,
       )
       .all(marks.chunk) as Array<{ key: string }>;
     return keys.every((r) => this.cooling(r.key, now));
@@ -504,6 +518,7 @@ export class Scheduler {
         `SELECT c.session_key AS key, min(c.received_at) AS oldest
          FROM chunks c LEFT JOIN sessions s ON s.key = c.session_key
          WHERE c.digested = 0 AND c.backfill = ? AND coalesce(s.ignored, 0) = 0
+         AND NOT EXISTS (SELECT 1 FROM digest_blocks b WHERE b.session_key = c.session_key)
          GROUP BY c.session_key ORDER BY oldest, key`,
       )
       .all(backfill ? 1 : 0) as Candidate[];

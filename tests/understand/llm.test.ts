@@ -311,3 +311,19 @@ test('buildQueryOptions turns ToolDefs into one in-process MCP server named pm a
   // A throwing handler comes back to the model as an error result rather than breaking the run.
   await expect(tools[2]!.handler({})).resolves.toEqual({ content: [{ type: 'text', text: 'tool crash failed: kaboom' }], isError: true });
 });
+
+test('provider refusal stop metadata is not a structured-output or transient error', () => {
+  for (const metadata of [{ stop_reason: 'refusal' }, { stop_details: { type: 'refusal', category: 'provider' } }]) {
+    expect(mapSdkMessages([resultMsg({ ...metadata })], { expectStructured: true })).toMatchObject({ ok: false, kind: 'refused' });
+  }
+  expect(mapSdkMessages([{ type: 'assistant', error: 'refusal' }])).toMatchObject({ ok: false, kind: 'refused' });
+  expect(mapSdkMessages([{ type: 'assistant', message: { stop_reason: 'refusal' } }, resultMsg({})])).toMatchObject({ ok: false, kind: 'refused' });
+  expect(isPausing('refused')).toBe(false);
+});
+
+test('legacy provider AUP refusal is recognized only in failed result messages', () => {
+  const error = "API Error: Haiku 5.5 can't help with this. Start a new session to continue.\nLearn more: https://www.anthropic.com/legal/aup\nDetails: `[frontier_llm]`";
+  expect(mapSdkMessages([resultMsg({ is_error: true, result: error })])).toMatchObject({ ok: false, kind: 'refused', message: error });
+  expect(mapSdkMessages([resultMsg({ result: error, structured_output: { quote: error } })], { expectStructured: true })).toMatchObject({ ok: true });
+  expect(mapSdkMessages([resultMsg({ is_error: true, result: 'API Error: network unreachable' })])).toMatchObject({ ok: false, kind: 'other' });
+});
