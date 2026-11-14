@@ -23,3 +23,8 @@ test('anything unrecognised is the home page', () => {
     expect(parseHash(hash)).toEqual({ page: 'home' });
   }
 });
+
+test('#/inbox supports direct links and a trailing slash', () => {
+  expect(parseHash('#/inbox')).toEqual({ page: 'inbox' });
+  expect(parseHash('#/inbox/')).toEqual({ page: 'inbox' });
+});

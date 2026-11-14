@@ -1,82 +1,80 @@
-import { useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { CredentialMode, LlmRole, SettingsView } from '../../../src/server/settings.ts';
 import { apiGet, apiSend, errorText } from '../api.ts';
 import { useToast } from './toast.tsx';
 import { authRequest, PasswordForm, useAdmin } from '../auth.tsx';
+import { Dialog } from './dialog.tsx';
+import { ConfirmButton } from './confirm-button.tsx';
 
 export type SettingsTab = 'access' | 'models' | 'provider' | 'keys';
 
-const TABS: Array<{ id: SettingsTab; label: string }> = [
-  { id: 'access', label: '账号' },
-  { id: 'models', label: '模型' },
-  { id: 'provider', label: '模型凭据' },
-  { id: 'keys', label: 'API Keys' },
+const TABS: Array<{ id: SettingsTab; label: string; detail: string }> = [
+  { id: 'access', label: '账号与安全', detail: '登录与密码' },
+  { id: 'models', label: '模型', detail: '各角色的模型选择' },
+  { id: 'provider', label: '模型服务', detail: '调用身份与计费' },
 ];
-
-/**
- * The signed-in administrator's account, model settings and machine API keys.
- */
+const DESCRIPTIONS: Record<SettingsTab, { title: string; detail: string }> = {
+  access: { title: '账号与安全', detail: '管理你的管理员账号和登录状态。' },
+  models: { title: '模型', detail: '为摘要、整理与复核选择合适的模型。' },
+  provider: { title: '模型服务', detail: '设置 agent-pm 调用 Claude 时使用的凭据。' },
+  keys: { title: '接入密钥', detail: '管理 agent 和采集器访问 agent-pm 的权限。' },
+};
 export function SettingsModal({ initialTab = 'access', onClose }: { initialTab?: SettingsTab; onClose: () => void }) {
   const [tab, setTab] = useState<SettingsTab>(initialTab);
-  const titleId = useId();
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  return (
-    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby={titleId}>
-        <div className="settings-head">
-          <h2 id={titleId}>设置</h2>
-          <button type="button" className="icon-btn" aria-label="关闭" onClick={onClose}>
-            ×
-          </button>
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState<{ run(): void } | null>(null);
+  const id = useId();
+  const request = (run: () => void) => { if (busy) return; if (dirty) { setPending({ run }); const panel = document.getElementById(`${id}-panel`); if (panel) panel.scrollTop = 0; } else run(); };
+  return <Dialog title="设置" className="settings-modal" onClose={() => request(onClose)} locked={busy}>
+    <div className="settings-head"><div><h2>设置</h2><p className="dim">管理账号、模型与连接</p></div><button type="button" className="icon-btn" aria-label="关闭" disabled={busy} onClick={() => request(onClose)}>×</button></div>
+    <div className="settings-body">
+      <nav className="settings-nav" aria-label="设置分类">
+        <p className="eyebrow">偏好设置</p>
+        <div className="settings-tabs" role="tablist" aria-orientation="vertical">
+          {TABS.map((item, index) => <button key={item.id} id={`${id}-${item.id}`} role="tab" aria-selected={tab === item.id} aria-controls={`${id}-panel`} tabIndex={tab === item.id ? 0 : -1} disabled={busy}
+            onClick={() => { if (tab !== item.id) request(() => { setDirty(false); setTab(item.id); }); }}
+            onKeyDown={(event) => {
+              const next = (event.key === 'ArrowDown' || event.key === 'ArrowRight') ? (index + 1) % TABS.length : (event.key === 'ArrowUp' || event.key === 'ArrowLeft') ? (index + TABS.length - 1) % TABS.length : event.key === 'Home' ? 0 : event.key === 'End' ? TABS.length - 1 : -1;
+              if (next < 0) return;
+              event.preventDefault(); request(() => { setDirty(false); setTab(TABS[next]!.id); document.getElementById(`${id}-${TABS[next]!.id}`)?.focus(); });
+            }}><span>{item.label}</span><small>{item.detail}</small></button>)}
         </div>
-        <div className="settings-body">
-          <div className="settings-tabs" role="tablist" aria-orientation="vertical">
-            {TABS.map((t) => (
-              <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}>
-                {t.label}
-              </button>
-            ))}
-          </div>
-          <div className="settings-panel" role="tabpanel" aria-label={TABS.find((t) => t.id === tab)!.label}>
-            {tab === 'access' ? <AccountTab onClose={onClose} /> : <CenterTabs tab={tab} onClose={onClose} />}
-          </div>
-        </div>
+        <div className="settings-nav-link"><p className="eyebrow">开发者</p><a href="#/keys" onClick={(event) => { event.preventDefault(); request(() => { window.location.hash = '/keys'; onClose(); }); }}>接入密钥 <span aria-hidden="true">↗</span></a></div>
+      </nav>
+      <div id={`${id}-panel`} className="settings-panel" role="tabpanel" aria-label={DESCRIPTIONS[tab].title} tabIndex={0}>
+        <div className="settings-panel-heading"><h3>{DESCRIPTIONS[tab].title}</h3><p className="dim">{DESCRIPTIONS[tab].detail}</p></div>
+        {pending && <div className="unsaved-notice" role="alert"><p>有尚未保存的更改，要放弃吗？</p><div><button type="button" onClick={() => setPending(null)}>继续编辑</button><button type="button" className="danger" onClick={() => { const run = pending.run; setPending(null); setDirty(false); run(); }}>放弃更改</button></div></div>}
+        {tab === 'access' ? <AccountTab onClose={onClose} onDirty={setDirty} onBusy={setBusy} /> : tab === 'keys' ? <KeysTab onClose={onClose} /> : <CenterTabs key={tab} tab={tab} onDirty={setDirty} onBusy={setBusy} />}
       </div>
     </div>
-  );
+  </Dialog>;
 }
 
-function AccountTab({ onClose }: { onClose(): void }) {
+function AccountTab({ onClose, onDirty, onBusy }: { onClose(): void; onDirty(dirty: boolean): void; onBusy(busy: boolean): void }) {
   const admin = useAdmin();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
+  const [editingPassword, setEditingPassword] = useState(false);
+  const passwordBusy = useCallback((value: boolean) => { setBusy(value); onBusy(value); }, [onBusy]);
   return <div className="settings-section">
-    <p>当前账号：{admin?.session.username ?? '管理员'}</p>
-    <PasswordForm onSaved={(session) => { admin?.update(session); toast('密码已更新'); }} />
-    <button type="button" disabled={busy} onClick={async () => {
+    <div className="account-identity"><span className="account-avatar" aria-hidden="true">{(admin?.session.username ?? 'A').slice(0, 1).toUpperCase()}</span><div><strong>{admin?.session.username ?? '管理员'}</strong><p className="dim">管理员 · 账号密码登录</p></div><span className="scope-badge">已登录</span></div>
+    {editingPassword ? <PasswordForm onDirty={onDirty} onBusy={passwordBusy} onSaved={(session) => { admin?.update(session); onDirty(false); onBusy(false); setBusy(false); setEditingPassword(false); toast('密码已更新'); }} /> : <div className="account-signout"><div><h3>登录密码</h3><p className="dim">建议使用独立密码，至少 12 个字符。</p></div><button type="button" onClick={() => setEditingPassword(true)}>修改密码</button></div>}
+    <div className="account-signout"><div><h3>退出此浏览器</h3><p className="dim">退出后，需要重新登录才能管理项目。</p></div><button type="button" disabled={busy} onClick={async () => {
       setBusy(true);
       try { await authRequest('logout', {}); onClose(); admin?.update({ configured: true, username: null, must_change_password: false }); }
       catch (error) { toast(errorText(error)); }
       finally { setBusy(false); }
-    }}>退出登录</button>
+    }}>退出登录</button></div>
   </div>;
 }
 
 /** The tabs that read and change the center's settings. */
-function CenterTabs({ tab, onClose }: { tab: SettingsTab; onClose: () => void }) {
+function CenterTabs({ tab, onDirty, onBusy }: { tab: SettingsTab; onDirty(dirty: boolean): void; onBusy(busy: boolean): void }) {
   const [view, setView] = useState<SettingsView | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    if (tab === 'keys') return;
     let live = true;
     apiGet<SettingsView>('/admin/settings', { auth: true }).then(
       (v) => live && setView(v),
@@ -87,15 +85,16 @@ function CenterTabs({ tab, onClose }: { tab: SettingsTab; onClose: () => void })
     };
   }, [tab]);
 
-  if (tab === 'keys') return <KeysTab onClose={onClose} />;
   if (error !== null) return <p role="alert">{error}</p>;
   if (view === null) return <p className="dim">加载中…</p>;
-  return tab === 'models' ? <ModelsTab view={view} onChange={setView} /> : <ProviderTab view={view} onChange={setView} />;
+  return tab === 'models' ? <ModelsTab view={view} onChange={setView} onDirty={onDirty} onBusy={onBusy} /> : <ProviderTab view={view} onChange={setView} onDirty={onDirty} onBusy={onBusy} />;
 }
 
 const CUSTOM = '__custom__';
 
-function ModelsTab({ view, onChange }: { view: SettingsView; onChange: (v: SettingsView) => void }) {
+type EditorProps = { view: SettingsView; onChange(v: SettingsView): void; onDirty(dirty: boolean): void; onBusy(busy: boolean): void };
+
+function ModelsTab({ view, onChange, onDirty, onBusy }: EditorProps) {
   const toast = useToast();
   const [draft, setDraft] = useState<Record<LlmRole, string>>(view.models);
   const [custom, setCustom] = useState<Partial<Record<LlmRole, boolean>>>(() =>
@@ -104,6 +103,8 @@ function ModelsTab({ view, onChange }: { view: SettingsView; onChange: (v: Setti
   const [busy, setBusy] = useState(false);
   const changed = view.roles.filter(({ role }) => draft[role].trim() !== view.models[role]);
 
+  useEffect(() => { onDirty(changed.length > 0); }, [changed.length, onDirty]);
+  useEffect(() => { onBusy(busy); }, [busy, onBusy]);
   const save = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -120,7 +121,7 @@ function ModelsTab({ view, onChange }: { view: SettingsView; onChange: (v: Setti
 
   return (
     <form className="settings-section" onSubmit={save}>
-      <p className="dim">中心理解层的每个角色用哪个模型。改动从下一次模型调用开始生效，不用重启。</p>
+      <p className="settings-info">更改从下一次模型调用生效，无需重启服务。</p>
       {view.roles.map(({ role, label, detail }) => (
         <div key={role} className="settings-row">
           <div>
@@ -130,6 +131,7 @@ function ModelsTab({ view, onChange }: { view: SettingsView; onChange: (v: Setti
           <div className="settings-control">
             <select
               id={`model-${role}`}
+              disabled={busy}
               value={custom[role] ? CUSTOM : draft[role]}
               onChange={(e) => {
                 const v = e.target.value;
@@ -146,6 +148,7 @@ function ModelsTab({ view, onChange }: { view: SettingsView; onChange: (v: Setti
             </select>
             {custom[role] ? (
               <input
+                disabled={busy}
                 aria-label={`${label} 的模型 ID`}
                 value={draft[role]}
                 placeholder="例如 claude-sonnet-5-5"
@@ -155,11 +158,7 @@ function ModelsTab({ view, onChange }: { view: SettingsView; onChange: (v: Setti
           </div>
         </div>
       ))}
-      <div className="modal-actions">
-        <button type="submit" disabled={busy || changed.length === 0}>
-          保存
-        </button>
-      </div>
+      <div className="settings-savebar"><span className="dim" role="status">{changed.length ? '有未保存的更改' : '所有更改已保存'}</span><button type="button" disabled={busy || !changed.length} onClick={() => { setDraft(view.models); setCustom(Object.fromEntries(view.roles.map(({ role }) => [role, !view.model_options.some((o) => o.id === view.models[role])]))); }}>重置</button><button type="submit" className="primary" disabled={busy || !changed.length}>{busy ? '正在保存…' : '保存更改'}</button></div>
     </form>
   );
 }
@@ -170,7 +169,7 @@ const MODE_TEXT: Record<CredentialMode, { title: string; detail: string }> = {
   api_key: { title: 'Anthropic API key', detail: '按 token 计费到这个 API key 所属的 API 账户，不走订阅。' },
 };
 
-function ProviderTab({ view, onChange }: { view: SettingsView; onChange: (v: SettingsView) => void }) {
+function ProviderTab({ view, onChange, onDirty, onBusy }: EditorProps) {
   const toast = useToast();
   const [mode, setMode] = useState<CredentialMode>(view.provider.mode);
   const [secret, setSecret] = useState('');
@@ -179,10 +178,14 @@ function ProviderTab({ view, onChange }: { view: SettingsView; onChange: (v: Set
   const stored = mode === 'login' ? undefined : view.provider.stored[mode];
   const needsSecret = mode !== 'login' && stored === undefined && secret.trim() === '';
 
+  const changed = mode !== view.provider.mode || secret.trim() !== '';
+  useEffect(() => { onDirty(changed); }, [changed, onDirty]);
+  useEffect(() => { onBusy(busy); }, [busy, onBusy]);
   const run = async (fn: () => Promise<SettingsView>, done: string) => {
     setBusy(true);
     try {
-      onChange(await fn());
+      const next = await fn();
+      onChange(next); setMode(next.provider.mode);
       setSecret('');
       toast(done);
     } catch (err) {
@@ -197,18 +200,18 @@ function ProviderTab({ view, onChange }: { view: SettingsView; onChange: (v: Set
     void run(() => apiSend<SettingsView>('PUT', '/admin/settings/provider', body), '凭据已保存，下一次调用开始生效');
   };
 
-  const origin = { settings: '在这里选择的', config: '配置文件里的 oauthTokenFile', default: '默认' }[view.provider.origin];
+  const origin = { settings: '已保存的设置', config: '来自中心配置', default: '默认凭据' }[view.provider.origin];
   return (
     <form className="settings-section" onSubmit={save}>
-      <p>
+      <p className="settings-info">
         当前使用：<b>{MODE_TEXT[view.provider.mode].title}</b>
         <span className="dim">（{origin}）</span>
       </p>
       <fieldset className="settings-modes">
-        <legend>模型调用用哪个凭据</legend>
+        <legend>调用方式</legend>
         {(Object.keys(MODE_TEXT) as CredentialMode[]).map((m) => (
-          <label key={m} className="settings-mode">
-            <input type="radio" name="credential-mode" value={m} checked={mode === m} onChange={() => setMode(m)} />
+          <label key={m} className={`settings-mode ${mode === m ? 'is-selected' : ''}`}>
+            <input type="radio" name="credential-mode" disabled={busy} value={m} checked={mode === m} onChange={() => { setMode(m); setSecret(''); }} />
             <span>
               <b>{MODE_TEXT[m].title}</b>
               {m !== 'login' && view.provider.stored[m] !== undefined ? <span className="tag">已保存 …{view.provider.stored[m]}</span> : null}
@@ -225,59 +228,22 @@ function ProviderTab({ view, onChange }: { view: SettingsView; onChange: (v: Set
             id={secretId}
             type="password"
             autoComplete="off"
-            disabled={!view.secrets_writable}
+            disabled={busy || !view.secrets_writable}
             value={secret}
             onChange={(e) => setSecret(e.target.value)}
           />
           {!view.secrets_writable ? <p className="dim">这个中心启动时没有指定存放密钥的位置，不能在网页里保存。</p> : null}
-          <p className="dim">保存在中心机器上配置文件旁的 secrets 目录（只有本用户可读），不进数据库，也不会再显示出来。</p>
+          <p className="field-help">凭据安全保存在中心服务器，保存后仅显示末四位。这里的凭据用于调用模型，接入密钥在独立页面管理。</p>
         </>
       ) : null}
-      <div className="modal-actions">
-        <button type="submit" disabled={busy || needsSecret}>
-          保存
-        </button>
-        {mode !== 'login' && stored !== undefined ? (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void run(() => apiSend<SettingsView>('DELETE', `/admin/settings/provider/${mode}`), '已删除')}
-          >
-            删除已保存的
-          </button>
-        ) : null}
+      <div className="settings-savebar"><span className="dim" role="status">{changed ? '有未保存的更改' : '所有更改已保存'}</span>
+        <button type="submit" className="primary" disabled={busy || needsSecret || !changed || (secret.trim() !== '' && !view.secrets_writable)}>{busy ? '正在保存…' : '保存更改'}</button>
       </div>
+      {mode !== 'login' && stored !== undefined && <div className="provider-remove"><p className="dim">如果此凭据正在使用，删除后模型服务将回到默认凭据。</p><ConfirmButton label="删除已保存的凭据" confirmLabel="确认删除凭据" onConfirm={async () => { if (!busy) await run(() => apiSend<SettingsView>('DELETE', `/admin/settings/provider/${mode}`), '凭据已删除'); }} /></div>}
     </form>
   );
 }
 
 function KeysTab({ onClose }: { onClose: () => void }) {
-  return (
-    <div className="settings-section">
-      <p>中心只有一种凭据：API key。每个 key 有一个权限范围，决定它能做什么：</p>
-      <ul className="settings-scopes">
-        <li>
-          <b>管理员</b>：网页上的修改、查看对话原文、管理 key 和这些设置。只给你自己用。
-        </li>
-        <li>
-          <b>Agent（MCP）</b>：各机器上的 coding agent 用，只能读看板和用 pm_report 上报。
-        </li>
-        <li>
-          <b>herdr 采集器</b> / <b>Paseo 采集器</b>：只能上报自己那台机器或那个 Paseo 来源的数据。
-        </li>
-      </ul>
-      <p className="dim">新建的 key 只存哈希，只在创建时显示一次；可以随时吊销。配置文件里的 token 仍然有效，在列表里显示为只读。</p>
-      <div className="modal-actions">
-        <a
-          className="button"
-          href="#/keys"
-          onClick={() => {
-            onClose();
-          }}
-        >
-          打开 API Keys 管理
-        </a>
-      </div>
-    </div>
-  );
+  return <div className="settings-section"><p>为 agent 和采集器创建专属密钥、查看使用情况，或吊销不再使用的连接。</p><a className="button primary" href="#/keys" onClick={onClose}>管理接入密钥 ↗</a></div>;
 }

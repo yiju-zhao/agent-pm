@@ -62,12 +62,15 @@ function LoginForm({ onLogin }: { onLogin(session: LoginSession): void }) {
   </form>;
 }
 
-export function PasswordForm({ initial = false, onSaved }: { initial?: boolean; onSaved(session: LoginSession): void }) {
+export function PasswordForm({ initial = false, onSaved, onDirty, onBusy }: { initial?: boolean; onSaved(session: LoginSession): void; onDirty?(dirty: boolean): void; onBusy?(busy: boolean): void }) {
   const [current, setCurrent] = useState('');
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const dirty = current !== '' || password !== '' || confirmation !== '';
+  useEffect(() => { onDirty?.(dirty); }, [dirty, onDirty]);
+  useEffect(() => { onBusy?.(busy); }, [busy, onBusy]);
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (password !== confirmation) { setMessage('两次输入的新密码不一致'); return; }

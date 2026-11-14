@@ -5,6 +5,9 @@ import { SettingsModal } from './components/settings-modal.tsx';
 import type { SettingsTab } from './components/settings-modal.tsx';
 import { Icon } from './components/icon.tsx';
 import { useToast } from './components/toast.tsx';
+import { InboxProvider, useInbox } from './inbox.tsx';
+import { splitQuestions } from './home-model.ts';
+import { InboxPage } from './pages/inbox.tsx';
 import { HomePage } from './pages/home.tsx';
 import { KeysPage } from './pages/keys.tsx';
 import { ProjectPage } from './pages/project.tsx';
@@ -87,7 +90,7 @@ function SyncButton() {
 function ConnectionDot() {
   const state = useConnectionState();
   return (
-    <span className={`conn conn-${state}`}>
+    <span className={`conn conn-${state}`} title={CONNECTION_LABEL[state]}>
       <i className="dot" aria-hidden="true" />
       {CONNECTION_LABEL[state]}
     </span>
@@ -108,12 +111,26 @@ function Page({ route }: { route: Route }) {
       return <ProjectPage key={route.id} id={route.id} />;
     case 'sessions':
       return <SessionsPage />;
+    case 'inbox':
+      return <InboxPage />;
     case 'keys':
       return <KeysPage />;
   }
 }
 
-export function App() {
+function InboxLink({ active }: { active: boolean }) {
+  const questions = useInbox()!;
+  const split = splitQuestions(questions.data ?? []);
+  const count = split.needYou.length + split.attribution.length;
+  const label = questions.error ? 'Inbox · 暂时无法刷新' : questions.data === undefined ? 'Inbox · 加载中' : `Inbox · ${count} 项待处理`;
+  return <a className="inbox-link" href="#/inbox" onClick={questions.reload} aria-current={active ? 'page' : undefined} aria-label={label} title={label}>
+    <Icon name="inbox" /><span>Inbox</span>{questions.data !== undefined && count > 0 && <span className="inbox-badge" aria-hidden="true">{count > 99 ? '99+' : count}</span>}{questions.error && <span className="inbox-load-error" aria-hidden="true">!</span>}
+  </a>;
+}
+
+export function App() { return <InboxProvider><Workspace /></InboxProvider>; }
+
+function Workspace() {
   const hash = useSyncExternalStore(subscribeHash, () => window.location.hash);
   const route = useMemo(() => parseHash(hash), [hash]);
   const [settingsTab, setSettingsTab] = useState<SettingsTab | null>(null);
@@ -131,13 +148,14 @@ export function App() {
             <Icon name="sessions" />Session
           </a>
           <a href="#/keys" aria-current={route.page === 'keys' ? 'page' : undefined}>
-            <Icon name="key" />API Keys
+            <Icon name="key" />接入密钥
           </a>
         </nav>
         <div className="topbar-status">
           <UnderstandingStatus />
           <SyncButton />
           <ConnectionDot />
+          <InboxLink active={route.page === 'inbox'} />
           <button type="button" onClick={() => setSettingsTab('access')}>
             <Icon name="settings" />设置
           </button>

@@ -7,11 +7,11 @@ import { PriorityTag, projectHref } from './project-card.tsx';
  * The same projects as the list, laid out by stage. A card is only a priority, a title and how long it has slept; the
  * list is where the details are. It is the one part of the page that scrolls sideways.
  */
-export function Kanban({ cards }: { cards: ProjectCard[] }) {
+export function Kanban({ cards, includeMerged = false }: { cards: ProjectCard[]; includeMerged?: boolean }) {
   const base = useId();
   return (
     <div className="kanban">
-      {kanbanColumns(cards).map((column) => {
+      {kanbanColumns(cards, includeMerged).map((column) => {
         const headingId = `${base}-${column.stage}`;
         return (
           <section key={column.stage} className="kcol" aria-labelledby={headingId}>

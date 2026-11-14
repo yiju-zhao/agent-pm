@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
-import type { ProjectCard, QuestionView } from '../../src/domain/read.ts';
-import type { SessionListItem } from '../../src/server/http.ts';
+import type { ProjectCard } from '../../src/domain/read.ts';
 import { setToken } from '../../web/src/api.ts';
 import { HomePage } from '../../web/src/pages/home.tsx';
 import type { Topic } from '../../web/src/stream.ts';
@@ -29,42 +28,27 @@ function emit(...topics: Topic[]): void {
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
-type Data = { projects: ProjectCard[]; questions: QuestionView[]; sessions: Array<Partial<SessionListItem>> };
+type Data = { projects: ProjectCard[] };
 let data: Data;
 
-/** The server, as far as the home page sees it: three reads, answered from `data`, and answers to questions. */
+/** The workspace reads projects; question actions still go to the shared API. */
 function serve(): void {
   fetchMock.mockImplementation(async (input, init) => {
     if (init?.method === 'POST') return json({ status: 'applied', event_id: 7, question_ids: [], warnings: [] });
     switch (String(input)) {
       case '/projects':
         return json(data.projects);
-      case '/questions?status=pending':
-        return json(data.questions);
-      case '/sessions':
-        return json(data.sessions);
       default:
         return json({ error: 'not_found' }, 404);
     }
   });
 }
 
+const region = (name: string | RegExp) => screen.getByRole('region', { name });
+
 const requests = (path: string) => fetchMock.mock.calls.filter(([input]) => String(input) === path).length;
 
-function session(over: Partial<SessionListItem> = {}): Partial<SessionListItem> {
-  return {
-    key: 'claude:abc',
-    short_id: '0d67da1f',
-    machine: 'mac-mini',
-    agent_kind: 'claude',
-    effective_status: 'working',
-    title: 'Rea reverse engineering on macOS',
-    linked_projects: [],
-    ...over,
-  };
-}
-
-/** Renders the page and waits until all three reads have been answered and shown. */
+/** Renders the project workspace and waits for its read. */
 async function renderHome() {
   const view = render(
     <StreamContext.Provider value={stream}>
@@ -75,8 +59,6 @@ async function renderHome() {
   return view;
 }
 
-const region = (name: string | RegExp) => screen.getByRole('region', { name });
-
 beforeAll(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 });
@@ -86,7 +68,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
   localStorage.clear();
   listeners = new Set();
-  data = { projects: [], questions: [], sessions: [] };
+  data = { projects: [] };
   serve();
 });
 
@@ -171,71 +153,10 @@ test('closed projects sit in their own shut fold; a fold with nothing in it is n
   expect(screen.getByRole('link', { name: '做完的' })).toBeTruthy();
 });
 
-test('questions are split: project decisions under 需要你, session ones under 待归属 with the session tag', async () => {
-  data.projects = [card({ id: 'p_1', title: 'dLLM 评测框架' })];
-  data.questions = [
-    question({ id: 'q_1', prompt: '评测集用哪个？', project_id: 'p_1', session_key: null }),
-    question({ id: 'q_2', prompt: '这个 session 属于哪个项目？', project_id: null, session_key: 'claude:abc' }),
-    question({ id: 'q_3', prompt: '已经答过的', status: 'answered' }),
-  ];
-  data.sessions = [session({ key: 'claude:abc', short_id: '0d67da1f', title: 'Rea reverse engineering on macOS' })];
-  await renderHome();
-
-  const need = region('需要你 · 1');
-  expect(within(need).getByText('评测集用哪个？')).toBeTruthy();
-  expect(within(need).getByText('dLLM 评测框架')).toBeTruthy();
-  expect(within(need).queryByText('这个 session 属于哪个项目？')).toBeNull();
-
-  const tray = region('待归属的 session · 1');
-  expect(within(tray).getByText('这个 session 属于哪个项目？')).toBeTruthy();
-  expect(within(tray).getByRole('button', { name: /0d67da1f/ })).toBeTruthy();
-  expect(within(tray).getByText('Rea reverse engineering on macOS')).toBeTruthy();
-  expect(within(tray).queryByText('评测集用哪个？')).toBeNull();
-  expect(screen.queryByText('已经答过的')).toBeNull();
-});
-
-test('a session that is not in the list is shown by its key', async () => {
-  data.questions = [question({ id: 'q_2', project_id: null, session_key: 'claude:gone', prompt: '归到哪里？' })];
-  data.sessions = [session({ key: 'claude:other' })];
-  await renderHome();
-  const tray = region('待归属的 session · 1');
-  expect(within(tray).getByText('claude:gone')).toBeTruthy();
-  expect(within(tray).queryByRole('button', { name: /0d67da1f/ })).toBeNull();
-  expect(within(tray).getByText('归到哪里？')).toBeTruthy();
-});
-
-test('a failed session list does not stop the tray: the key stands in', async () => {
-  data.questions = [question({ id: 'q_2', project_id: null, session_key: 'claude:x', prompt: '归到哪里？' })];
-  fetchMock.mockImplementation(async (input) => {
-    switch (String(input)) {
-      case '/projects':
-        return json([]);
-      case '/questions?status=pending':
-        return json(data.questions);
-      default:
-        return json({ error: 'internal' }, 500);
-    }
-  });
-  render(
-    <StreamContext.Provider value={stream}>
-      <HomePage />
-    </StreamContext.Provider>,
-  );
-  const tray = await screen.findByRole('region', { name: '待归属的 session · 1' });
-  expect(within(tray).getByText('claude:x')).toBeTruthy();
-});
-
-test('both lists have an empty message', async () => {
-  await renderHome();
-  expect(within(region('需要你 · 0')).getByText('没有需要你决定的事')).toBeTruthy();
-  expect(within(region('待归属的 session · 0')).getByText('没有待归属的 session')).toBeTruthy();
-});
-
-test('a project card can be answered from the home page: its question is on the card and in 需要你', async () => {
+test('a project question stays on its card without a second sidebar copy', async () => {
   data.projects = [card({ id: 'p_1', pending_questions: [question({ id: 'q_1', prompt: '评测集用哪个？' })] })];
-  data.questions = [question({ id: 'q_1', prompt: '评测集用哪个？' })];
   await renderHome();
-  expect(screen.getAllByText('评测集用哪个？')).toHaveLength(2);
+  expect(screen.getAllByText('评测集用哪个？')).toHaveLength(1);
 });
 
 test('the view toggle starts on the list, switches to the kanban and remembers it', async () => {
@@ -313,57 +234,18 @@ test('an unknown stored view falls back to the list', async () => {
   expect(screen.getByRole('button', { name: '列表' }).getAttribute('aria-pressed')).toBe('true');
 });
 
-test('an answered question in 需要你 clears without the stream: the questions and projects are read again', async () => {
-  setToken('tok-1');
-  data.projects = [card({ id: 'p_1', title: 'dLLM 评测框架' })];
-  data.questions = [question({ id: 'q_1', prompt: '评测集用哪个？' })];
-  await renderHome();
-  const before = { questions: requests('/questions?status=pending'), projects: requests('/projects') };
-  data.questions = [];
-  fireEvent.click(within(region('需要你 · 1')).getByRole('button', { name: '公开 v2' }));
-  expect(await screen.findByText('没有需要你决定的事')).toBeTruthy();
-  expect(requests('/questions?status=pending')).toBe(before.questions + 1);
-  expect(requests('/projects')).toBe(before.projects + 1);
-});
-
-test('a question answered on a project card clears from the card and from 需要你 without the stream', async () => {
+test('a question answered on a project card clears without the stream', async () => {
   setToken('tok-1');
   const q = question({ id: 'q_1', prompt: '评测集用哪个？' });
   data.projects = [card({ id: 'p_1', pending_questions: [q] })];
-  data.questions = [q];
   await renderHome();
   data.projects = [card({ id: 'p_1', pending_questions: [] })];
-  data.questions = [];
   const article = document.querySelector('article[data-project-id="p_1"]') as HTMLElement;
   fireEvent.click(within(article).getByRole('button', { name: '公开 v2' }));
   await waitFor(() => expect(screen.queryByText('评测集用哪个？')).toBeNull());
 });
 
-test('a session question answered in the tray clears without the stream', async () => {
-  setToken('tok-1');
-  data.questions = [question({ id: 'q_2', project_id: null, session_key: 'claude:abc', prompt: '归到哪里？' })];
-  data.sessions = [session({ key: 'claude:abc' })];
-  await renderHome();
-  data.questions = [];
-  fireEvent.click(within(region('待归属的 session · 1')).getByRole('button', { name: '公开 v2' }));
-  expect(await screen.findByText('没有待归属的 session')).toBeTruthy();
-});
-
-test('a questions change makes the page read the questions again, and only those', async () => {
-  data.questions = [question({ id: 'q_1', prompt: '第一个问题' })];
-  await renderHome();
-  expect(screen.getAllByText('第一个问题').length).toBeGreaterThan(0);
-  const before = { questions: requests('/questions?status=pending'), projects: requests('/projects'), sessions: requests('/sessions') };
-
-  data.questions = [question({ id: 'q_1', prompt: '第一个问题' }), question({ id: 'q_9', prompt: '新来的问题' })];
-  emit('questions');
-  expect(await screen.findByText('新来的问题')).toBeTruthy();
-  expect(requests('/questions?status=pending')).toBe(before.questions + 1);
-  expect(requests('/sessions')).toBe(before.sessions);
-  expect(requests('/projects')).toBe(before.projects);
-});
-
-test('a projects change reads the projects again; a reconnect reads all three', async () => {
+test('a projects change and reconnect reload the project workspace only', async () => {
   data.projects = [card({ id: 'a', title: '旧标题' })];
   await renderHome();
 
@@ -371,10 +253,11 @@ test('a projects change reads the projects again; a reconnect reads all three', 
   emit('projects');
   expect(await screen.findByRole('link', { name: '新标题' })).toBeTruthy();
 
-  const before = { questions: requests('/questions?status=pending'), sessions: requests('/sessions') };
+  const before = requests('/projects');
   emit('all');
-  await waitFor(() => expect(requests('/sessions')).toBe(before.sessions + 1));
-  expect(requests('/questions?status=pending')).toBe(before.questions + 1);
+  await waitFor(() => expect(requests('/projects')).toBe(before + 1));
+  expect(requests('/questions?status=pending')).toBe(0);
+  expect(requests('/sessions')).toBe(0);
   await waitFor(() => expect(screen.queryByText('加载中…')).toBeNull());
 });
 
@@ -382,4 +265,65 @@ test('a project with a todo shows it as the next step on its card', async () => 
   data.projects = [card({ id: 'a', open_todos: [todo({ title: '评测报告模板' })], active_sessions: [tag()] })];
   await renderHome();
   expect(screen.getByText('下一步：评测报告模板')).toBeTruthy();
+});
+
+test('project search, stage and priority combine and remain active when switching views', async () => {
+  data.projects = [
+    card({ id: 'a', title: 'Agent 平台', summary: '管理多机工作', stage: 'build', priority: 'P1' }),
+    card({ id: 'b', title: '其他平台', stage: 'verify', priority: 'P1' }),
+    card({ id: 'c', title: '低优先 Agent', stage: 'build', priority: 'P3' }),
+  ];
+  await renderHome();
+  fireEvent.change(screen.getByLabelText('搜索项目'), { target: { value: ' AGENT ' } });
+  fireEvent.change(screen.getByLabelText('筛选项目阶段'), { target: { value: 'build' } });
+  fireEvent.change(screen.getByLabelText('筛选项目优先级'), { target: { value: 'P1' } });
+  expect(screen.getByRole('link', { name: 'Agent 平台' })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '其他平台' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '低优先 Agent' })).toBeNull();
+  expect(screen.getByText('显示 1 / 3 个项目')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '看板' }));
+  expect(within(region('构建 · 1')).getByRole('link', { name: 'Agent 平台' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '清除筛选' }));
+  expect(screen.getByRole('link', { name: '其他平台' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '低优先 Agent' })).toBeTruthy();
+});
+
+test('filtering includes folded projects, missing priorities and merged projects on the board', async () => {
+  data.projects = [
+    card({ id: 'a', title: '正式项目', priority: 'P1' }),
+    card({ id: 'b', title: '新想法', stage: 'idea', inbox: true, priority: null, summary: '特别关键词' }),
+    card({ id: 'c', title: '已经合并', stage: 'merged', closed: true, priority: null }),
+  ];
+  await renderHome();
+  fireEvent.change(screen.getByLabelText('搜索项目'), { target: { value: '特别关键词' } });
+  expect(screen.getByRole('link', { name: '新想法' })).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('搜索项目'), { target: { value: '' } });
+  fireEvent.change(screen.getByLabelText('筛选项目优先级'), { target: { value: 'none' } });
+  fireEvent.change(screen.getByLabelText('筛选项目阶段'), { target: { value: 'merged' } });
+  fireEvent.click(screen.getByRole('button', { name: '看板' }));
+  expect(within(region('合并 · 1')).getByRole('link', { name: '已经合并' })).toBeTruthy();
+});
+
+test('an empty filter result can be cleared and live updates still obey the filters', async () => {
+  data.projects = [card({ id: 'a', title: '构建项目', stage: 'build' })];
+  await renderHome();
+  fireEvent.change(screen.getByLabelText('筛选项目阶段'), { target: { value: 'verify' } });
+  expect(screen.getByText('没有符合条件的项目')).toBeTruthy();
+  data.projects = [card({ id: 'a', title: '构建项目', stage: 'verify' })];
+  emit('projects');
+  expect(await screen.findByRole('link', { name: '构建项目' })).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('搜索项目'), { target: { value: 'no match' } });
+  fireEvent.click(screen.getByRole('button', { name: '查看全部项目' }));
+  expect(screen.getByRole('link', { name: '构建项目' })).toBeTruthy();
+  expect((screen.getByLabelText('筛选项目阶段') as HTMLSelectElement).value).toBe('all');
+});
+
+
+test('the project workspace has no pending queue sidebar or attribution reads', async () => {
+  data.projects = [card()];
+  await renderHome();
+  expect(document.querySelector('[data-page="home"] aside')).toBeNull();
+  expect(screen.queryByRole('region', { name: /需要你|待归属/ })).toBeNull();
+  expect(requests('/questions?status=pending')).toBe(0);
+  expect(requests('/sessions')).toBe(0);
 });

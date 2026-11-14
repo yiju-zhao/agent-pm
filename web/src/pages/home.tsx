@@ -1,15 +1,12 @@
-import { useId, useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
-import type { ProjectCard, QuestionView } from '../../../src/domain/read.ts';
-import type { SessionListItem } from '../../../src/server/http.ts';
+import { useMemo, useState } from 'react';
+import type { ProjectCard } from '../../../src/domain/read.ts';
+import { PRIORITIES, PRIORITY_LABEL, STAGES, STAGE_LABEL } from '../../../src/shared/vocab.ts';
 import { errorText } from '../api.ts';
 import { Fold } from '../components/blocks.tsx';
 import { Icon } from '../components/icon.tsx';
 import { Kanban } from '../components/kanban.tsx';
 import { ProjectCardView } from '../components/project-card.tsx';
-import { QuestionCard } from '../components/question-card.tsx';
-import { SessionTag } from '../components/session-tag.tsx';
-import { groupProjects, isDormant, splitQuestions } from '../home-model.ts';
+import { groupProjects, isDormant } from '../home-model.ts';
 import { useApi } from '../use-api.ts';
 
 export const VIEW_KEY = 'herdr-pm.homeView';
@@ -45,138 +42,85 @@ function ViewToggle({ view, onChange }: { view: View; onChange: (view: View) => 
   );
 }
 
-function SideSection({ title, children }: { title: string; children: ReactNode }) {
-  const id = useId();
-  return (
-    <section className="side-section" aria-labelledby={id}>
-      <h2 id={id} className="h">
-        {title}
-      </h2>
-      {children}
-    </section>
-  );
-}
-
-type Read<T> = ReturnType<typeof useApi<T>>;
-type Reads = { questions: Read<QuestionView[]>; sessions: Read<SessionListItem[]> };
-
-function NeedYou({ questions, titles, onAnswered }: { questions: Reads['questions']; titles: Map<string, string>; onAnswered(): void }) {
-  const needYou = splitQuestions(questions.data ?? []).needYou;
-  const ready = questions.data !== undefined;
-  return (
-    <SideSection title={ready ? `需要你 · ${needYou.length}` : '需要你'}>
-      {!ready ? (
-        <div className="dim">{questions.error ? errorText(questions.error) : '加载中…'}</div>
-      ) : needYou.length === 0 ? (
-        <div className="dim">没有需要你决定的事</div>
-      ) : (
-        needYou.map((q) => (
-          <QuestionCard
-            key={q.id}
-            question={q}
-            projectTitle={q.project_id === null ? undefined : titles.get(q.project_id)}
-            onDone={onAnswered}
-          />
-        ))
-      )}
-    </SideSection>
-  );
-}
-
-function Attribution({ questions, sessions, onAnswered }: Reads & { onAnswered(): void }) {
-  const attribution = splitQuestions(questions.data ?? []).attribution;
-  const byKey = useMemo(() => new Map((sessions.data ?? []).map((s) => [s.key, s])), [sessions.data]);
-  // A session list that cannot be read is no reason to hide the questions: they show the key instead of the session.
-  const ready = questions.data !== undefined && (sessions.data !== undefined || sessions.error !== null);
-  return (
-    <SideSection title={questions.data !== undefined ? `待归属的 session · ${attribution.length}` : '待归属的 session'}>
-      <div className="tray">
-        {!ready ? (
-          <div className="dim">{questions.error ? errorText(questions.error) : '加载中…'}</div>
-        ) : attribution.length === 0 ? (
-          <div className="dim">没有待归属的 session</div>
-        ) : (
-          attribution.map((q) => {
-            const session = byKey.get(q.session_key ?? '');
-            return (
-              <div key={q.id} className="todo attrib">
-                {session ? <SessionTag session={session} /> : null}
-                <div>{session ? session.title : q.session_key}</div>
-                <QuestionCard question={q} onDone={onAnswered} />
-              </div>
-            );
-          })
-        )}
-      </div>
-    </SideSection>
-  );
-}
-
-/** The home page (spec 9.1): projects as the subject, what needs the user on the right, sessions nobody has claimed below it. */
+/** The project workspace; pending decisions and session attribution live in Inbox. */
 export function HomePage() {
   const projects = useApi<ProjectCard[]>('/projects', ['projects']);
-  const questions = useApi<QuestionView[]>('/questions?status=pending', ['questions']);
-  const sessions = useApi<SessionListItem[]>('/sessions', ['sessions']);
   const [view, setView] = useState<View>(readView);
+  const [query, setQuery] = useState('');
+  const [stage, setStage] = useState('all');
+  const [priority, setPriority] = useState('all');
+  const filtering = query.trim() !== '' || stage !== 'all' || priority !== 'all';
+  const clearFilters = () => { setQuery(''); setStage('all'); setPriority('all'); };
   const choose = (next: View) => {
     setView(next);
     writeView(next);
   };
 
   const cards = projects.data;
+  const filteredCards = useMemo(() => (cards ?? []).filter((card) =>
+    (stage === 'all' || card.stage === stage)
+    && (priority === 'all' || (priority === 'none' ? card.priority === null : card.priority === priority))
+    && `${card.title} ${card.summary ?? ''}`.toLowerCase().includes(query.trim().toLowerCase())), [cards, stage, priority, query]);
   const groups = useMemo(() => groupProjects(cards ?? []), [cards]);
   const titles = useMemo(() => new Map((cards ?? []).map((c) => [c.id, c.title])), [cards]);
   const asleep = groups.main.filter(isDormant).length;
   const heading =
     cards === undefined ? '项目 · 按优先级' : `项目 · 按优先级 · ${groups.main.length - asleep} 个推进中 · ${asleep} 个休眠`;
 
-  // The same question can be on a project card and under 需要你, and an answer can change the project too: both lists are
-  // read again, so the card clears even while the stream is down.
-  const answered = () => {
-    questions.reload();
-    projects.reload();
-  };
+  const answered = projects.reload;
   const list = (items: ProjectCard[]) =>
     items.map((card) => <ProjectCardView key={card.id} card={card} projectTitles={titles} onAnswered={answered} />);
 
   return (
     <main data-page="home">
-      <div className="cols">
-        <div className="main">
-          <div className="head-row">
-            <h2 className="h workspace-title" aria-label={heading}>
-              项目<span className="workspace-meta">按优先级{cards !== undefined ? ` / ${groups.main.length - asleep} 个推进中 / ${asleep} 个休眠` : ''}</span>
-            </h2>
-            <ViewToggle view={view} onChange={choose} />
-          </div>
-          {projects.error !== null ? (
-            <div className="error-bar" role="alert">
-              <span>{errorText(projects.error)}</span>
-              <button type="button" onClick={projects.reload}>
-                重试
-              </button>
-            </div>
-          ) : null}
-          {cards === undefined ? (
-            projects.error === null ? (
-              <div className="dim">加载中…</div>
-            ) : null
-          ) : view === 'kanban' ? (
-            // The server's order is by priority; the kanban columns keep it (the list's groups are only for the list).
-            <Kanban cards={cards} />
-          ) : (
-            <>
-              {cards.length === 0 ? <div className="dim">还没有项目</div> : null}
-              {list(groups.main)}
-              {groups.inbox.length > 0 ? <Fold label={`新 idea（${groups.inbox.length}）`}>{list(groups.inbox)}</Fold> : null}
-              {groups.closed.length > 0 ? <Fold label={`已关闭（${groups.closed.length}）`}>{list(groups.closed)}</Fold> : null}
-            </>
-          )}
+      <div className="project-workspace">
+      <div className="head-row">
+        <h2 className="h workspace-title" aria-label={heading}>
+          项目<span className="workspace-meta">按优先级{cards !== undefined ? ` / ${groups.main.length - asleep} 个推进中 / ${asleep} 个休眠` : ''}</span>
+        </h2>
+        <ViewToggle view={view} onChange={choose} />
+      </div>
+      <div className="project-filters" role="search" aria-label="项目筛选">
+        <input type="search" aria-label="搜索项目" placeholder="搜索项目名称或摘要…" value={query} onChange={(event) => setQuery(event.target.value)} />
+        <select aria-label="筛选项目阶段" value={stage} onChange={(event) => setStage(event.target.value)}>
+          <option value="all">所有阶段</option>
+          {STAGES.map((value) => <option key={value} value={value}>{STAGE_LABEL[value]}</option>)}
+        </select>
+        <select aria-label="筛选项目优先级" value={priority} onChange={(event) => setPriority(event.target.value)}>
+          <option value="all">所有优先级</option>
+          {PRIORITIES.map((value) => <option key={value} value={value}>{value} · {PRIORITY_LABEL[value]}</option>)}
+          <option value="none">未定优先级</option>
+        </select>
+        {filtering && <button type="button" onClick={clearFilters}>清除筛选</button>}
+      </div>
+      {cards !== undefined && filtering && <p className="project-filter-count dim" role="status">显示 {filteredCards.length} / {cards.length} 个项目</p>}
+      {projects.error !== null ? (
+        <div className="error-bar" role="alert">
+          <span>{errorText(projects.error)}</span>
+          <button type="button" onClick={projects.reload}>
+            重试
+          </button>
         </div>
-        <aside className="side">
-          <NeedYou questions={questions} titles={titles} onAnswered={answered} />
-          <Attribution questions={questions} sessions={sessions} onAnswered={answered} />
-        </aside>
+      ) : null}
+      {cards === undefined ? (
+        projects.error === null ? (
+          <div className="dim">加载中…</div>
+        ) : null
+      ) : filtering && filteredCards.length === 0 ? (
+        <div className="project-filter-empty"><h3>没有符合条件的项目</h3><p className="dim">试试其他关键词，或清除筛选查看全部项目。</p><button type="button" onClick={clearFilters}>查看全部项目</button></div>
+      ) : view === 'kanban' ? (
+        // The server's order is by priority; the kanban columns keep it (the list's groups are only for the list).
+        <Kanban cards={filteredCards} includeMerged={filtering} />
+      ) : filtering ? (
+        <>{list(filteredCards)}</>
+      ) : (
+        <>
+          {cards.length === 0 ? <div className="dim">还没有项目</div> : null}
+          {list(groups.main)}
+          {groups.inbox.length > 0 ? <Fold label={`新 idea（${groups.inbox.length}）`}>{list(groups.inbox)}</Fold> : null}
+          {groups.closed.length > 0 ? <Fold label={`已关闭（${groups.closed.length}）`}>{list(groups.closed)}</Fold> : null}
+        </>
+      )}
       </div>
     </main>
   );

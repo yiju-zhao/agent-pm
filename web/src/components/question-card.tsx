@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import type { QuestionView } from '../../../src/domain/read.ts';
 import { apiSend, errorText } from '../api.ts';
 import { describeOption } from '../format.ts';
+import { useInbox } from '../inbox.tsx';
 import { EvidenceLink } from './evidence-drawer.tsx';
 
 /**
@@ -11,6 +12,7 @@ import { EvidenceLink } from './evidence-drawer.tsx';
  * the dismissal.
  */
 export function QuestionCard({ question, projectTitle, onDone }: { question: QuestionView; projectTitle?: string; onDone?: () => void }) {
+  const inbox = useInbox();
   const [busy, setBusy] = useState(false);
   // Once the server took the answer the question is no longer pending: keep the card shut until the list drops it.
   const [resolved, setResolved] = useState(false);
@@ -33,6 +35,7 @@ export function QuestionCard({ question, projectTitle, onDone }: { question: Que
     }
     if (ok) {
       setResolved(true);
+      inbox?.reload();
       onDone?.();
     }
   };

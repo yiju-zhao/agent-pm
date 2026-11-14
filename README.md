@@ -314,7 +314,7 @@ curl -s -XPOST $S/events/2/revert -H "Authorization: Bearer $T"
 ### 模型和费用
 
 - 摘要用 `claude-haiku-5-5`，整理用 `claude-sonnet-5-5`（复核默认跟整理一样）。配置里的 `understanding.digestModel` / `understanding.curateModel` 是默认值；网页 **设置 → 模型** 可以按角色（摘要员、整理员、复核）改，从下一次调用开始生效，不用重启。
-- 调用走 Claude Agent SDK，默认用 **Claude 订阅**的额度（环境里继承来的 `ANTHROPIC_API_KEY` 等一律忽略），没有设额度上限。网页 **设置 → 模型凭据** 可以改成 Claude OAuth token（订阅）或 Anthropic API key（按 token 计费到 API 账户，只有在这里明确选了才会用）。同一时刻最多一个模型调用；实时 session 先处理，历史导入（采集器第一次看到的旧对话）只在空闲时做。
+- 调用走 Claude Agent SDK，默认用 **Claude 订阅**的额度（环境里继承来的 `ANTHROPIC_API_KEY` 等一律忽略），没有设额度上限。网页 **设置 → 模型服务** 可以改成 Claude OAuth token（订阅）或 Anthropic API key（按 token 计费到 API 账户，只有在这里明确选了才会用）。同一时刻最多一个模型调用；实时 session 先处理，历史导入（采集器第一次看到的旧对话）只在空闲时做。
 - 遇到限流或额度用完，调度器暂停并指数退避，`GET /status` 里能看到暂停原因和恢复时间；没处理完的 chunk 和摘要保持"未处理"，恢复后接着做。
 - 每次模型调用（成功或失败）在 `llm_runs` 表里写一行：角色（`digest` / `curate`）、模型、token 数、耗时、是否成功、错误类型。按天汇总用量：
 
@@ -342,7 +342,7 @@ ls -l ~/.config/herdr-pm/claude-oauth-token         # 应为 -rw-------
 "understanding": { "oauthTokenFile": "claude-oauth-token" }
 ```
 
-也可以不改配置，在网页 **设置 → 模型凭据** 里粘贴 OAuth token 或 API key：它们写在配置文件旁的 `secrets/` 目录（权限 600），不进数据库，网页上之后只显示末四位。网页里选了凭据就用它；没选时用 `oauthTokenFile`；都没有时用本机登录。
+也可以不改配置，在网页 **设置 → 模型服务** 里粘贴 OAuth token 或 API key：它们写在配置文件旁的 `secrets/` 目录（权限 600），不进数据库，网页上之后只显示末四位。网页里选了凭据就用它；没选时用 `oauthTokenFile`；都没有时用本机登录。
 
 token 只放在这个文件里，**不要写进 launchd plist 或配置 JSON**。没有 `oauthTokenFile` 时，中心用这台机器上 Claude Code 自己的登录（环境变量 `CLAUDE_CODE_OAUTH_TOKEN` 也行），启动时会打印一行提示。整个理解层可以用 `"understanding": { "enabled": false }` 关掉，关掉后 `/status` 显示 `enabled: false`，`/sync` 返回 409。
 
@@ -384,7 +384,9 @@ curl -s -XPOST http://<mac-mini>:7718/sync -H "Authorization: Bearer <userToken>
 | herdr 采集器（`ingest:herdr:<机器>`） | 那台机器的 herdr 采集器 | 只能上报那台机器的数据 |
 | Paseo 采集器（`ingest:paseo:<来源>`） | 那个 Paseo 采集器 | 只能写那个来源（来源的机器和 daemon 身份仍在配置里） |
 
-在网页 **API Keys** 页（或 设置 → API Keys）新建、吊销 key：新 key 只在创建时显示一次，中心只存它的哈希，列表里显示前缀和最近使用时间。配置文件里的 `userToken`、`mcpToken`、`collectors`、`paseoCollectors` 照常有效，就是对应范围的 key，在列表里显示为只读（改它们要改配置文件）。所以已经部署的采集器和 agent 不用改；给新机器发 key 时，建议每台机器单独建一个，丢了只吊销那一个。
+在网页 **接入密钥（API Keys）** 页（或 设置 → 开发者 → 接入密钥）新建、吊销 key：新 key 只在创建时显示一次，中心只存它的哈希，列表里显示前缀和最近使用时间。配置文件里的 `userToken`、`mcpToken`、`collectors`、`paseoCollectors` 照常有效，就是对应范围的 key，在列表里显示为只读（改它们要改配置文件）。所以已经部署的采集器和 agent 不用改；给新机器发 key 时，建议每台机器单独建一个，丢了只吊销那一个。
+
+接入密钥页默认显示有效的页面管理密钥，可按名称、用途、状态筛选；配置文件中的旧 token 单独折叠，只读展示。点击“创建密钥”后选择用途与绑定范围，完整密钥仅在创建成功时显示一次，确认安全保存后关闭。管理员脚本权限位于高级选项中；网页登录仍使用账号密码，模型服务凭据另在设置中管理。吊销前会说明影响；更换密钥时，先为连接配置新密钥，再吊销旧密钥。
 
 ### 各台机器上的 agent 接入 MCP
 
@@ -434,7 +436,7 @@ curl -s http://<mac-mini>:7718/mcp -H "Authorization: Bearer <mcpToken>" \
 
 ## 网页界面（计划 4）
 
-中心服务在 `/` 托管一个网页：首页按优先级列出项目（卡片上有进度条、在跑的 session、阻塞和待你回答的问题），右栏是"需要你"和"待归属的 session"；点项目进详情页（改字段、里程碑、todo、阻塞、决策、时间线、事件日志；你改过的字段 AI 之后只能提议，页面上不显示锁，解锁只有 API）；`Session` 页按机器列出全部 session，可以关联到项目、取消关联、不追踪。页面里 AI 写的文字一律按纯文本显示。
+中心服务在 `/` 托管一个网页：首页用完整宽度按优先级列出项目（卡片上有进度条、在跑的 session、阻塞和待你回答的问题）；右上角 Inbox 显示待处理数量，独立 `#/inbox` 页面集中处理“需要你”和“待归属的 session”，可按类别筛选，回答或忽略后数量立即更新；点项目进详情页（改字段、里程碑、todo、阻塞、决策、时间线、事件日志；你改过的字段 AI 之后只能提议，页面上不显示锁，解锁只有 API）；`Session` 页按机器列出全部 session，可以关联到项目、取消关联、不追踪。页面里 AI 写的文字一律按纯文本显示。
 
 **样式**：界面按 [Hallmark](https://github.com/nutlope/hallmark) 的规范重构（主题 Coral，app 界面）：所有颜色、间距、字号都走 `web/src/tokens.css` 里的 token，`base.css` 是它的基础规则，`styles.css` 开头的 `Hallmark ·` 注释是这次设计的记录（主题、检查、保留的交互）。字体用系统字体，不请求外部字体。改样式时用 token，不写颜色字面量。
 
@@ -451,7 +453,7 @@ npm run build:web      # 写到 dist/web，已在 .gitignore 里
 
 - 浏览器打开 `http://<中心机器>:<port>/`（`<port>` 是配置里的 `port`，通过 Tailscale 访问就是 `http://<mac-mini 的 Tailscale 名或 IP>:<port>/`）。浏览器打开后先登录管理员账号（底层项目只读 API 仍依赖 Tailscale 网络隔离）。
 - 网页使用**管理员用户名和密码登录**，不再要求填写 API key。中心机器先运行 `npm run setup:admin -- --config ~/.config/herdr-pm/server.json`（可加 `--username <用户名>`，默认 `admin`）。命令生成随机初始密码，保存在配置文件旁的 `admin-initial-password`（权限 600），不会输出密码、覆盖现有账号或重置密码。首次登录需将初始密码改为自己的密码（至少12个字符）。
-- 浏览器通过 HttpOnly、SameSite=Strict cookie 保持7天登录；HTTPS 下同时使用 Secure。密码采用带随机盐的 scrypt 哈希，会话只保存 SHA-256 哈希。设置 → 账号可改密或退出；改密会撤销其他浏览器的登录。修改请求同时校验本站 Origin 和自定义请求头，登录有失败限流。
+- 浏览器通过 HttpOnly、SameSite=Strict cookie 保持7天登录；HTTPS 下同时使用 Secure。密码采用带随机盐的 scrypt 哈希，会话只保存 SHA-256 哈希。设置 → 账号与安全可改密或退出；改密会撤销其他浏览器的登录。修改请求同时校验本站 Origin 和自定义请求头，登录有失败限流。
 - `userToken` 和现有 API key 仍供受信任的旧客户端使用；Agent（MCP）和采集器仍使用各自范围的 API key，浏览器登录不会赋予它们管理员权限。
 - 页面通过 `WS /stream` 自动刷新：服务只推"哪里变了"的信号，页面收到后重新读对应的接口，所以别的地方（curator、`curl`、另一个浏览器）做的改动几秒内就会出现在页面上，不用手动刷新。顶栏的点表示这条连接的状态：绿色 `已连接`，黄色 `重连中`（服务重启或网络断了，会按 1、2、4、8、10 秒的间隔自动重连，连上后把所有数据重新读一遍）。
 - 页面是用 `http://` 打开的（Tailscale 下没有 HTTPS），浏览器不开放剪贴板接口时，点 session 标签复制短 ID 会退回到旧的复制方式；两种都不行时，提示条里会直接显示短 ID，手动选中复制。

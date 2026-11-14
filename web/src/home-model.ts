@@ -50,9 +50,9 @@ export function isDormant(card: ProjectCard): boolean {
   return !card.closed && card.dormant_days !== null;
 }
 
-/** One column per stage, in lifecycle order; empty columns stay. A merged project has no column: it lives on in another. */
-export function kanbanColumns(cards: ProjectCard[]): Array<{ stage: Stage; label: string; cards: ProjectCard[] }> {
-  return STAGES.filter((stage) => stage !== 'merged').map((stage) => ({
+/** Lifecycle columns keep their order. Filtered views can include merged projects so matches remain visible. */
+export function kanbanColumns(cards: ProjectCard[], includeMerged = false): Array<{ stage: Stage; label: string; cards: ProjectCard[] }> {
+  return STAGES.filter((stage) => stage !== 'merged' || includeMerged).map((stage) => ({
     stage,
     label: STAGE_LABEL[stage],
     cards: cards.filter((card) => card.stage === stage),

@@ -218,6 +218,7 @@ test('设置 shows account and password controls, with no browser API key field'
   serve(understanding()); renderApp(); await screen.findByText('空闲');
   fireEvent.click(screen.getByRole('button', { name: '设置' }));
   const dialog = await screen.findByRole('dialog');
+  fireEvent.click(within(dialog).getByRole('button', { name: '修改密码' }));
   expect(within(dialog).getByLabelText('当前密码')).toBeTruthy();
   expect(within(dialog).queryByLabelText('API key')).toBeNull();
   expect((within(dialog).getByRole('button', { name: '保存密码' }) as HTMLButtonElement).disabled).toBe(true);
@@ -228,7 +229,7 @@ test('设置 shows account and password controls, with no browser API key field'
 test('Escape closes account settings', async () => {
   serve(understanding()); renderApp(); await screen.findByText('空闲');
   fireEvent.click(screen.getByRole('button', { name: '设置' }));
-  fireEvent.keyDown(await screen.findByRole('dialog'), { key: 'Escape' });
+  fireEvent(await screen.findByRole('dialog'), new Event('cancel', { cancelable: true }));
   expect(screen.queryByRole('dialog')).toBeNull();
 });
 
@@ -333,6 +334,46 @@ test('a new runtime error still warns alongside a paused digest', async () => {
   renderApp();
   expect(await screen.findByRole('link', { name: '1 个会话摘要已暂停' })).toBeTruthy();
   expect(screen.getByRole('img', { name: '最近一次出错' }).getAttribute('title')).toBe('新的连接故障');
+});
+
+test('global Inbox count shares the queue with its page and updates after answering', async () => {
+  const { card, question } = await import('./fixtures.ts');
+  let pending = [question({ id: 'q_1', prompt: '需要决定', session_key: null }), question({ id: 'q_2', project_id: null, session_key: 'claude:gone', prompt: '需要归属' })];
+  fetchMock.mockImplementation(async (url, init) => {
+    if (url === '/status') return json({ understanding: understanding() });
+    if (url === '/questions?status=pending') return json(pending);
+    if (url === '/projects') return json([card()]);
+    if (url === '/sessions') return json([]);
+    if (init?.method === 'POST') { pending = pending.filter((q) => q.id !== 'q_1'); return json({ status: 'applied', event_id: 1, question_ids: [], warnings: [] }); }
+    return json({ error: 'not_found' }, 404);
+  });
+  renderApp();
+  const link = await screen.findByRole('link', { name: 'Inbox · 2 项待处理' });
+  expect(link.getAttribute('href')).toBe('#/inbox');
+  expect(fetchMock.mock.calls.filter(([url]) => url === '/questions?status=pending')).toHaveLength(1);
+  act(() => { history.replaceState(null, '', '#/inbox'); window.dispatchEvent(new HashChangeEvent('hashchange')); });
+  expect(await screen.findByRole('heading', { name: /Inbox 待处理事项/ })).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Inbox · 2 项待处理' }).getAttribute('aria-current')).toBe('page');
+  fireEvent.click(within(screen.getByRole('region', { name: '需要你 · 1' })).getByRole('button', { name: '公开 v2' }));
+  expect(await screen.findByRole('link', { name: 'Inbox · 1 项待处理' })).toBeTruthy();
+  expect(screen.queryByText('需要决定')).toBeNull();
+  expect(screen.getByText('需要归属')).toBeTruthy();
+});
+
+test('resolving a project card question also refreshes the global Inbox counter', async () => {
+  const { card, question } = await import('./fixtures.ts');
+  let pending = [question({ session_key: null })];
+  fetchMock.mockImplementation(async (url, init) => {
+    if (url === '/status') return json({ understanding: understanding() });
+    if (url === '/questions?status=pending') return json(pending);
+    if (url === '/projects') return json([card({ pending_questions: pending })]);
+    if (init?.method === 'POST') { pending = []; return json({ status: 'applied', event_id: 1, question_ids: [], warnings: [] }); }
+    return json([]);
+  });
+  renderApp();
+  await screen.findByRole('link', { name: 'Inbox · 1 项待处理' });
+  fireEvent.click(await screen.findByRole('button', { name: '公开 v2' }));
+  expect(await screen.findByRole('link', { name: 'Inbox · 0 项待处理' })).toBeTruthy();
 });
 
 
