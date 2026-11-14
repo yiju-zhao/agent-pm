@@ -2,7 +2,7 @@ import { addLocks, LOCKABLE, readLocks, readRow } from './changes.ts';
 import type { Row } from './changes.ts';
 import type { Handler, OpContext } from './execute.ts';
 import { applyAiFieldEdits, definedFields } from './field-edits.ts';
-import { linkSession } from './links-ops.ts';
+import { carrySessionLink, linkSession } from './links-ops.ts';
 import type { OpArgs, OpName } from './ops.ts';
 import { confirmOptions } from './questions.ts';
 import { aiMayTransition, checkTransition } from './stage.ts';
@@ -96,6 +96,13 @@ function transitionStage(ctx: OpContext, args: OpArgs<'transition_stage'>): void
       dedupe_key: `stage:${args.project}:${to}`,
     });
     return;
+  }
+
+  // The user's merge links every session of the source to the target here, in the same event: which sessions a merged
+  // project brings along is never left for a model to decide.
+  if (!ctx.ai && target) {
+    const links = ctx.db.prepare('SELECT * FROM contributions WHERE project_id = ? AND deleted_at IS NULL ORDER BY session_key').all(args.project);
+    for (const link of links) carrySessionLink(ctx, { ...link }, args.merge_into!, { restoreVetoed: false });
   }
 
   ctx.changes.update('projects', args.project, {

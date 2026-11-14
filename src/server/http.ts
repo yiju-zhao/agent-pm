@@ -14,9 +14,12 @@ import type { Scheduler } from '../understand/scheduler.ts';
 import { disabledStatus } from '../understand/status.ts';
 import type { ServerConfig } from './config.ts';
 import { mountAuthRoutes } from './auth-routes.ts';
+import { sourceCoverage } from './coverage.ts';
 import { mountAdminRoutes } from './admin-routes.ts';
 import { mountDomainRoutes, userAuth } from './domain-routes.ts';
 import { mountIngestV2 } from './ingest-v2.ts';
+import { mountMergeRoutes } from './merge-routes.ts';
+import type { MergeLlm } from './merge-routes.ts';
 import { principalOf } from './keys.ts';
 import { applySnapshot, findByShortId, insertChunks, listSessions, maxOffset } from './sessions-repo.ts';
 import type { SessionView } from './sessions-repo.ts';
@@ -117,6 +120,9 @@ export function createApp(
     return evidence === null ? c.json({ error: 'not_found' }, 404) : c.json(evidence);
   });
 
+  // What each collection source has delivered and where it falls short (see ./coverage.ts).
+  app.get('/coverage', userAuth(config, db, clock), (c) => c.json(sourceCoverage(db, config, clock())));
+
   app.get('/status', (c) => c.json({ understanding: scheduler?.status() ?? disabledStatus() }));
 
   app.post('/sync', userAuth(config, db, clock), (c) => {
@@ -127,6 +133,7 @@ export function createApp(
 
   mountAuthRoutes(app, db, clock);
   mountDomainRoutes(app, db, config, deps, () => scheduler?.requestProjectReview?.());
+  mountMergeRoutes(app, db, deps, userAuth(config, db, clock), opts.mergeLlm ?? null, () => scheduler?.requestProjectReview?.());
   mountAdminRoutes(app, db, config, deps, opts.settings ?? new Settings(db, config, null, clock));
   mountMcp(app, db, config, deps);
   mountWeb(app, opts.webDir ?? null);
@@ -137,8 +144,11 @@ export function createApp(
 /** One entry of `GET /sessions`: the session and the live projects it is linked to. */
 export type SessionListItem = SessionView & { linked_projects: Array<{ id: string; title: string }> };
 
-/** `settings`: the run-time settings (models, provider credential); without one, secrets cannot be set from the UI. */
-export type AppOptions = { scheduler?: Scheduler | null; webDir?: string | null; settings?: Settings };
+/**
+ * `settings`: the run-time settings (models, provider credential); without one, secrets cannot be set from the UI.
+ * `mergeLlm`: the model that drafts merge previews; without one, previews answer `understanding_disabled`.
+ */
+export type AppOptions = { scheduler?: Scheduler | null; webDir?: string | null; settings?: Settings; mergeLlm?: MergeLlm | null };
 
 /**
  * Authenticates an ingest request, then reads and validates its JSON body. Order: bearer token

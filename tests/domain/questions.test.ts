@@ -639,7 +639,7 @@ const UNLOCK = { label: '解锁', op: 'unlock_field' as const, args: { table: 'p
 const REVERT = { label: '撤销', op: 'revert_event' as const, args: { event_id: 1 } };
 
 test('USER_ONLY_OPS lists the operations an AI may never put in a question', () => {
-  expect([...USER_ONLY_OPS]).toEqual(['unlock_field', 'revert_event']);
+  expect([...USER_ONLY_OPS]).toEqual(['unlock_field', 'revert_event', 'apply_merge']);
 });
 
 test('an AI cannot bind unlock_field or revert_event to an option through askUser', () => {

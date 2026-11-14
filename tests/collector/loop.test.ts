@@ -235,6 +235,36 @@ test('first run reads transcript from 0 and marks old chunks as backfill', async
   expect((await savedState()).cursors[CLAUDE_KEY]!.offset).toBe(end);
 });
 
+test('a closed pane still delivers its final transcript after a failed push and collector restart', async () => {
+  await writeLines(transcript, [claudeUser(OLD_TS, 'start work')]);
+  const store = await CursorStore.load(cfg.stateFile);
+  await collectOnce(cfg, store, fakeDeps(() => [claudePane()]));
+  await appendLines(transcript, [claudeAssistant(NEW_TS, 'final acceptance result')]);
+  failChunks = true;
+  await expect(collectOnce(cfg, store, fakeDeps(() => []))).rejects.toThrow('server unavailable');
+  failChunks = false;
+  const restarted = await CursorStore.load(cfg.stateFile);
+  expect((await collectOnce(cfg, restarted, fakeDeps(() => []))).chunksPushed).toBe(1);
+  expect(chunks().map((r) => r.text).join('\n')).toContain('final acceptance result');
+  expect(sessionRow(CLAUDE_KEY)?.lifecycle).toBe('ended');
+  expect((await collectOnce(cfg, restarted, fakeDeps(() => []))).chunksPushed).toBe(0);
+  expect(chunks()).toHaveLength(2);
+});
+
+test('closed sessions that were read to the end cost no server request, even after a restart', async () => {
+  await writeLines(transcript, [claudeUser(OLD_TS, 'done long ago')]);
+  await collectOnce(cfg, await CursorStore.load(cfg.stateFile), fakeDeps(() => [claudePane()]));
+  let offsetRequests = 0;
+  const real = client;
+  client = { ...real, getOffset: (key) => (offsetRequests++, real.getOffset(key)) };
+  const restarted = await CursorStore.load(cfg.stateFile);
+  for (let i = 0; i < 3; i++) expect((await collectOnce(cfg, restarted, fakeDeps(() => []))).chunksPushed).toBe(0);
+  expect(offsetRequests).toBe(0);
+  // Once the closed session's file grows, it is read again.
+  await appendLines(transcript, [claudeAssistant(NEW_TS, 'late line')]);
+  expect((await collectOnce(cfg, restarted, fakeDeps(() => []))).chunksPushed).toBe(1);
+});
+
 test('second run pushes only the new tail', async () => {
   await writeLines(transcript, [claudeUser(OLD_TS, 'first question')]);
   const store = await CursorStore.load(cfg.stateFile);

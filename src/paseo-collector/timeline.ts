@@ -89,7 +89,7 @@ export async function nextBatch(o: ReadOptions): Promise<BatchPlan | null> {
       break;
     }
     const n = normalizeEntry(row, page.epoch, o.startedAt);
-    const bytes = 'event' in n ? JSON.stringify(n.event).length : 0;
+    const bytes = 'event' in n ? Buffer.byteLength(JSON.stringify(n.event), 'utf8') : 0;
     // Cut before this row if the batch is full, but only where the position still moves (else the same rows would be
     // read again forever); a cut that cannot move it takes the row along.
     if (events.length > 0 && size + bytes > budget && stopAt.seq > cursor.seq) {

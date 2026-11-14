@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { loadCollectorConfig } from './collector/config.ts';
 import { runCollector } from './collector/loop.ts';
 import { defaultOpenDeps, runOpen } from './lookup/command.ts';
+import type { MergeLlm } from './server/merge-routes.ts';
 import type { Scheduler } from './understand/scheduler.ts';
 
 // Server modules (node:sqlite, hono) are loaded only inside the `server` command, with a dynamic
@@ -110,6 +111,7 @@ async function runServer(args: string[], io: Io): Promise<number> {
   const { dirname, join } = await import('node:path');
   const settings = new Settings(db, config, join(dirname(configPath), 'secrets'));
   let scheduler: Scheduler | null = null;
+  let mergeLlm: MergeLlm | null = null;
   let removeListeners = () => {};
   try {
     if (understanding.enabled) {
@@ -119,7 +121,10 @@ async function runServer(args: string[], io: Io): Promise<number> {
       const { defaultDeps } = await import('./domain/types.ts');
       // Models and the credential are read before each call, so changes in the settings apply without a restart. The
       // token file named in the config was checked above; the settings fall back to it when nothing else is chosen.
-      scheduler = new Scheduler(db, defaultDeps(), agentSdkRunner({ credential: () => settings.credential() }), () => settings.models());
+      const runner = agentSdkRunner({ credential: () => settings.credential() });
+      scheduler = new Scheduler(db, defaultDeps(), runner, () => settings.models());
+      // Merge previews are drafted with the curator's model, on the user's request rather than the scheduler's clock.
+      mergeLlm = { runner, model: () => settings.models().curate };
       if (settings.credential().mode === 'login' && !process.env.CLAUDE_CODE_OAUTH_TOKEN) {
         io.stdout(
           'agent-pm server: no understanding.oauthTokenFile and no CLAUDE_CODE_OAUTH_TOKEN; model calls use this machine\'s Claude Code login\n',
@@ -128,7 +133,7 @@ async function runServer(args: string[], io: Io): Promise<number> {
     }
     // `npm run build:web` writes the web UI here (relative to this file, so it works from any working directory).
     const webDir = fileURLToPath(new URL('../dist/web', import.meta.url));
-    const app = createApp(db, config, undefined, undefined, { scheduler, webDir, settings });
+    const app = createApp(db, config, undefined, undefined, { scheduler, webDir, settings, mergeLlm });
     const feed = new ChangeFeed(db, { status: () => scheduler?.status() ?? disabledStatus() });
     await new Promise<void>((resolve, reject) => {
       // No hostname: listen on every interface, so collectors and the CLI can reach it over Tailscale.

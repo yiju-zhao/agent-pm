@@ -15,7 +15,8 @@ import { StateDir } from '../../src/paseo-collector/state-store.ts';
 import { getSession } from '../../src/server/sessions-repo.ts';
 import { nextWindow, runDigest } from '../../src/understand/digest.ts';
 import type { LlmRunner } from '../../src/understand/llm.ts';
-import { call, count, HERDR_TOKEN, herdrChunks, herdrSession, herdrSnapshot, MACHINE, PASEO_SOURCE, PASEO_TOKEN, SERVER_ID, startCenter } from '../helpers/center.ts';
+import { call, count, HERDR_TOKEN, herdrChunks, herdrSession, herdrSnapshot, MACHINE, PASEO_SOURCE, PASEO_TOKEN, SERVER_ID, startCenter, config as centerConfig } from '../helpers/center.ts';
+import type { SourceCoverage } from '../../src/server/coverage.ts';
 import type { Center } from '../helpers/center.ts';
 import { FakePaseo } from '../helpers/fake-paseo.ts';
 
@@ -164,4 +165,30 @@ test('an agent going idle or being archived changes no project', async () => {
   expect(getSession(center.db, key, center.now)!.effective_status).toBe('ended');
   expect(center.db.prepare("SELECT stage FROM projects WHERE id = 'proj'").get()).toEqual({ stage: 'building' });
   expect(count(center.db, 'SELECT count(*) AS n FROM events')).toBe(0);
+});
+
+test('large Chinese and emoji messages reach the center across bounded HTTP batches', async () => {
+  fake.addAgent('unicode');
+  for (let i = 0; i < 4; i++) fake.user('unicode', `${i} ${'中🚀'.repeat(20_000)} END-${i}`, `unicode-${i}`);
+  c = startCollector();
+  await run();
+  const key = 'claude:native-unicode';
+  const view = getSession(center.db, key, center.now)!;
+  expect(view.sources[0].checkpoint?.seq).toBe(4);
+  for (let i = 0; i < 4; i++) {
+    const row = center.db.prepare('SELECT text FROM source_events WHERE session_key = ? AND text LIKE ?').get(key, `${i} %`) as { text: string } | undefined;
+    expect(row?.text).toContain(`END-${i}`);
+  }
+});
+
+test('the coverage report tells what a Paseo source delivered apart from what it only found', async () => {
+  fake.addAgent('read');
+  fake.user('read', `${'长'.repeat(70_000)} END`, 'long-1');
+  c = startCollector();
+  await run();
+  const res = await center.app.request('/coverage', { headers: { authorization: `Bearer ${centerConfig.userToken}` } });
+  const report = ((await res.json()) as SourceCoverage[]).find((s) => s.source_id === PASEO_SOURCE)!;
+  expect(report).toMatchObject({ state: 'ok', daemon_status: 'connected', sessions: { total: 1, live: 1 }, backlog: { outbox_batches: 0 } });
+  // The message was longer than the collector keeps: it arrived, and the cut is counted rather than hidden.
+  expect(report.content).toMatchObject({ with_content: 1, without_content: 0, truncated_chunks: 1, excerpted_chunks: 1 });
 });

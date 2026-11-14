@@ -82,6 +82,41 @@ const chunkTexts = (key: string) => (center.db.prepare('SELECT text FROM chunks 
 const sessionKey = (agentId: string) => `claude:native-${agentId}`;
 const occurrences = (hay: string, needle: string) => hay.split(needle).length - 1;
 
+test('archived history continues after the per-step round budget until its final message is committed', async () => {
+  fake.addAgent('long-archive');
+  for (let i = 0; i < 2002; i++) fake.user('long-archive', `history-${i}`, `u-${i}`);
+  fake.archive('long-archive');
+  let batches = 0;
+  /** What the collector told the center about the agent's content while batches were still going out. */
+  const reportedMidway = new Set<string>();
+  const c = collector({
+    cfg: { includeArchivedHistory: true, pageLimit: 1 },
+    wrap: (base) => ({
+      ...base,
+      batch: (b) => (batches++, base.batch(b)),
+      snapshot: (s) => {
+        if (batches < 2002) for (const a of s.agents) reportedMidway.add(a.content);
+        return base.snapshot(s);
+      },
+    }),
+  });
+  await c.reconcile();
+  await c.heartbeat();
+  // Heartbeats while the read is under way: the agent is never reported as caught up before its last row is in.
+  while (batches < 2002) {
+    await sleep(20);
+    await c.heartbeat();
+  }
+  await drain(c);
+  await cycle(c);
+  expect([...reportedMidway]).toEqual(['catching_up']);
+  // One batch per row: the step that ran out of rounds resumed where it stopped, without re-sending or spinning.
+  expect(batches).toBe(2002);
+  expect(getSession(center.db, sessionKey('long-archive'), center.now)!.sources[0].checkpoint?.seq).toBe(2002);
+  expect(chunkTexts(sessionKey('long-archive'))).toContain('history-2001');
+  expect(count(center.db, 'SELECT count(*) AS n FROM source_events WHERE session_key = ?', sessionKey('long-archive'))).toBe(2002);
+}, 60_000);
+
 function history(id: string, n: number, prefix = 'msg'): void {
   for (let i = 0; i < n; i++) {
     fake.user(id, `${prefix} user ${i}`, `${prefix}-u${i}`);

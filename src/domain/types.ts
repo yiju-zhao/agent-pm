@@ -11,7 +11,7 @@ export function isAi(actor: Actor): boolean {
   return actor !== 'user';
 }
 
-export type IdPrefix = 'p' | 'm' | 't' | 'd' | 'b' | 'c' | 'q';
+export type IdPrefix = 'p' | 'm' | 't' | 'd' | 'b' | 'c' | 'q' | 'mp';
 
 /** Everything non-deterministic the domain layer needs, so tests can pin it. */
 export type DomainDeps = {

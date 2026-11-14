@@ -258,7 +258,7 @@ openssl rand -hex 24      # 48 个字符，直接用作 userToken
 | `GET /projects/:id` | | 项目详情（里程碑、todo、决策、阻塞、关联、事件、`tombstones`） |
 | `POST /projects` | `{title, summary?, why?, done_criteria?, priority?, stage?}` | 新建项目，201 |
 | `PATCH /projects/:id` | `{title?, summary?, why?, done_criteria?, priority?}` | 改字段，改过的字段自动加锁 |
-| `POST /projects/:id/stage` | `{stage, merge_into?}` | 切换阶段（合并时带 `merge_into`） |
+| `POST /projects/:id/stage` | `{stage, merge_into?}` | 切换阶段（带 `merge_into` 时直接合并；网页走下面的合并预览） |
 | `DELETE /projects/:id/locks/:field` | | 解锁字段 |
 | `POST /projects/:id/milestones`、`PATCH …/milestones/:mid`、`DELETE …/milestones/:mid`、`DELETE …/milestones/:mid/locks/:field` | `{title, status?, position?}` | 里程碑；`status` 取 `todo`/`doing`/`done` |
 | `POST /projects/:id/todos`、`PATCH …/todos/:tid`、`DELETE …/todos/:tid`、`DELETE …/todos/:tid/locks/:field` | `{title, status?, priority?, milestone_id?}` | todo |
@@ -295,6 +295,31 @@ curl -s -XPOST $S/questions/q_1c9e…/answer "${H[@]}" -d '{"option_index":0}'
 curl -s -XPOST $S/events/2/revert -H "Authorization: Bearer $T"
 ```
 
+### 合并项目：先预览，确认后才生效
+
+合并有两种范围，都只动「session 与项目的关联」，不动会话原文、证据、历史事件，也不动该 session 与其他项目的关联：
+
+- **整个项目**：来源项目的全部 session 关联到目标项目（目标已有的不重复添加），来源项目标记为「合并」并保留原记录。
+- **选中的 session**：这些 session 的关联移到目标项目；来源项目保留、阶段不变，未选中的 session 仍在来源项目。
+
+| 接口 | 请求体 | 作用 |
+| --- | --- | --- |
+| `POST /projects/:id/merge-previews` | `{target, sessions?}` | 开始生成把 `:id`（或其中 `sessions`）并入 `target` 的预览，立即返回 `202` 和预览 id |
+| `GET /merge-previews/:id` | | 预览：状态（`generating` / `ready` / `failed` / `applied`）、项目草稿、关联变化、证据范围、是否已过期 |
+| `POST /merge-previews/:id/apply` | `{overwrite_locked?}` | 应用这份预览（不再调用模型） |
+
+预览做什么、不做什么：
+
+- 草稿（标题、简介、为什么、完成标准、未知事项）由整理员模型根据**目标项目已有 session 加上本次并入 session 的已存正文**重写，不是拼接两个项目的旧文字，也不经过摘要；旧项目记录只作参考，部分合并时来源项目的旧记录和未选 session 的内容不会交给模型。每个字段带所依据的 chunk id，引用了没给过的 chunk 的草稿直接作废。
+- 内容多时按 10 万字符一段先逐段提取事实再汇总；超过 24 段时每个 session 保留开头和最近的若干段，跳过的部分在「证据范围」里写明。被你忽略的 session、被模型提供方拒绝过的 session 不会发送，作为缺口列出。
+- 这里的「正文」是中心保存的归一化内容，不是 agent 机器上的原始 transcript：采集时被截断的消息、Paseo 较长事件的节选都会按 session 计数显示。
+- 生成预览不改任何项目、关联或阶段。确认时在一个事务里写入预览中的确切内容：关联的迁移和去重由代码按规则执行，不由模型决定；你锁定过的字段默认保留，逐个勾选才会被草稿替换；写入的字段随即锁定。
+- 预览记录了生成时的输入（两个项目的文字、阶段、锁，双方全部关联，相关 session 的内容量、忽略和拒绝状态）。其中任何一项之后变了，预览即过期，确认会被拒绝（`409 stale`），需要重新生成。模型失败、输出不合格、生成期间输入变化都只留下一条失败的预览。
+- 整个合并是一条事件（`apply_merge`），在事件日志里一次撤销即可恢复关联、来源阶段和目标文字。
+- 仍可用 `POST /projects/:id/stage` 带 `merge_into` 直接合并（不重写文字）；这条路径现在也在同一事件里把来源的 session 关联到目标。
+
+确认之后，目标项目（部分合并时还有来源项目）照常进入下面的整体整理，由整理员按新的 session 范围重整里程碑和 todo；它要改你锁定的字段时仍然先问你。
+
 ### 合并、关联后的项目整体整理
 
 管理员合并项目或改变 session 关联后，领域操作会在同一个事务内写入持久的 `project_reviews` 队列；保存成功后唤醒整理器，无需再点同步。同一目标项目的连续修改合并为最新请求，AI 自己更新贡献记录不会再次触发队列。
@@ -304,6 +329,20 @@ curl -s -XPOST $S/events/2/revert -H "Authorization: Bearer $T"
 整理员只能写目标项目，所有写入仍经过原有领域操作并记录事件。用户锁定或编辑的内容、删除记录和否决不能被绕过；删除用户编辑过的条目仍需确认。用户中途撤销或改变关联时，旧任务停止后续写入，新请求读取最新状态；已产生的 AI 事件保留，可逐条撤销。
 
 上游拒绝或被忽略的 session 不重发原文，任务完成时记录 `done_with_gaps`，不会谎称信息完整。无写入的临时失败退避重试，发生部分写入后的失败不自动重放；`GET /status` 暴露 `pending_project_reviews`、`reviewing_project`、`failed_project_reviews`，失败会保留为可检查的状态。
+
+## 采集覆盖核验
+
+`GET /coverage`（管理员）和 `Session` 页顶部的「采集覆盖核验」按来源列出实际收到了什么，避免把「采集器在线」当成「内容收齐」：
+
+- 状态：已配置但从未上报、采集器离线、daemon 未连接、在线。
+- 发现的 session 数（活跃、已结束、原文已删、未跟踪）与其中**有正文**的数量；没有任何正文、只有屏幕快照、Paseo 未加载（只有元数据）、仍在补采、积压暂停、读取出错的数量。
+- 时间线缺口（按原因）、采集器未送达的批次、最近错误。
+- 已存正文的缩减情况，分三类：有 user / assistant 消息在采集时被截断的段数（被截掉的部分中心没有）；只截了工具内容的段数（按设计）；Paseo 较长事件的节选段数（中心在 `source_events` 里保留更完整的事件副本）。
+- 每类来源采集不到的范围（文字说明）。
+
+它只统计到达中心的内容。采集器从未见过的 session 无法计数：herdr 只发现采集器运行期间出现过的 pane；Paseo 默认不导入采集器启动前已归档的 agent，已关闭或未加载的 agent 只有元数据。要核对这部分，只能在那台机器上对照 daemon / transcript 目录。
+
+herdr 采集器对 user / assistant 消息保留首尾共 16000 字符并标注中间省略了多少（旧版本只保留前 4000 字符，结尾会丢）；工具调用只保留 200 字符的摘要，工具结果不采集。改规则不会回补已经越过游标的旧内容：那些段落以「采集时被截断」计数呈现，目前没有自动补采。
 
 ## 理解层与 MCP（计划 3）
 
@@ -432,7 +471,7 @@ curl -s http://<mac-mini>:7718/mcp -H "Authorization: Bearer <mcpToken>" \
 
 项目的阶段和优先级都只能取固定选项。优先级 **P0 最高、P3 最低**：P0 阻塞其他工作或有硬期限，现在就要做；P1 当前主线，本周要推进；P2 重要但不紧急，排进计划；P3 可选，有空再做（定义在 `src/shared/vocab.ts`，整理员、复核、网页和 skill 共用）。
 
-整理员新建项目时按定义预填优先级，往前推进阶段；还没有优先级的老项目由一次性复核补上（规则版本 `BOARD_RULES_VERSION` 变了时，所有进行中的项目各复核一次）。网页上它们就是那个字段本身：页面不标明一个值是 AI 填的还是你改的，你直接在同一个下拉框里改，选了就生效，没有确认步骤（选「合并」时先选合并到哪个项目，选完即合并）。改错了在事件日志里撤销。谁改的仍然记在数据库里（每次改动一条事件，带操作者）：你改过的字段 AI 之后不能直接改，只能向你提一个确认题；AI 提出的阶段回退、完成、搁置、放弃、合并始终要你确认。
+整理员新建项目时按定义预填优先级，往前推进阶段；还没有优先级的老项目由一次性复核补上（规则版本 `BOARD_RULES_VERSION` 变了时，所有进行中的项目各复核一次）。网页上它们就是那个字段本身：页面不标明一个值是 AI 填的还是你改的，你直接在同一个下拉框里改，选了就生效，没有确认步骤（选「合并」例外：它打开合并对话框，选目标和范围、看过预览并确认后才生效，见「合并项目：先预览，确认后才生效」）。改错了在事件日志里撤销。谁改的仍然记在数据库里（每次改动一条事件，带操作者）：你改过的字段 AI 之后不能直接改，只能向你提一个确认题；AI 提出的阶段回退、完成、搁置、放弃、合并始终要你确认。
 
 ## 网页界面（计划 4）
 

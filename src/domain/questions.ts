@@ -79,7 +79,7 @@ export function setArgPath(args: Record<string, unknown>, path: string, value: u
  * Operations only the user may perform. Answering a question runs the chosen option as the user, so an AI must not
  * be able to bind one of these to an option.
  */
-export const USER_ONLY_OPS = ['unlock_field', 'revert_event'] as const satisfies readonly OpName[];
+export const USER_ONLY_OPS = ['unlock_field', 'revert_event', 'apply_merge'] as const satisfies readonly OpName[];
 
 function isUserOnlyOp(op: OpName): boolean {
   return (USER_ONLY_OPS as readonly OpName[]).includes(op);

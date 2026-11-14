@@ -95,6 +95,21 @@ export const OP_SCHEMAS = {
   unlink_session: z.object({ session: Id, project: Id }).strict(),
   ignore_session: z.object({ session: Id, ignored: z.boolean().default(true) }).strict(),
   revert_event: z.object({ event_id: z.int().min(1) }).strict(),
+  /**
+   * Applies a merge preview exactly as it was shown (see domain/merge.ts). `source`, `target`, `mode` and `sessions`
+   * repeat the preview's scope so the event says what was merged; they must equal the preview's.
+   */
+  apply_merge: z
+    .object({
+      preview: Id,
+      source: Id,
+      target: Id,
+      mode: z.enum(['project', 'sessions']),
+      sessions: z.array(Id),
+      /** Fields of the target the user locked and now agrees to replace with the draft's text. */
+      overwrite_locked: z.array(z.enum(['title', 'summary', 'why', 'done_criteria'])).default([]),
+    })
+    .strict(),
 };
 
 export type OpName = keyof typeof OP_SCHEMAS;

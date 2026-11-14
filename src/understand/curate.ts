@@ -8,6 +8,7 @@ import { DigestSchema, neutralizeTags } from './digest.ts';
 import { recordRun } from './llm.ts';
 import type { LlmCall, LlmErrorKind, LlmResult, LlmRunner } from './llm.ts';
 import { renderBrief, renderProjectIndex, renderTombstones, TOMBSTONES_TITLE } from './render.ts';
+import { PROJECT_GUIDE } from './project-guide.ts';
 import { PRIORITY_GUIDE, STAGE_GUIDE } from './stage-guide.ts';
 
 /** Most digests one curator run takes; the rest wait for the next run. */
@@ -58,8 +59,10 @@ const SYSTEM_PROMPT = [
   '2. 写操作最终由系统的规则校验：完成、放弃、合并、搁置不会直接生效，而是变成给用户的确认题；用户锁定的字段、删除过的内容也不会被改回去。不要想办法绕开。',
   '',
   '规则：',
-  '3. 新课题：摘要的 topics 里 is_new_topic 为真、trivial 为假，且不像"全部未结束项目的索引"和"相关项目"里的任何一个时，',
-  '   直接调用 `create_project` 建一个项目（只能是 idea 阶段，写上 summary，why 有依据就写），并用 `from_session` 关联这条摘要的 session。不要为此提问。',
+  '3. 新项目：按下面"项目的定义与写法"判断。摘要的 topics 里 is_new_topic 为真、trivial 为假，并且它是一个索引和相关项目里都没有的、可独立验收的目标时，',
+  '   直接调用 `create_project` 建一个项目（只能是 idea 阶段；title、summary 按写法要求写，why 和 done_criteria 有依据才写），并用 `from_session` 关联这条摘要的 session。不要为此提问。',
+  '   它如果是在为某个已有项目的目标服务（一个 feature、一次 bug 修复、一项调研），不要建项目：关联到那个项目，并记成它的里程碑或 todo。',
+  '   同一批里多条摘要指向同一个新目标时只建一个项目，其余 session 用 `link_session` 关联过去。',
   '4. 像某个已有项目、但拿不准归属：调用 `ask_user`（`project_id` 填相关项目 id，`session_key` 填 session），给出选项，每个选项绑定一个合法操作',
   '   （例如 `link_session`、`create_project`，或 `ignore_session`，op 为 null 表示什么都不做）。待回答的问题里已经有的，不要再问。',
   '5. 已有项目的更新：先用 `get_project`（参数是 `project_id`）看一眼，避免重复添加。只记摘要里明确出现的事实：',
@@ -76,6 +79,8 @@ const SYSTEM_PROMPT = [
   '   （也不能用在 `from_session`、`ignore_session`、`ask_user` 的 `session_key` 上），只用它的内容更新项目。',
   '10. trivial 的摘要、与任何项目无关的零碎内容，不需要任何操作；整批都没有值得记的，什么工具都不调直接结束也可以。',
   '11. 用对话所用的语言写项目文字，保持简短具体。结束时用一两句话说明做了什么。',
+  '',
+  PROJECT_GUIDE,
   '',
   STAGE_GUIDE,
   '',

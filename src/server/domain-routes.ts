@@ -15,7 +15,7 @@ import { isAdmin, requireScope } from './keys.ts';
 import type { ServerConfig } from './config.ts';
 
 /** Request bodies of the write routes are small JSON documents. */
-const MAX_BODY_BYTES = 64 * 1024;
+export const MAX_BODY_BYTES = 64 * 1024;
 
 // ---- request shapes ----------------------------------------------------------------------------------------------
 // The routes check only the shape of a body (which keys, which JSON types) and refuse anything else, so a user's request can
@@ -61,7 +61,7 @@ function rejected(code: RejectCode, message: string): OpResult {
 }
 
 /** `invalid` is the caller's mistake, `not_found` and `user_only` are what they say, every other refusal is a state conflict. */
-function rejectStatus(code: RejectCode): 400 | 403 | 404 | 409 {
+export function rejectStatus(code: RejectCode): 400 | 403 | 404 | 409 {
   switch (code) {
     case 'invalid':
       return 400;
@@ -81,7 +81,7 @@ function respond(c: Context, result: OpResult, created: boolean): Response {
 }
 
 /** The parsed JSON body, or the 400 response to send. */
-async function readBody<S extends z.ZodType>(c: Context, schema: S): Promise<z.output<S> | Response> {
+export async function readBody<S extends z.ZodType>(c: Context, schema: S): Promise<z.output<S> | Response> {
   let json: unknown;
   try {
     json = await c.req.json();

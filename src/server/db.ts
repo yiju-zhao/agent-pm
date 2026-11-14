@@ -438,6 +438,24 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX idx_project_reviews_pending ON project_reviews(status,retry_at,id);
   `,
+  // v10: merge previews. A draft of the merged project built from session evidence; nothing in the domain tables changes
+  // until the user applies it, and `signature` (the inputs it was built from) refuses an apply after they changed.
+  `
+  CREATE TABLE merge_previews (
+    id TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    session_keys TEXT NOT NULL,
+    status TEXT NOT NULL,
+    signature TEXT NOT NULL,
+    draft TEXT,
+    coverage TEXT,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  `,
 ];
 
 /** Opens (creating if needed) the central database in WAL mode and applies pending migrations. */

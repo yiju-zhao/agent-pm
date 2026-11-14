@@ -9,6 +9,7 @@ import { neutralizeTags } from './digest.ts';
 import { recordRun } from './llm.ts';
 import type { LlmCall, LlmErrorKind, LlmResult, LlmRunner } from './llm.ts';
 import { renderProjectMarkdown } from './render.ts';
+import { PROJECT_GUIDE } from './project-guide.ts';
 import { PRIORITY_GUIDE, STAGE_GUIDE } from './stage-guide.ts';
 
 export const REVIEW_BATCH = 20;
@@ -67,7 +68,8 @@ const SYSTEM = [
   '保留用户锁定的字段、删除记录和否决。不能把重复任务标为完成；删除重复条目用delete工具，用户编辑过的内容仍由系统请求确认。',
   '写操作必须有reason和evidence，只能引用本批列出的digest:<id>及event:<id>；触发事件只证明结构调整，事实依据来自项目记录或摘要。',
   '先读目标与来源的完整记录；复用已有条目，不重复记录决策和贡献。所有调整均经原有领域操作，不能解锁字段或绕过确认。',
-  '阶段、优先级遵守以下约定。结束时简述梳理结果与尚缺的信息。', STAGE_GUIDE, PRIORITY_GUIDE,
+  '项目关联的session由系统在用户合并或关联时确定，不需要你补建；你负责的是项目记录的内容。',
+  '标题、简介、完成标准按下面的"项目的定义与写法"检查和改写。阶段、优先级遵守以下约定。结束时简述梳理结果与尚缺的信息。', PROJECT_GUIDE, STAGE_GUIDE, PRIORITY_GUIDE,
 ].join('\n');
 
 export type ReviewOutcome = { ok: true; finished: boolean; gaps: number } | { ok: false; kind: LlmErrorKind; message: string; partial: boolean };

@@ -4,6 +4,7 @@ import { transaction } from '../server/db.ts';
 import { appendEvent, ChangeSet, netChanges } from './changes.ts';
 import { ITEM_HANDLERS } from './items-ops.ts';
 import { LINK_HANDLERS } from './links-ops.ts';
+import { MERGE_HANDLERS } from './merge.ts';
 import { EVIDENCE_RE, OP_SCHEMAS } from './ops.ts';
 import type { OpInput, OpName } from './ops.ts';
 import { enqueueProjectReviews } from './project-reviews.ts';
@@ -45,6 +46,7 @@ export const HANDLERS: Partial<Record<OpName, Handler>> = {
   ...PROJECT_HANDLERS,
   ...ITEM_HANDLERS,
   ...LINK_HANDLERS,
+  ...MERGE_HANDLERS,
   ...REVERT_HANDLERS,
 };
 

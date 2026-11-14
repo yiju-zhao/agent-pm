@@ -493,15 +493,23 @@ export class PaseoCollector {
       a.content = 'catching_up';
       if (a.base === undefined) a.base = (await this.deps.client.checkpoint(agentId)).checkpoint;
       const turnActive = a.entry.agent.status === 'running' || (a.entry.agent.activeTurn ?? null) !== null;
+      // Only a read that found nothing more to deliver ends the step as caught up. Running out of rounds (or being
+      // stopped) leaves the agent catching up: the slot is released and the rest is read in a following step.
+      let caughtUp = false;
+      let committed = false;
       for (let round = 0; round < MAX_ROUNDS_PER_SYNC && !this.stopping; round++) {
         const plan = await nextBatch({ sdk: this.deps.sdk, agentId, base: a.base, turnActive, startedAt: this.startedAt, pageLimit: this.cfg.pageLimit });
-        if (plan === null) break;
+        if (plan === null) {
+          caughtUp = true;
+          break;
+        }
         const batch = { ...plan.batch, source_id: this.cfg.sourceId, instance_id: this.deps.state.identity.instanceId, lease_epoch: this.lease!.epoch };
         const file = this.deps.outbox.put(batch);
         try {
           const ack = await this.deps.client.batch(batch);
           this.deps.outbox.remove(file);
           a.base = ack.checkpoint;
+          committed = true;
         } catch (err) {
           if (err instanceof RefusedError && (err.code === 'checkpoint_mismatch' || err.code === 'batch_conflict')) {
             // Built on a position the center does not have (restored backup, lost state): rebuild from its position.
@@ -512,16 +520,24 @@ export class PaseoCollector {
           }
           throw err; // the batch stays in the outbox and is resent (re-stamped with the next lease if needed)
         }
-        if (!plan.progressed || !plan.more) break;
+        if (!plan.progressed || !plan.more) {
+          caughtUp = true;
+          break;
+        }
         if (this.outboxFull()) {
           a.content = 'paused';
           return;
         }
       }
-      if (a.lifecycle === 'archived') a.finalRead = true;
-      a.content = 'current';
       a.failures = 0;
       a.retryAt = 0;
+      if (!caughtUp) {
+        // Continue right away only if this step moved the position; otherwise the heartbeat tries again later.
+        if (committed) a.dirty = true;
+        return;
+      }
+      if (a.lifecycle === 'archived') a.finalRead = true;
+      a.content = 'current';
     } catch (err) {
       if (a) {
         a.failures += 1;

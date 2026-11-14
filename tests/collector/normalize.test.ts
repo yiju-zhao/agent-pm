@@ -150,11 +150,16 @@ test('bad json lines and unknown record types are skipped', () => {
   expect(normalizeCodex(['not json', '{"type":"brand-new-type"}', cxUser('hi')])).toHaveLength(1);
 });
 
-test('long entry is truncated to MAX_ENTRY_CHARS with marker', () => {
-  const [e] = normalizeClaude([asstText('x'.repeat(50000))]);
-  expect(e!.text.length).toBeLessThanOrEqual(4000 + 20);
-  expect(e!.text.endsWith('…[已截断]')).toBe(true);
-  expect(e!.text).toBe('x'.repeat(MAX_ENTRY_CHARS) + MARKER);
+test('a long message keeps its beginning and its conclusion, and says how much of the middle was left out', () => {
+  const text = `GOAL 修复采集 ${'x'.repeat(50000)} 最终结论：验收通过 END`;
+  const [e] = normalizeClaude([asstText(text)]);
+  expect(e!.text.startsWith('GOAL 修复采集')).toBe(true);
+  expect(e!.text.endsWith('最终结论：验收通过 END')).toBe(true);
+  const cut = /…\[中间省略 (\d+) 字符\]…/.exec(e!.text);
+  expect(cut).not.toBeNull();
+  expect(e!.text.length).toBeLessThanOrEqual(MAX_ENTRY_CHARS + 30);
+  expect(Number(cut![1])).toBe(text.length - (e!.text.length - `\n${cut![0]}\n`.length));
+  expect(MAX_ENTRY_CHARS).toBe(16000);
 });
 
 test('entry exactly MAX_ENTRY_CHARS long is not truncated', () => {
@@ -162,12 +167,13 @@ test('entry exactly MAX_ENTRY_CHARS long is not truncated', () => {
   expect(e!.text).toBe('y'.repeat(MAX_ENTRY_CHARS));
 });
 
-test('truncation does not split a surrogate pair', () => {
-  // 1 + 2k units: the MAX_ENTRY_CHARS boundary falls between the halves of an emoji.
-  const [e] = normalizeClaude([userStr('a' + '😀'.repeat(3000))]);
-  expect(e!.text.endsWith(MARKER)).toBe(true);
-  expect(e!.text).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
-  expect(e!.text).not.toMatch(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+test('cutting a long message does not split a surrogate pair at either edge', () => {
+  for (const lead of ['', 'a']) {
+    const [e] = normalizeClaude([userStr(lead + '😀'.repeat(20000))]);
+    expect(e!.text).toContain('中间省略');
+    expect(e!.text).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+    expect(e!.text).not.toMatch(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+  }
 });
 
 test('tool summary: the part after "<name>: " is cut to MAX_TOOL_SUMMARY_CHARS and marked', () => {

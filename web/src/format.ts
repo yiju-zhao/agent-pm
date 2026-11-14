@@ -46,6 +46,7 @@ export const OP_LABEL: Record<string, string> = {
   unlink_session: '取消关联',
   ignore_session: '不追踪 session',
   revert_event: '撤销',
+  apply_merge: '合并（经预览确认）',
 };
 
 /** The Chinese name of an operation; one we have no name for is shown as the server wrote it. */

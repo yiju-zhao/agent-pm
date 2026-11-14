@@ -83,36 +83,39 @@ test('picking the stage the project is in sends nothing', () => {
   expect(fetchMock).not.toHaveBeenCalled();
 });
 
-test('合并 asks which project first; picking one merges at once with {stage, merge_into}', async () => {
+test('合并 opens the merge dialog instead of merging: nothing is sent, and closing it leaves the project as it was', () => {
   renderControl();
   choose('merged');
   expect(fetchMock).not.toHaveBeenCalled();
-  const target = screen.getByRole('combobox', { name: '合并到' }) as HTMLSelectElement;
-  expect(within(target).queryByRole('option', { name: 'dLLM 评测框架' })).toBeNull();
+  const dialog = screen.getByRole('dialog', { name: '合并项目' });
+  const target = within(dialog).getByRole('combobox', { name: '合并到' }) as HTMLSelectElement;
   expect(within(target).getAllByRole('option').map((o) => o.textContent)).toEqual(['合并到哪个项目…', 'loopwm', 'agent-pm']);
   fireEvent.change(target, { target: { value: 'p_2' } });
-  await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
-  expect(request()).toMatchObject({ url: '/projects/p_1/stage', method: 'POST', body: { stage: 'merged', merge_into: 'p_2' } });
+  expect(fetchMock).not.toHaveBeenCalled();
+  fireEvent.click(within(dialog).getByRole('button', { name: '取消' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(stageSelect().value).toBe('build');
+  expect(reload).not.toHaveBeenCalled();
 });
 
-test('picking another stage instead of a merge target drops the merge and moves there', async () => {
-  renderControl();
+test('picking another stage instead of merging drops the merge and moves there', async () => {
+  renderControl({}, null);
   choose('merged');
   choose('build');
-  expect(screen.queryByRole('combobox', { name: '合并到' })).toBeNull();
+  expect(screen.queryByText('加载中…')).toBeNull();
   expect(fetchMock).not.toHaveBeenCalled();
   choose('merged');
   choose('verify');
   await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
   expect(request().body).toEqual({ stage: 'verify' });
-  expect(screen.queryByRole('combobox', { name: '合并到' })).toBeNull();
+  expect(screen.queryByText('加载中…')).toBeNull();
 });
 
 test('with no other project to merge into, 合并 says why and sends nothing', () => {
   renderControl({}, [{ id: 'p_1', title: 'dLLM 评测框架' }]);
   choose('merged');
   expect(screen.getByText('没有可以合并进去的项目')).toBeTruthy();
-  expect(screen.queryByRole('combobox', { name: '合并到' })).toBeNull();
+  expect(screen.queryByRole('dialog')).toBeNull();
   expect(fetchMock).not.toHaveBeenCalled();
 });
 

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { SnapshotPush, SnapshotSession } from '../shared/protocol.ts';
-import { makeSessionKey } from '../shared/session-key.ts';
+import { makeSessionKey, parseSessionKey } from '../shared/session-key.ts';
 import { createPmClient, RetryableError } from './client.ts';
 import type { PmClient } from './client.ts';
 import type { CollectorConfig } from './config.ts';
@@ -144,7 +144,7 @@ async function purgeCheck(sessions: SnapshotSession[], store: CursorStore) {
  * Pushes everything appended to a session's transcript since the confirmed cursor, one read window
  * per push; the cursor moves only after the server accepted the window's chunks.
  */
-async function pushTranscript(s: SnapshotSession, t: Tick): Promise<number> {
+async function pushTranscript(s: Pick<SnapshotSession, 'key' | 'agent_kind' | 'transcript_path'>, t: Tick): Promise<number> {
   const { store, deps } = t;
   const path = s.transcript_path!;
   const cur = store.get(s.key);
@@ -320,6 +320,28 @@ export async function collectOnce(
       if (err instanceof RetryableError) throw err;
       errors += 1;
       log(`${now.toISOString()} agent-pm collector: session ${s.key}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  // A pane can close between polls, after writing its last result. Its persisted transcript cursor
+  // remains useful after restarts; read that tail without putting the session back in the live snapshot.
+  const liveKeys = new Set(sessions.map((s) => s.key));
+  for (const key of store.keys()) {
+    const cursor = store.get(key)!;
+    if (liveKeys.has(key) || cursor.fidelity !== 'full' || cursor.path === null) continue;
+    // Nothing appended since the cursor (or the file is gone, which the purge check reports): no read, and no
+    // question to the server either, so an old cursor costs one stat (a file left ending in an unfinished line is
+    // still opened each tick, as it may yet be completed).
+    const size = await stat(cursor.path).then((st) => st.size, () => null);
+    if (size === null || size === cursor.offset) continue;
+    await t.heartbeat();
+    try {
+      const identity = parseSessionKey(key);
+      if (identity.kind !== 'native' || !['claude', 'codex'].includes(identity.agentKind)) continue;
+      chunksPushed += await pushTranscript({ key, agent_kind: identity.agentKind, transcript_path: cursor.path }, t);
+    } catch (err) {
+      if (err instanceof RetryableError) throw err;
+      errors += 1;
+      log(`${now.toISOString()} agent-pm collector: closed session ${key}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
   return { sessions: sessions.length, chunksPushed, errors };

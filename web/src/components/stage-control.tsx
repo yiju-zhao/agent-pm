@@ -4,14 +4,15 @@ import { STAGES, STAGE_LABEL } from '../../../src/shared/vocab.ts';
 import type { Stage } from '../../../src/shared/vocab.ts';
 import { apiSend } from '../api.ts';
 import { useWrite } from '../use-write.ts';
+import { MergeDialog } from './merge-dialog.tsx';
 
 /**
  * The project's stage as one menu: it shows the current stage, and picking another one moves the project at once.
  * Whether a move is allowed is the server's call; a refusal is shown as a toast and the menu stays on the stage the
- * project is in. Merging needs the project to merge into, so picking 合并 opens a second menu and picking a project
- * there does the merge; picking any other stage instead drops it. `mergeTargets` is undefined while that list is on
- * its way (or, with `mergeTargetsFailed`, could not be read). `reload` runs after a move was accepted. A move is taken
- * back from the event log, like any other change.
+ * project is in. Merging is not a one-click move: picking 合并 opens the merge dialog (target, whole project or chosen
+ * sessions, preview, confirmation), and closing it leaves the project as it was. `mergeTargets` is undefined while that
+ * list is on its way (or, with `mergeTargetsFailed`, could not be read). `reload` runs after a move was accepted. A move
+ * is taken back from the event log, like any other change.
  */
 export function StageControl({
   project,
@@ -34,7 +35,7 @@ export function StageControl({
   const path = `/projects/${encodeURIComponent(project.id)}/stage`;
   const resume = project.stage === 'parked' ? project.stage_before_park : null;
 
-  const move = async (body: { stage: Stage; merge_into?: string }) => {
+  const move = async (body: { stage: Stage }) => {
     setBusy(true);
     await fire(() => apiSend('POST', path, body));
     setBusy(false);
@@ -47,20 +48,14 @@ export function StageControl({
     else void move({ stage });
   };
 
+  // The merge itself (target, scope, preview, confirmation) happens in the dialog; here only why it cannot open.
   const targetMenu =
     mergeTargets === undefined ? (
       <span className="dim">{mergeTargetsFailed ? '读不到项目列表' : '加载中…'}</span>
     ) : targets.length === 0 ? (
       <span className="dim">没有可以合并进去的项目</span>
     ) : (
-      <select aria-label="合并到" value="" disabled={busy} onChange={(e) => e.target.value !== '' && void move({ stage: 'merged', merge_into: e.target.value })}>
-        <option value="">合并到哪个项目…</option>
-        {targets.map((t) => (
-          <option key={t.id} value={t.id}>
-            {t.title}
-          </option>
-        ))}
-      </select>
+      <MergeDialog project={project} targets={targets} reload={reload} onClose={() => setChoosingTarget(false)} />
     );
 
   return (

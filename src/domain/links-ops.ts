@@ -112,6 +112,44 @@ export function linkSession(ctx: OpContext, args: OpArgs<'link_session'>): { id:
 }
 
 /**
+ * The user's merge carries a source project's link (`link`, a live contribution row) over to `targetId`: a new link
+ * with the same description and time range, a link taken back earlier restored, or, when the target already has the
+ * session, only its time range widened. The result is the user's link. A milestone belongs to its project, so it is
+ * not carried. A link the user took back from the target stays taken back unless `restoreVetoed` (the merge preview
+ * shows such a link as restored before the user confirms; a merge without preview does not get to undo that choice).
+ */
+export function carrySessionLink(ctx: OpContext, link: Row, targetId: string, opts: { restoreVetoed: boolean }): void {
+  const session = String(link.session_key);
+  const text = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+  const existing = findLink(ctx.db, session, targetId);
+  if (!existing) {
+    ctx.changes.insert('contributions', {
+      id: ctx.deps.newId('c'),
+      session_key: session,
+      project_id: targetId,
+      milestone_id: null,
+      summary: text(link.summary) ?? null,
+      ts_start: text(link.ts_start) ?? null,
+      ts_end: text(link.ts_end) ?? null,
+      confidence: typeof link.confidence === 'number' ? link.confidence : null,
+      actor: 'user',
+      created_at: ctx.deps.now().toISOString(),
+    });
+    return;
+  }
+  const revived = existing.deleted_at !== null;
+  if (revived && existing.vetoed === 1 && !opts.restoreVetoed) return;
+  ctx.changes.update('contributions', String(existing.id), {
+    ts_start: widen(existing.ts_start, text(link.ts_start), 'min'),
+    ts_end: widen(existing.ts_end, text(link.ts_end), 'max'),
+    summary: revived && existing.summary === null ? (text(link.summary) ?? null) : undefined,
+    deleted_at: null,
+    vetoed: 0,
+    actor: revived ? 'user' : undefined,
+  });
+}
+
+/**
  * The user's unlink is a veto (a tombstone an AI may only ask to undo). An AI removes links it made itself; one the
  * user made it can only propose removing.
  */

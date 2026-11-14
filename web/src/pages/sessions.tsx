@@ -3,6 +3,7 @@ import type { ProjectCard } from '../../../src/domain/read.ts';
 import type { SessionListItem } from '../../../src/server/http.ts';
 import { apiSend, errorText, sessionPath } from '../api.ts';
 import { ConfirmButton } from '../components/confirm-button.tsx';
+import { CoveragePanel } from '../components/coverage-panel.tsx';
 import { projectHref } from '../components/project-card.tsx';
 import { SessionTag } from '../components/session-tag.tsx';
 import { SourceBadges } from '../components/source-badges.tsx';
@@ -142,6 +143,7 @@ export function SessionsPage() {
         <h2 className="h">{data === undefined ? 'Session' : `Session · ${data.length} 个`}</h2>
         <FilterToggle filter={filter} onChange={setFilter} />
       </div>
+      <CoveragePanel now={now} />
       {error !== null ? (
         <div className="error-bar" role="alert">
           <span>{errorText(error)}</span>

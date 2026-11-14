@@ -304,9 +304,10 @@ test('the stage menu offers the other projects as merge targets, not the project
   fireEvent.change(screen.getByRole('combobox', { name: '阶段' }), { target: { value: 'merged' } });
   const target = screen.getByRole('combobox', { name: '合并到' });
   expect(within(target).getAllByRole('option').map((o) => o.textContent)).toEqual(['合并到哪个项目…', 'loopwm']);
+  // Choosing a target merges nothing yet: the dialog goes on to the scope and the preview.
   fireEvent.change(target, { target: { value: 'p_2' } });
-  await waitFor(() => expect(writesMade()).toHaveLength(1));
-  expect(writesMade()[0]).toEqual({ url: '/projects/p_1/stage', method: 'POST', body: { stage: 'merged', merge_into: 'p_2' } });
+  expect(screen.getByRole('button', { name: '生成预览' })).toBeTruthy();
+  expect(writesMade()).toHaveLength(0);
 });
 
 test('deleted items are folded under 已删除的条目（n）, with what they were and when', async () => {

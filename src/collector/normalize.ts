@@ -8,7 +8,11 @@ export type TranscriptChunk = {
   text: string;
 };
 
-export const MAX_ENTRY_CHARS = 4000;
+/**
+ * Most UTF-16 units kept of one user or assistant message. A longer one keeps its head and its tail (where a turn's
+ * conclusion usually is) with a marker saying how much of the middle was left out.
+ */
+export const MAX_ENTRY_CHARS = 16000;
 export const MAX_TOOL_SUMMARY_CHARS = 200;
 export const MAX_CHUNK_CHARS = 48000;
 
@@ -30,6 +34,18 @@ function truncate(s: string, max: number): string {
   return s.slice(0, end) + TRUNCATION_MARKER;
 }
 
+/** `text` cut to about `max` units keeping head and tail, never half a surrogate pair, with what was left out. */
+function headTail(text: string, max: number): string {
+  if (text.length <= max) return text;
+  let headEnd = Math.floor(max * 0.6);
+  const before = text.charCodeAt(headEnd - 1);
+  if (before >= 0xd800 && before <= 0xdbff) headEnd -= 1;
+  let tailStart = text.length - (max - Math.floor(max * 0.6));
+  const at = text.charCodeAt(tailStart);
+  if (at >= 0xdc00 && at <= 0xdfff) tailStart += 1;
+  return `${text.slice(0, headEnd)}\n…[中间省略 ${tailStart - headEnd} 字符]…\n${text.slice(tailStart)}`;
+}
+
 function parseRecord(line: string): Rec | null {
   let v: unknown;
   try {
@@ -48,7 +64,7 @@ function usableTs(rec: Rec): string | null {
 
 function textEntry(ts: string, role: 'user' | 'assistant', text: string): Entry | null {
   if (text.trim() === '') return null;
-  return { ts, role, text: truncate(text, MAX_ENTRY_CHARS) };
+  return { ts, role, text: headTail(text, MAX_ENTRY_CHARS) };
 }
 
 function toolEntry(ts: string, name: unknown, args: unknown): Entry | null {

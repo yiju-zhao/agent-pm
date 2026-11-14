@@ -21,6 +21,7 @@ const MINIMAL: Record<OpName, unknown> = {
   unlink_session: { session: 'claude:abc', project: 'p_1' },
   ignore_session: { session: 'claude:abc' },
   revert_event: { event_id: 1 },
+  apply_merge: { preview: 'mp_1', source: 'p_1', target: 'p_2', mode: 'project', sessions: [] },
 };
 
 const OPS = Object.keys(OP_SCHEMAS) as OpName[];

@@ -168,6 +168,9 @@ const WRITE_ROUTES: Array<[method: string, pattern: string, body?: unknown]> = [
   ['POST', '/events/:id/revert'],
   ['POST', '/questions/:id/answer', { option_index: 0 }],
   ['POST', '/questions/:id/dismiss'],
+  // Merge previews (merge-routes.test.ts): starting one calls the model, applying one writes.
+  ['POST', '/projects/:id/merge-previews', { target: 'x' }],
+  ['POST', '/merge-previews/:id/apply', {}],
   // Not a project write, but it starts model calls, so it takes the user token too (see http.test.ts).
   ['POST', '/sync'],
   // Keys and settings (admin-routes.test.ts): admin keys only.
