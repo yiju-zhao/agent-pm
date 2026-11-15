@@ -124,6 +124,8 @@ export type QuestionView = {
   recommend_reason: string | null;
   /** Set when an automatic decider answered it instead of the user: who, how sure, which option, the event it ran. */
   auto: { decider: string; confidence: number; option_index: number; event_id: number | null; reason: string } | null;
+  /** The blocker this question settles, when it was asked about one. */
+  about_blocker: string | null;
 };
 
 export type ProjectCard = {
@@ -309,10 +311,10 @@ function loadContributions(db: DatabaseSync, projectId: string): ContributionRow
   return asRows<ContributionRow>(rows).map((r) => ({ ...r }));
 }
 
-type QuestionRaw = Omit<QuestionView, 'options' | 'evidence' | 'auto'> & { options: string; evidence: string; answer: string | null };
+type QuestionRaw = Omit<QuestionView, 'options' | 'evidence' | 'auto' | 'about_blocker'> & { options: string; evidence: string; answer: string | null; dedupe_key: string };
 
 const QUESTION_COLUMNS =
-  'id, kind, prompt, options, project_id, session_key, status, evidence, created_by, created_at, resolution_note, context, why_user, recommended, recommend_reason, answer';
+  'id, kind, prompt, options, project_id, session_key, status, evidence, created_by, created_at, resolution_note, context, why_user, recommended, recommend_reason, answer, dedupe_key';
 
 /** Easiest first: yes/no, then a choice, then free text; newest first within each. */
 const QUESTION_ORDER = "CASE kind WHEN 'confirm' THEN 0 WHEN 'choice' THEN 1 ELSE 2 END, created_at DESC, rowid DESC";
@@ -343,6 +345,7 @@ function questionView(r: QuestionRaw): QuestionView {
     recommended: r.recommended ?? null,
     recommend_reason: r.recommend_reason ?? null,
     auto: autoDecision(r.answer),
+    about_blocker: r.dedupe_key.startsWith('blocker:') ? r.dedupe_key.slice('blocker:'.length) : null,
   };
 }
 

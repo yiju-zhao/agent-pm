@@ -146,3 +146,13 @@ test('recent changes list the period’s milestones with their project, and the 
   expect(within(changes).getByText('完成')).toBeTruthy();
   expect(within(panel('工作量')).getByText(/收到 7 段对话，其中未归属 1 段/)).toBeTruthy();
 });
+
+test('a blocker the user was asked about shows only as that question', async () => {
+  data.projects = [card({ open_blockers: [blocker({ id: 'b_1', kind: 'user', text: '需要你推送' }), blocker({ id: 'b_2', kind: 'user', text: '需要你试听' })] })];
+  data.questions = [question({ id: 'q_b', prompt: '已经推送了吗？', session_key: null, about_blocker: 'b_1' })];
+  await renderPage();
+  const queue = panel('行动队列');
+  await waitFor(() => expect(within(queue).getByText('已经推送了吗？')).toBeTruthy());
+  expect(within(queue).queryByText('需要你推送')).toBeNull();
+  expect(within(queue).getByText('需要你试听')).toBeTruthy();
+});

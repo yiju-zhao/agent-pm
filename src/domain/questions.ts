@@ -23,6 +23,8 @@ export type QuestionOption = {
   text_arg?: string;
   /** What choosing it does, in a line, when the label alone does not say. */
   detail?: string;
+  /** A blocker this answer settles: it is cleared, as the user, together with the option's own op. */
+  clears_blocker?: { project: string; id: string };
 };
 
 /**
@@ -105,6 +107,9 @@ function isUserOnlyOp(op: OpName): boolean {
 /** Checks that answering `option` can never fail on the shape of its args, and that `creator` may offer it. */
 function checkOption(option: QuestionOption, creator: Actor): void {
   const where = `invalid option ${JSON.stringify(option.label)}`;
+  if (option.clears_blocker !== undefined && !OP_SCHEMAS.clear_blocker.safeParse(option.clears_blocker).success) {
+    throw new OpRejected('invalid', `${where}: clears_blocker needs a project and a blocker id`);
+  }
   if (option.op === null) {
     if (option.text_arg !== undefined) throw new OpRejected('invalid', `${where}: text_arg needs an op`);
     return;

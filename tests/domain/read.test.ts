@@ -767,6 +767,7 @@ test('a question view has the fields in the brief and nothing internal', () => {
     recommended: null,
     recommend_reason: null,
     auto: null,
+    about_blocker: null,
   });
 });
 

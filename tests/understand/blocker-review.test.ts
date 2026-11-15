@@ -90,3 +90,44 @@ test('the scheduler reviews blockers when nothing more urgent is waiting', async
   expect(calls[0]).toMatchObject({ role: 'curate', model: 'c-model' });
   expect(open()).toEqual([]);
 });
+
+test('evidence from other sessions that name the same thing is read, so work finished elsewhere clears the blocker', async () => {
+  const b = blocker('git push origin master 被拦下，需用户推送 gx10-090e 的修复', 'user');
+  t.db.prepare(`INSERT INTO sessions (key, agent_kind, machine, cwd, title, live_status, lifecycle, ignored, first_seen, last_seen) VALUES ('codex:other', 'codex', 'm', '/x', 'x', 'idle', 'live', 0, ?, ?)`).run('2026-11-01T00:00:00Z', '2026-11-01T00:00:00Z');
+  const json = JSON.stringify({ topics: [], decisions: [], progress: ['已执行 git push origin master，gx10-090e 修复已推送'], todos_added: [], todos_done: [], blockers: [], open_questions: [], trivial: false });
+  const other = Number(t.db.prepare("INSERT INTO digests (session_key, chunk_ids, json, model, ts_start, ts_end, backfill, trivial, skipped, curated, created_at) VALUES ('codex:other', '[]', ?, 'm', ?, ?, 0, 0, 0, 1, ?)").run(json, '2026-11-11T00:00:00Z', '2026-11-11T00:00:00Z', '2026-11-11T00:00:00Z').lastInsertRowid);
+  t.db.prepare("INSERT INTO ingest_sources (source_id, kind, machine, collector_version, collector_heartbeat) VALUES ('herdr:gx10-090e', 'herdr', 'gx10-090e', '0.1.0', '2026-11-07T08:15:45Z')").run();
+  await runBlockerReview(t.db, t.deps, answer([{ blocker_id: b, verdict: 'resolved', reason: '另一个会话里已经推送', evidence: [`digest:${other}`] }]), 'm', p);
+  expect(open()).toEqual([]);
+  expect(calls[0]!.prompt).toContain('已执行 git push origin master');
+  expect(calls[0]!.prompt).toContain('采集来源 herdr:gx10-090e：版本 0.1.0，最近心跳 2026-11-07T08:15:45Z');
+});
+
+test('a blocker that waits on the user and cannot be settled becomes a question whose answer clears it', async () => {
+  const action = blocker('需用户输入 sudo 密码运行降级脚本', 'user');
+  const decision = blocker('宿主选型待用户决定', 'user');
+  await runBlockerReview(t.db, t.deps, answer([
+    { blocker_id: action, verdict: 'keep', reason: '没有证据显示已执行', evidence: [], question: { type: 'done_check', context: 'gx10-1009 的降级脚本需要 sudo 密码。', prompt: '降级脚本已经运行了吗？' } },
+    { blocker_id: decision, verdict: 'keep', reason: '仍待决定', evidence: [], question: { type: 'decision', context: '候选宿主都缺权重共享循环。', prompt: '宿主选哪个？', options: [{ label: 'HWM-CogWAM', decision: '宿主选 HWM-CogWAM', detail: '需申请 DINOv3' }, { label: 'OpenVLA', decision: '宿主选 OpenVLA' }], recommended: 0, recommend_reason: '最接近需求' } },
+  ]), 'm', p);
+  const qs = t.db.prepare("SELECT id, kind, prompt, context, recommended, options FROM questions WHERE status = 'pending' ORDER BY rowid").all() as Array<{ id: string; kind: string; prompt: string; context: string; recommended: number | null; options: string }>;
+  expect(qs.map((q) => [q.kind, q.prompt, q.recommended])).toEqual([['confirm', '降级脚本已经运行了吗？', null], ['choice', '宿主选哪个？', 0]]);
+  expect(JSON.parse(qs[1]!.options).map((o: { label: string }) => o.label)).toEqual(['HWM-CogWAM', 'OpenVLA', '已经处理 / 不再需要', '暂不决定']);
+
+  const { answerQuestion } = await import('../../src/domain/answers.ts');
+  expect(answerQuestion(t.db, t.deps, qs[0]!.id, { option_index: 0 }).status).toBe('applied');
+  expect(answerQuestion(t.db, t.deps, qs[1]!.id, { option_index: 0 }).status).toBe('applied');
+  expect(open()).toEqual([]);
+  expect(t.db.prepare('SELECT text FROM decisions WHERE project_id = ?').all(p)).toEqual([{ text: '宿主选 HWM-CogWAM' }]);
+
+  // Asked once: the next review does not ask again while a question is pending or was just declined.
+  const again = blocker('需用户转交 R2 prompt 给 L40', 'user');
+  const ask = { blocker_id: again, verdict: 'keep', reason: 'r', evidence: [], question: { type: 'done_check', context: 'c', prompt: '转交了吗？' } };
+  await runBlockerReview(t.db, t.deps, answer([ask]), 'm', p);
+  const q = (t.db.prepare("SELECT id FROM questions WHERE prompt = '转交了吗？'").all() as Array<{ id: string }>);
+  expect(q).toHaveLength(1);
+  answerQuestion(t.db, t.deps, q[0]!.id, { option_index: 1 });
+  await runBlockerReview(t.db, t.deps, answer([ask]), 'm', p);
+  expect(t.db.prepare("SELECT count(*) AS n FROM questions WHERE prompt = '转交了吗？'").get()).toEqual({ n: 1 });
+  expect(open()).toEqual([{ id: again, kind: 'user' }]);
+});

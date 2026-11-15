@@ -36,6 +36,7 @@ function question(over: Partial<QuestionView> = {}): QuestionView {
     recommended: null,
     recommend_reason: null,
     auto: null,
+    about_blocker: null,
     ...over,
   };
 }

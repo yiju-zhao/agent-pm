@@ -65,7 +65,9 @@ function ActionQueue({ cards, sessions, coverage, questions, titles, now, reload
   // The server lists projects by priority; within a project, the newest blocker first.
   // Only what waits on the user; technical and external blockers are the agents' and the world's, shown per project.
   const open = cards.filter((c) => !c.closed).flatMap((c) => [...c.open_blockers].reverse().map((b) => ({ card: c, blocker: b })));
-  const blocked = open.filter((b) => b.blocker.kind === 'user');
+  // A blocker the user was asked about shows as that question, not twice.
+  const asked = new Set(questions.map((q) => q.about_blocker).filter((id): id is string => id !== null));
+  const blocked = open.filter((b) => b.blocker.kind === 'user' && !asked.has(b.blocker.id));
   const others = open.length - blocked.length;
   const faults = (coverage ?? []).filter((s) => s.state !== 'ok');
   const stale = cards.filter((c) => !c.closed && (c.priority === 'P0' || c.priority === 'P1') && c.dormant_days !== null);
