@@ -204,6 +204,7 @@ const SYSTEM_PROMPT = [
   '   此时 label 写要交付的对象或结果，summary 里写清目标和对话中出现的完成条件（没有出现就不写）。',
   '5. 一次性问答、闲聊、与任何项目无关的零碎操作，把 trivial 设为 true，topics 留空。',
   '6. progress、todos_added、todos_done、blockers、open_questions 只记对话里明确出现的事实，不推测，不重复项目简报里已有的内容。',
+  '   blockers 只记在这段对话结尾仍然卡住进展的事；进度说明、待验证、要修的 bug 放进 todos_added，需要用户拍板的放进 open_questions；对话里已经解决的不记。',
   '7. confidence 在 0 到 1 之间，表示你对"这段对话属于这个话题"的把握。',
   '8. 用对话所用的语言写 summary 和各条文字，保持简短具体。',
 ].join('\n');

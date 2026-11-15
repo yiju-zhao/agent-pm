@@ -54,21 +54,28 @@ test('the key numbers count what needs the user, what runs and what is wrong', a
     sessionItem({ key: 'b', effective_status: 'blocked', linked_projects: [] }),
     sessionItem({ key: 'c', effective_status: 'ended', linked_projects: [] }),
   ];
-  data.projects = [card({ open_blockers: [blocker({ id: 'b_1' }), blocker({ id: 'b_2' })] }), card({ id: 'p_2', closed: true, stage: 'done', open_blockers: [blocker({ id: 'b_3' })] })];
+  data.projects = [
+    card({ open_blockers: [blocker({ id: 'b_1', kind: 'user' }), blocker({ id: 'b_2', kind: 'user' }), blocker({ id: 'b_4', kind: 'technical' })] }),
+    card({ id: 'p_2', closed: true, stage: 'done', open_blockers: [blocker({ id: 'b_3', kind: 'user' })] }),
+  ];
   data.coverage = [source(), source({ source_id: 'herdr:gx10', state: 'offline' })];
   await renderPage();
   await waitFor(() => expect(metric('待你决定').textContent).toContain('1'));
   expect(metric('等你操作').textContent).toContain('1');
   expect(metric('运行中').textContent).toBe('运行中1共 2 个在线');
   expect(metric('未归属 session').textContent).toContain('1');
-  expect(metric('开放阻塞').textContent).toContain('2');
+  // Only what waits on the user counts; the technical one is mentioned beside it.
+  expect(metric('等你处理的阻塞').textContent).toBe('等你处理的阻塞2另有 1 个技术/外部');
   await waitFor(() => expect(metric('采集异常').textContent).toContain('1'));
 });
 
 test('the action queue lists decisions, waiting agents, blockers, collection faults and stalled priorities, each with a way in', async () => {
   data.questions = [1, 2, 3, 4].map((n) => question({ id: `q_${n}`, prompt: `问题 ${n}`, session_key: null }));
   data.sessions = [sessionItem({ key: 'w', title: '等我确认的 agent', short_id: 'deadbeef', effective_status: 'blocked', linked_projects: [{ id: 'p_1', title: 'dLLM 评测框架' }] })];
-  data.projects = [card({ open_blockers: Array.from({ length: 8 }, (_, i) => blocker({ id: `b_${i}`, text: `阻塞 ${i}` })) }), card({ id: 'p_2', title: '停了的 P1', priority: 'P1', dormant_days: 9 })];
+  data.projects = [
+    card({ open_blockers: [...Array.from({ length: 8 }, (_, i) => blocker({ id: `b_${i}`, kind: 'user', text: `阻塞 ${i}` })), blocker({ id: 'b_tech', kind: 'technical', text: '技术阻塞' })] }),
+    card({ id: 'p_2', title: '停了的 P1', priority: 'P1', dormant_days: 9 }),
+  ];
   data.coverage = [source({ source_id: 'herdr:never', state: 'never_reported', collector_heartbeat: null })];
   await renderPage();
   const queue = panel('行动队列');
@@ -79,7 +86,9 @@ test('the action queue lists decisions, waiting agents, blockers, collection fau
   // The newest blockers first, six of them, the rest counted.
   expect(within(queue).getByText('阻塞 7')).toBeTruthy();
   expect(within(queue).queryByText('阻塞 1')).toBeNull();
-  expect(within(queue).getByText(/另有 2 个阻塞/)).toBeTruthy();
+  expect(within(queue).getByText(/另有 2 个，分布在/)).toBeTruthy();
+  expect(within(queue).queryByText('技术阻塞')).toBeNull();
+  expect(within(queue).getByText(/另有 1 个技术或外部阻塞由 agent 处理/)).toBeTruthy();
   await waitFor(() => expect(within(queue).getByText('herdr:never')).toBeTruthy());
   expect(within(queue).getByText(/已配置但从未上报/)).toBeTruthy();
   expect(within(queue).getByText('停了的 P1').closest('a')!.getAttribute('href')).toBe('#/p/p_2');

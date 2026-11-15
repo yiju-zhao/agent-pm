@@ -155,11 +155,11 @@ const WRITE_OPS = [
   },
   {
     op: 'set_blocker',
-    description: '新增阻塞（text、kind: user/external/technical），或带 id 修改已有阻塞。',
+    description: '新增阻塞（text、kind: user/external/technical），或带 id 修改已有阻塞。阻塞只记真正卡住项目推进、且对话结束时仍未解决的事；进度说明、待验证事项、要修的 bug 记成 todo，需要用户拍板的事用 ask_user。kind=user 只用于必须用户本人行动的事。先看项目已有的阻塞，不重复记录。',
   },
   {
     op: 'clear_blocker',
-    description: '把一条阻塞标记为已解决（需要 project 和阻塞 id）。只在对话里确认解决后使用。',
+    description: '把一条阻塞标记为已解决（需要 project 和阻塞 id）。对话显示它已解决或已不成立时就使用，不要让过时的阻塞留着。',
   },
   {
     op: 'link_session',

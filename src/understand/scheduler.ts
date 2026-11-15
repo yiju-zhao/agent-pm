@@ -11,6 +11,7 @@ import { pickProjectReview, reviewDigestDependency, reviewFailure, runProjectRev
 import type { ProjectReview } from './project-review.ts';
 import { markStageReviewed, pickRestageBatch, runRestage } from './restage.ts';
 import { llmDecider, pickTriage, runTriage } from './decider.ts';
+import { pickBlockerReview, runBlockerReview } from './blocker-review.ts';
 import type { Decider } from './decider.ts';
 import type { SchedulerStatus } from './status.ts';
 
@@ -127,6 +128,8 @@ export class Scheduler {
   private curateFailures = 0;
   private curateWaitUntil: number | null = null;
   private restageFailures = 0;
+  /** After a failed blocker review, none is tried before this. */
+  private blockerWaitUntil: number | null = null;
   private restageWaitUntil: number | null = null;
   /** The session the last backfill window came from; the next one starts after it. */
   private backfillCursor: string | null = null;
@@ -336,6 +339,12 @@ export class Scheduler {
     const realtime = this.pickRealtime(now);
     if (realtime !== null) return this.digest(now, realtime);
 
+    // Open blockers are checked against what the sessions said since, so the user's queue holds only what still blocks.
+    if (this.blockerWaitUntil === null || now >= this.blockerWaitUntil) {
+      const project = pickBlockerReview(this.db);
+      if (project !== null) return this.blockerReview(now, project);
+    }
+
     const backfill = this.pickBackfill(now);
     if (backfill !== null) return this.digest(now, backfill);
 
@@ -360,6 +369,19 @@ export class Scheduler {
     if (isPausing(result.kind) && !result.partial) return this.pause(now,result.kind);
     reviewFailure(this.db,this.deps.now(),job,result.message,result.partial || result.kind==='refused');
     return isPausing(result.kind) ? this.pause(now,result.kind) : 'skipped';
+  }
+
+  private async blockerReview(now: number, projectId: string): Promise<TickResult> {
+    this.running = 'curate';
+    const outcome = await runBlockerReview(this.db, this.deps, this.runner, this.modelsOf().curate, projectId);
+    if (outcome.ok) {
+      this.blockerWaitUntil = null;
+      return 'curated';
+    }
+    this.lastError = `阻塞复核失败（${projectId}）：${outcome.message}`;
+    if (isPausing(outcome.kind)) return this.pause(now, outcome.kind);
+    this.blockerWaitUntil = now + BACKOFF_START_MS;
+    return 'skipped';
   }
 
   private async triage(now: number, question: NonNullable<ReturnType<typeof pickTriage>>): Promise<TickResult> {

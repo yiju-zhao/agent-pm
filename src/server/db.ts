@@ -467,6 +467,10 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE questions ADD COLUMN recommend_reason TEXT;
   ALTER TABLE questions ADD COLUMN triaged_at TEXT;
   `,
+  // v12: when an open blocker was last checked against what happened since (see understand/blocker-review.ts).
+  `
+  ALTER TABLE blockers ADD COLUMN reviewed_at TEXT;
+  `,
 ];
 
 /** Opens (creating if needed) the central database in WAL mode and applies pending migrations. */

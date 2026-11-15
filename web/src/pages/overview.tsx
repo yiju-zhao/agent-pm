@@ -63,12 +63,15 @@ function ActionQueue({ cards, sessions, coverage, questions, titles, now, reload
   const { needYou, attribution } = splitQuestions(questions);
   const waiting = sessions.filter((s) => s.effective_status === 'blocked' && !s.ignored);
   // The server lists projects by priority; within a project, the newest blocker first.
-  const blocked = cards.filter((c) => !c.closed).flatMap((c) => [...c.open_blockers].reverse().map((b) => ({ card: c, blocker: b })));
+  // Only what waits on the user; technical and external blockers are the agents' and the world's, shown per project.
+  const open = cards.filter((c) => !c.closed).flatMap((c) => [...c.open_blockers].reverse().map((b) => ({ card: c, blocker: b })));
+  const blocked = open.filter((b) => b.blocker.kind === 'user');
+  const others = open.length - blocked.length;
   const faults = (coverage ?? []).filter((s) => s.state !== 'ok');
   const stale = cards.filter((c) => !c.closed && (c.priority === 'P0' || c.priority === 'P1') && c.dormant_days !== null);
   const empty = needYou.length + attribution.length + waiting.length + blocked.length + faults.length + stale.length === 0;
   return (
-    <Panel title="行动队列" meta={empty ? '没有待处理的事' : `${needYou.length} 个决定 · ${waiting.length} 个等你操作 · ${blocked.length} 个阻塞`} className="queue">
+    <Panel title="行动队列" meta={empty ? '没有待处理的事' : `${needYou.length} 个决定 · ${waiting.length} 个等你操作 · ${blocked.length} 个等你处理的阻塞`} className="queue">
       {empty ? <p className="empty">一切正常：没有待你决定的问题、等你操作的 session 或阻塞。</p> : null}
       {needYou.length > 0 ? (
         <div className="queue-group">
@@ -101,19 +104,20 @@ function ActionQueue({ cards, sessions, coverage, questions, titles, now, reload
       ) : null}
       {blocked.length > 0 ? (
         <div className="queue-group">
-          <h3 className="group-label">{`阻塞 · ${blocked.length}`}</h3>
+          <h3 className="group-label">{`等你处理的阻塞 · ${blocked.length}`}</h3>
           {blocked.slice(0, QUEUE_BLOCKERS).map(({ card, blocker }) => (
             <a key={blocker.id} className="queue-row" href={projectHref(card.id)}>
               <span className={`tag prio-${(card.priority ?? 'none').toLowerCase()}`}>{card.priority ?? '—'}</span>
               <span className="queue-text">
                 <strong>{blocker.text}</strong>
-                <span className="dim">{` · ${card.title} · ${blocker.kind === 'user' ? '等你' : blocker.kind === 'external' ? '外部' : '技术'} · ${relTime(blocker.created_at, now)}`}</span>
+                <span className="dim">{` · ${card.title} · ${relTime(blocker.created_at, now)}`}</span>
               </span>
             </a>
           ))}
-          {blocked.length > QUEUE_BLOCKERS ? <p className="queue-more">{`另有 ${blocked.length - QUEUE_BLOCKERS} 个阻塞，分布在 ${new Set(blocked.slice(QUEUE_BLOCKERS).map((b) => b.card.id)).size} 个项目，见项目组合的「阻塞」列`}</p> : null}
+          {blocked.length > QUEUE_BLOCKERS ? <p className="queue-more">{`另有 ${blocked.length - QUEUE_BLOCKERS} 个，分布在 ${new Set(blocked.slice(QUEUE_BLOCKERS).map((b) => b.card.id)).size} 个项目，见项目组合的「阻塞」列`}</p> : null}
         </div>
       ) : null}
+      {others > 0 ? <p className="queue-more">{`另有 ${others} 个技术或外部阻塞由 agent 处理或在等外部条件，不需要你操作；AI 会按新进展自动复核，已解决的会自动解除。`}</p> : null}
       {faults.length > 0 ? (
         <div className="queue-group">
           <h3 className="group-label">{`采集异常 · ${faults.length}`}</h3>
@@ -257,7 +261,8 @@ export function OverviewPage() {
   const pending = splitQuestions(inbox?.data ?? []);
   const live = list.filter((s) => LIVE.has(s.effective_status) && !s.ignored);
   const unlinked = live.filter((s) => s.linked_projects.length === 0);
-  const blockers = cards.filter((c) => !c.closed).reduce((n, c) => n + c.open_blockers.length, 0);
+  const allBlockers = cards.filter((c) => !c.closed).flatMap((c) => c.open_blockers);
+  const blockers = allBlockers.filter((b) => b.kind === 'user').length;
   const faults = (coverage.data ?? []).filter((s) => s.state !== 'ok').length;
   const a = activity.data;
   const reload = () => {
@@ -279,7 +284,7 @@ export function OverviewPage() {
         <Metric label="等你操作" value={live.filter((s) => s.effective_status === 'blocked').length} tone={live.some((s) => s.effective_status === 'blocked') ? 'bad' : undefined} />
         <Metric label="运行中" value={live.filter((s) => s.effective_status === 'working').length} tone="ok" hint={`共 ${live.length} 个在线`} href="#/sessions" />
         <Metric label="未归属 session" value={unlinked.length} tone={unlinked.length > 0 ? 'warn' : undefined} href="#/sessions" />
-        <Metric label="开放阻塞" value={blockers} tone={blockers > 0 ? 'bad' : undefined} />
+        <Metric label="等你处理的阻塞" value={blockers} tone={blockers > 0 ? 'bad' : undefined} hint={allBlockers.length > blockers ? `另有 ${allBlockers.length - blockers} 个技术/外部` : undefined} />
         <Metric label="采集异常" value={coverage.data === undefined ? '—' : faults} tone={faults > 0 ? 'bad' : undefined} href="#/sessions" hint={coverage.data === undefined ? '需要登录' : undefined} />
       </div>
       <div className="console-grid">
