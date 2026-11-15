@@ -1,11 +1,14 @@
-// In-page routing uses the URL hash (`#/`, `#/p/<id>`, `#/sessions`, `#/keys`, `#/inbox`), so the server needs no route besides `/`.
+// In-page routing uses the URL hash (`#/` the command center, `#/projects`, `#/review`, `#/p/<id>`, `#/sessions`, `#/keys`,
+// `#/inbox`), so the server needs no route besides `/`.
 
-export type Route = { page: 'home' } | { page: 'project'; id: string } | { page: 'sessions' } | { page: 'keys' } | { page: 'inbox' };
+export type Route = { page: 'home' } | { page: 'projects' } | { page: 'review' } | { page: 'project'; id: string } | { page: 'sessions' } | { page: 'keys' } | { page: 'inbox' };
 
 /** Anything not recognised is the home page. */
 export function parseHash(hash: string): Route {
   const path = hash.startsWith('#') ? hash.slice(1) : hash;
   if (path === '/sessions' || path === '/sessions/') return { page: 'sessions' };
+  if (path === '/projects' || path === '/projects/') return { page: 'projects' };
+  if (path === '/review' || path === '/review/') return { page: 'review' };
   if (path === '/keys' || path === '/keys/') return { page: 'keys' };
   if (path === '/inbox' || path === '/inbox/') return { page: 'inbox' };
   const project = /^\/p\/([^/]+)\/?$/.exec(path);

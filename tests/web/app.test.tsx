@@ -264,8 +264,10 @@ test('the home page is the default', async () => {
   renderApp();
   await screen.findByText('空闲');
   expect(document.querySelector('main[data-page="home"]')).not.toBeNull();
-  expect(screen.getByRole('link', { name: '首页' }).getAttribute('href')).toBe('#/');
+  expect(screen.getByRole('link', { name: '指挥台' }).getAttribute('href')).toBe('#/');
   expect(screen.getByRole('link', { name: 'Session' }).getAttribute('href')).toBe('#/sessions');
+  expect(screen.getByRole('link', { name: '项目' }).getAttribute('href')).toBe('#/projects');
+  expect(screen.getByRole('link', { name: '复盘' }).getAttribute('href')).toBe('#/review');
 });
 
 test('hash routing renders the project page for #/p/p_1', async () => {
@@ -287,7 +289,7 @@ test('hash routing follows hashchange', async () => {
   expect(screen.getByRole('link', { name: 'Session' }).getAttribute('aria-current')).toBe('page');
   location.hash = '#/nowhere';
   await waitFor(() => expect(document.querySelector('main[data-page="home"]')).not.toBeNull());
-  expect(screen.getByRole('link', { name: '首页' }).getAttribute('aria-current')).toBe('page');
+  expect(screen.getByRole('link', { name: '指挥台' }).getAttribute('aria-current')).toBe('page');
 });
 
 function Shout() {
@@ -368,6 +370,7 @@ test('resolving a project card question also refreshes the global Inbox counter'
     if (url === '/questions?status=pending') return json(pending);
     if (url === '/projects') return json([card({ pending_questions: pending })]);
     if (init?.method === 'POST') { pending = []; return json({ status: 'applied', event_id: 1, question_ids: [], warnings: [] }); }
+    if (String(url).startsWith('/activity')) return json({ error: 'not_found' }, 404);
     return json([]);
   });
   renderApp();

@@ -12,6 +12,9 @@ import { QuestionCard } from '../components/question-card.tsx';
 import { StageControl } from '../components/stage-control.tsx';
 import { Timeline } from '../components/timeline.tsx';
 import { relTime, shortDate } from '../format.ts';
+import type { ActivityView } from '../../../src/domain/activity.ts';
+import { DayBars, Metric, Panel, StagePipeline } from '../components/viz.tsx';
+import { ActivityRow, activityPath } from './overview.tsx';
 import { useApi } from '../use-api.ts';
 import { useNow } from '../use-now.ts';
 import { useWrite } from '../use-write.ts';
@@ -106,6 +109,40 @@ function Overview({ project, reload, mergeTargets, mergeTargetsFailed, now }: Ov
   );
 }
 
+const PULSE_DAYS = 30;
+
+/** The project at a glance: where it stands, what is open, how much work went in lately and what changed. */
+function Pulse({ project, now }: { project: ProjectDetail; now: Date }) {
+  const activity = useApi<ActivityView>(activityPath(PULSE_DAYS, project.id), [`project:${project.id}`]);
+  const a = activity.data;
+  const mine = a?.projects.find((p) => p.id === project.id);
+  const openTodos = project.todos.filter((t) => t.status !== 'done').length;
+  return (
+    <div className="pulse">
+      <div className="metrics pulse-metrics" role="group" aria-label="项目指标">
+        <div className="metric"><span className="metric-label">阶段</span><StagePipeline stage={project.stage} /></div>
+        <Metric label="开放阻塞" value={project.open_blockers.length} tone={project.open_blockers.length > 0 ? 'bad' : undefined} />
+        <Metric label="未完成 todo" value={openTodos} />
+        <Metric label="活跃 session" value={project.active_sessions.length} tone={project.active_sessions.length > 0 ? 'ok' : undefined} />
+        <Metric label={`${PULSE_DAYS} 天决策`} value={mine?.totals.decisions ?? '—'} tone="accent" />
+        <Metric label={`${PULSE_DAYS} 天完成`} value={mine?.totals.done ?? '—'} />
+      </div>
+      {a && mine ? (
+        <div className="pulse-grid">
+          <Panel title="投入" meta={`近 ${PULSE_DAYS} 天 ${mine.totals.chunks} 段对话 · ${mine.totals.sessions} 个 session`}>
+            <DayBars values={mine.daily} labels={a.days} label="每天收到的对话段数" />
+            <div className="axis"><span>{a.days[0]!.slice(5)}</span><span>今天</span></div>
+          </Panel>
+          <Panel title="最近变化" meta={`${a.items.length} 条`}>
+            {a.items.length === 0 ? <p className="empty">近 {PULSE_DAYS} 天没有决策、完成或阶段变化。</p> : null}
+            <ul className="feed">{a.items.slice(0, 6).map((item) => <ActivityRow key={`${item.event_id}-${item.kind}-${item.text}`} item={item} now={now} />)}</ul>
+          </Panel>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function BigPicture({ project, reload }: PageProps) {
   const { write } = useWrite(reload);
   const path = projectPath(project);
@@ -175,6 +212,7 @@ export function ProjectPage({ id }: { id: string }) {
       {error !== null ? <ErrorBar error={error} onRetry={reload} /> : null}
       <a className="project-back" href="#/">所有项目</a>
       <Overview project={data} reload={reload} mergeTargets={mergeTargets} mergeTargetsFailed={projects.error !== null} now={now} />
+      <Pulse project={data} now={now} />
       <div className="cols">
         <div className="main">
           {questions.error !== null ? (

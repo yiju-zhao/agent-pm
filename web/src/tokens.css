@@ -51,3 +51,36 @@
   --text-xs: 0.8125rem;
   --tracking-display: -0.02em;
 }
+
+/* Ops console theme (2026-11-15). The palette above is remapped, not removed: every existing rule reads these names, so
+   the whole UI follows. Dark graphite surfaces in three steps, hairline rules, one blue for focus and selection, and
+   green / amber / red only for state. Paper = page, paper-2 = panel, paper-3 = raised; cotton = inputs and cards. */
+:root {
+  color-scheme: dark;
+  --color-paper: oklch(17.5% 0.012 255); --color-paper-2: oklch(21% 0.013 255); --color-paper-3: oklch(25.5% 0.014 255);
+  --color-cotton: oklch(23% 0.013 255); --color-desk: oklch(15% 0.011 255);
+  --color-ink: oklch(94% 0.006 255); --color-ink-2: oklch(84% 0.01 255); --color-muted: oklch(67% 0.016 255);
+  --color-rule: oklch(29% 0.014 255); --color-rule-2: oklch(35% 0.016 255);
+  --color-accent: oklch(66% 0.15 252); --color-accent-ink: oklch(98% 0.005 255); --color-accent-2: oklch(64% 0.16 252); --color-focus: oklch(72% 0.14 252);
+  --color-accent-wash: oklch(30% 0.07 252); --color-accent-deep: oklch(82% 0.09 252); --color-accent-edge: oklch(55% 0.15 252);
+  --color-print: oklch(94% 0.006 255);
+  --color-board: oklch(13% 0.01 255); --color-board-type: oklch(90% 0.008 255); --color-paid: oklch(70% 0.15 40);
+  --color-graphite-muted: oklch(62% 0.014 255);
+  --color-error: oklch(70% 0.17 25); --color-error-wash: oklch(26% 0.05 25);
+  --color-success: oklch(75% 0.15 155); --color-success-wash: oklch(28% 0.05 155);
+  --color-warning: oklch(79% 0.14 78); --color-warning-ink: oklch(85% 0.12 82); --color-warning-wash: oklch(26% 0.035 78);
+  --color-scrim: oklch(8% 0.01 255 / 0.66);
+  --shadow-card: none;
+  --shadow-overlay: 0 24px 60px -16px oklch(5% 0.01 255 / 0.75);
+  --shade: 5% 0.01 255; --lit: 40% 0.01 255; --deep: 4% 0.01 255;
+  --edge-stock: 0 0 0 1px var(--color-rule-2);
+  --cast-stock: none; --cast-stock-lift: none;
+  --press-groove: inset 0 0 0 1px var(--color-rule-2);
+  --radius-card: 4px; --radius-input: 3px; --radius-stock: 3px;
+  --control-h: 30px;
+  --topbar-h: 48px;
+  --text-xs: 0.72rem; --text-sm: 0.8125rem; --text-md: 0.875rem; --text-lg: 1.05rem; --text-section: 1rem; --text-title: 0.875rem;
+  --tracking-display: -0.005em; --display-weight: 600;
+  --font-outlier: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  --rail-w: 196px;
+}

@@ -9,6 +9,8 @@ import { InboxProvider, useInbox } from './inbox.tsx';
 import { splitQuestions } from './home-model.ts';
 import { InboxPage } from './pages/inbox.tsx';
 import { HomePage } from './pages/home.tsx';
+import { OverviewPage } from './pages/overview.tsx';
+import { ReviewPage } from './pages/review.tsx';
 import { KeysPage } from './pages/keys.tsx';
 import { ProjectPage } from './pages/project.tsx';
 import { SessionsPage } from './pages/sessions.tsx';
@@ -16,6 +18,8 @@ import { parseHash } from './route.ts';
 import type { Route } from './route.ts';
 import type { StreamState } from './stream.ts';
 import { useApi, useConnectionState } from './use-api.ts';
+
+const PAGE_TITLE: Record<Route['page'], string> = { home: '指挥台', projects: '项目', review: '复盘', project: '项目详情', sessions: 'Session', inbox: 'Inbox', keys: '接入密钥' };
 
 const CONNECTION_LABEL: Record<StreamState, string> = { open: '已连接', connecting: '重连中', closed: '已断开' };
 
@@ -105,7 +109,11 @@ function subscribeHash(onChange: () => void): () => void {
 function Page({ route }: { route: Route }) {
   switch (route.page) {
     case 'home':
+      return <OverviewPage />;
+    case 'projects':
       return <HomePage />;
+    case 'review':
+      return <ReviewPage />;
     case 'project':
       // Keyed by id, so going from one project to another starts from an empty page.
       return <ProjectPage key={route.id} id={route.id} />;
@@ -136,25 +144,28 @@ function Workspace() {
   const [settingsTab, setSettingsTab] = useState<SettingsTab | null>(null);
   const closeSettings = useCallback(() => setSettingsTab(null), []);
 
+  const here = (page: Route['page']) => (route.page === page || (page === 'projects' && route.page === 'project') ? 'page' : undefined);
   return (
-    <>
-      <header className="topbar">
+    <div className="shell">
+      <aside className="rail">
         <h1 className="wordmark">agent<span className="wordmark-separator">-</span>pm</h1>
         <nav aria-label="主导航">
-          <a href="#/" aria-current={route.page === 'home' ? 'page' : undefined}>
-            <Icon name="projects" />首页
-          </a>
-          <a href="#/sessions" aria-current={route.page === 'sessions' ? 'page' : undefined}>
-            <Icon name="sessions" />Session
-          </a>
-          <a href="#/keys" aria-current={route.page === 'keys' ? 'page' : undefined}>
-            <Icon name="key" />接入密钥
-          </a>
+          <a href="#/" aria-current={here('home')}><Icon name="console" />指挥台</a>
+          <a href="#/projects" aria-current={here('projects')}><Icon name="projects" />项目</a>
+          <a href="#/review" aria-current={here('review')}><Icon name="review" />复盘</a>
+          <a href="#/sessions" aria-current={here('sessions')}><Icon name="sessions" />Session</a>
+          <a href="#/keys" aria-current={here('keys')}><Icon name="key" />接入密钥</a>
         </nav>
+        <div className="rail-foot">
+          <ConnectionDot />
+        </div>
+      </aside>
+      <div className="workspace">
+      <header className="topbar">
+        <span className="topbar-title">{PAGE_TITLE[route.page]}</span>
         <div className="topbar-status">
           <UnderstandingStatus />
           <SyncButton />
-          <ConnectionDot />
           <InboxLink active={route.page === 'inbox'} />
           <button type="button" onClick={() => setSettingsTab('access')}>
             <Icon name="settings" />设置
@@ -162,7 +173,8 @@ function Workspace() {
         </div>
       </header>
       <Page route={route} />
+      </div>
       {settingsTab !== null ? <SettingsModal initialTab={settingsTab} onClose={closeSettings} /> : null}
-    </>
+    </div>
   );
 }

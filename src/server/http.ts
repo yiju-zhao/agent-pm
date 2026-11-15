@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import type { ZodType } from 'zod';
+import { getActivity, MAX_ACTIVITY_DAYS } from '../domain/activity.ts';
 import { getEvidence, parseEvidenceRef } from '../domain/evidence.ts';
 import { sessionLinks } from '../domain/read.ts';
 import { defaultDeps } from '../domain/types.ts';
@@ -118,6 +119,16 @@ export function createApp(
     if (parseEvidenceRef(ref) === null) return c.json({ error: 'invalid' }, 400);
     const evidence = getEvidence(db, clock(), ref);
     return evidence === null ? c.json({ error: 'not_found' }, 404) : c.json(evidence);
+  });
+
+  // Work and milestones per day over a period, for the overview and the review page (see ../domain/activity.ts).
+  app.get('/activity', (c) => {
+    const days = Number(c.req.query('days') ?? '14');
+    const tz = Number(c.req.query('tz') ?? '0');
+    if (!Number.isInteger(days) || days < 1 || days > MAX_ACTIVITY_DAYS || !Number.isInteger(tz) || Math.abs(tz) > 14 * 60) {
+      return c.json({ error: 'invalid', message: `days must be 1–${MAX_ACTIVITY_DAYS}, tz minutes within ±840` }, 400);
+    }
+    return c.json(getActivity(db, clock(), { days, tzOffsetMinutes: tz, project: c.req.query('project') || undefined }));
   });
 
   // What each collection source has delivered and where it falls short (see ./coverage.ts).
