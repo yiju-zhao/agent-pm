@@ -48,6 +48,8 @@ export const AgentObservation = z.object({
   native_id: z.string().min(1).max(300).nullable(),
   native_id_origin: z.enum(['runtime', 'persistence']).nullable(),
   cwd: z.string().max(4096),
+  /** The Paseo project the agent works in (its repository's name, as Paseo shows it); absent from older collectors. */
+  project_name: z.string().max(200).nullable().optional(),
   title: z.string().max(2000),
   workspace_id: z.string().max(200).nullable(),
   raw_status: z.string().max(50),

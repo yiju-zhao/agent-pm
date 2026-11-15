@@ -18,7 +18,7 @@ import { nextBatch } from './timeline.ts';
 //    and a periodic refresh of long turns. A failing agent backs off on its own.
 // Nothing here writes to the daemon or changes an agent; stopping the collector leaves every agent as it was.
 
-export const PASEO_COLLECTOR_VERSION = '0.2.0';
+export const PASEO_COLLECTOR_VERSION = '0.3.0';
 
 export type CollectorDeps = {
   sdk: PaseoSdk;
@@ -193,7 +193,7 @@ export class PaseoCollector {
   }
 
   private observations(): AgentObservation[] {
-    return [...this.agents.values()].map((a) => toObservation(a.entry.agent, a.lifecycle, a.content));
+    return [...this.agents.values()].map((a) => toObservation(a.entry.agent, a.lifecycle, a.content, a.entry.project?.projectName ?? null));
   }
 
   /** One snapshot push: collector alive, daemon health, and (when connected) the agents. Also the long-turn refresh. */

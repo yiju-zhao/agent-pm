@@ -133,14 +133,16 @@ test('ai editing a locked milestone field is proposed; unlocked fields apply', (
   expect(q).toMatchObject({
     kind: 'confirm',
     status: 'pending',
-    prompt: 'AI 想修改你锁定的字段（title）：看起来做完了',
+    prompt: '用 AI 的新内容替换你锁定的标题？',
+    context: 'AI 的理由：看起来做完了',
+    why_user: 'user_authority',
     project_id: p,
     created_by: 'ai:curator',
     dedupe_key: `update:milestones:${m}:title`,
   });
   expect(JSON.parse(q.guards as string)).toEqual([{ table: 'milestones', id: m, col: 'title', equals: '用户标题' }]);
   expect(JSON.parse(q.options as string)).toEqual([
-    { label: '确认', op: 'upsert_milestone', args: { project: p, id: m, title: 'AI 标题' } },
+    { label: '确认', op: 'upsert_milestone', args: { project: p, id: m, title: 'AI 标题' }, detail: '标题 → AI 标题' },
     { label: '拒绝', op: null },
   ]);
 });
@@ -153,7 +155,7 @@ test('ai milestone edit that only touches locked fields is proposed, nothing app
   expect(r).toMatchObject({ status: 'proposed', question_ids: [expect.any(String)] });
   expect(eventCount()).toBe(before);
   expect(question(r.question_ids[0]).dedupe_key).toBe(`update:milestones:${m}:status,title`);
-  expect(question(r.question_ids[0]).prompt).toBe('AI 想修改你锁定的字段（status、title）：r');
+  expect(question(r.question_ids[0]).prompt).toBe('用 AI 的新内容替换你锁定的状态、标题？');
 });
 
 // ---- todos -------------------------------------------------------------------------------------------------------
@@ -272,14 +274,15 @@ test('ai editing a locked todo field is proposed; unlocked fields apply', () => 
   const q = question(r.question_ids[0]);
   expect(q).toMatchObject({
     kind: 'confirm',
-    prompt: 'AI 想修改你锁定的字段（status）：做完了',
+    prompt: '用 AI 的新内容替换你锁定的状态？',
+    context: 'AI 的理由：做完了',
     project_id: p,
     dedupe_key: `update:todos:${todo}:status`,
     evidence: '["chunk:1"]',
   });
   expect(JSON.parse(q.guards as string)).toEqual([{ table: 'todos', id: todo, col: 'status', equals: 'doing' }]);
   expect(JSON.parse(q.options as string)).toEqual([
-    { label: '确认', op: 'upsert_todo', args: { project: p, id: todo, status: 'done' } },
+    { label: '确认', op: 'upsert_todo', args: { project: p, id: todo, status: 'done' }, detail: '状态 → 完成' },
     { label: '拒绝', op: null },
   ]);
 });
@@ -378,7 +381,8 @@ test('ai deleting a user-created item is proposed', () => {
   const q = question(r.question_ids[0]);
   expect(q).toMatchObject({
     kind: 'confirm',
-    prompt: 'AI 想删除你编辑过的todo「我的 todo」：重复了',
+    prompt: '删除你编辑过的todo「我的 todo」？',
+    context: 'AI 的理由：重复了',
     project_id: p,
     created_by: 'ai:curator',
     dedupe_key: `delete:todos:${todo}`,
@@ -419,9 +423,9 @@ test('delete prompts name the kind of item and use the text of decisions and blo
   const d = t.user('record_decision', { project: p, text: '用 SQLite' }).id;
   const b = t.user('set_blocker', { project: p, text: '等 GPU' }).id;
   const prompt = (r: { question_ids: string[] }): string => question(r.question_ids[0]).prompt as string;
-  expect(prompt(t.ai('delete_milestone', { project: p, id: m }))).toBe('AI 想删除你编辑过的里程碑「里程碑 A」：r');
-  expect(prompt(t.ai('delete_decision', { project: p, id: d }))).toBe('AI 想删除你编辑过的决策「用 SQLite」：r');
-  expect(prompt(t.ai('delete_blocker', { project: p, id: b }))).toBe('AI 想删除你编辑过的阻塞「等 GPU」：r');
+  expect(prompt(t.ai('delete_milestone', { project: p, id: m }))).toBe('删除你编辑过的里程碑「里程碑 A」？');
+  expect(prompt(t.ai('delete_decision', { project: p, id: d }))).toBe('删除你编辑过的决策「用 SQLite」？');
+  expect(prompt(t.ai('delete_blocker', { project: p, id: b }))).toBe('删除你编辑过的阻塞「等 GPU」？');
 });
 
 test('deleting a milestone detaches its todos in the same event', () => {
@@ -478,7 +482,8 @@ test('ai deleting its own milestone is proposed when a user-locked todo is attac
   const q = question(r.question_ids[0]);
   expect(q).toMatchObject({
     kind: 'confirm',
-    prompt: 'AI 想删除你编辑过的里程碑「AI 的里程碑」：里程碑重复了',
+    prompt: '删除你编辑过的里程碑「AI 的里程碑」？',
+    context: 'AI 的理由：里程碑重复了',
     project_id: p,
     dedupe_key: `delete:milestones:${m}`,
   });

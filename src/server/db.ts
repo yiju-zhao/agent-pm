@@ -456,6 +456,17 @@ export const MIGRATIONS: string[] = [
     updated_at TEXT NOT NULL
   );
   `,
+  // v11: the project a session belongs to in Paseo (projects are named after it), and questions written for a quick
+  // answer: what happened, why the user has to decide, and what the AI recommends. `triaged_at` marks a question an
+  // automatic decider has looked at, whatever it concluded.
+  `
+  ALTER TABLE session_sources ADD COLUMN project_name TEXT;
+  ALTER TABLE questions ADD COLUMN context TEXT;
+  ALTER TABLE questions ADD COLUMN why_user TEXT;
+  ALTER TABLE questions ADD COLUMN recommended INTEGER;
+  ALTER TABLE questions ADD COLUMN recommend_reason TEXT;
+  ALTER TABLE questions ADD COLUMN triaged_at TEXT;
+  `,
 ];
 
 /** Opens (creating if needed) the central database in WAL mode and applies pending migrations. */

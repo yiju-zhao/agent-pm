@@ -216,7 +216,9 @@ function deleteItem(ctx: OpContext, table: ItemTable, args: { project: string; i
   if (ctx.ai && touchesUserWork) {
     ctx.propose({
       kind: 'confirm',
-      prompt: `AI 想删除你编辑过的${LABEL[table]}「${String(row.title ?? row.text)}」：${ctx.reason}`,
+      prompt: `删除你编辑过的${LABEL[table]}「${String(row.title ?? row.text)}」？`,
+      context: `AI 的理由：${ctx.reason}`,
+      why_user: 'user_authority',
       options: confirmOptions(DELETE_OP[table], { project: args.project, id: args.id }),
       project_id: args.project,
       session_key: null,

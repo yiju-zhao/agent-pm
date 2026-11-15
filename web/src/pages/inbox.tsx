@@ -9,6 +9,7 @@ import { QuestionCard } from '../components/question-card.tsx';
 import { SessionTag } from '../components/session-tag.tsx';
 import { splitQuestions } from '../home-model.ts';
 import { useInbox } from '../inbox.tsx';
+import { AutoDecisions, SameNameProjects } from '../components/inbox-extras.tsx';
 import { useApi } from '../use-api.ts';
 
 type Filter = 'all' | 'decisions' | 'sessions';
@@ -45,5 +46,7 @@ export function InboxPage() {
         })}
       </InboxSection>}
     </>}
+    {filter !== 'sessions' && projects.data ? <SameNameProjects cards={projects.data} reload={projects.reload} /> : null}
+    <AutoDecisions />
   </main>;
 }

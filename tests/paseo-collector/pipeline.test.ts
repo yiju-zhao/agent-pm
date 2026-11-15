@@ -192,3 +192,11 @@ test('the coverage report tells what a Paseo source delivered apart from what it
   // The message was longer than the collector keeps: it arrived, and the cut is counted rather than hidden.
   expect(report.content).toMatchObject({ with_content: 1, without_content: 0, truncated_chunks: 1, excerpted_chunks: 1 });
 });
+
+test('the Paseo project an agent works in reaches the center with its observation', async () => {
+  fake.addAgent('named');
+  c = startCollector();
+  await run();
+  const row = center.db.prepare("SELECT project_name FROM session_sources WHERE external_id = 'named'").get() as { project_name: string | null };
+  expect(row.project_name).toBe('proj');
+});

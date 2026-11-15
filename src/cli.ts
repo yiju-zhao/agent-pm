@@ -8,6 +8,7 @@ import { loadCollectorConfig } from './collector/config.ts';
 import { runCollector } from './collector/loop.ts';
 import { defaultOpenDeps, runOpen } from './lookup/command.ts';
 import type { MergeLlm } from './server/merge-routes.ts';
+import type { Decider } from './understand/decider.ts';
 import type { Scheduler } from './understand/scheduler.ts';
 
 // Server modules (node:sqlite, hono) are loaded only inside the `server` command, with a dynamic
@@ -122,7 +123,14 @@ async function runServer(args: string[], io: Io): Promise<number> {
       // Models and the credential are read before each call, so changes in the settings apply without a restart. The
       // token file named in the config was checked above; the settings fall back to it when nothing else is chosen.
       const runner = agentSdkRunner({ credential: () => settings.credential() });
-      scheduler = new Scheduler(db, defaultDeps(), runner, () => settings.models());
+      const jevKeyFile = config.understanding?.jevKeyFile;
+      let decider: Decider | undefined;
+      if (jevKeyFile !== undefined) {
+        const { jevDecider } = await import('./understand/decider.ts');
+        decider = jevDecider({ key: readTokenFile(jevKeyFile), baseUrl: process.env.TYPESAFE_BASE_URL, model: process.env.TYPESAFE_DEFAULT_MODEL });
+        io.stdout('agent-pm server: questions that need no user are decided by TypeSafe Jev\n');
+      }
+      scheduler = new Scheduler(db, defaultDeps(), runner, () => settings.models(), decider);
       // Merge previews are drafted with the curator's model, on the user's request rather than the scheduler's clock.
       mergeLlm = { runner, model: () => settings.models().curate };
       if (settings.credential().mode === 'login' && !process.env.CLAUDE_CODE_OAUTH_TOKEN) {

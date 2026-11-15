@@ -25,14 +25,16 @@ const sessionName = (c: Contribution | undefined, key: string) => (c?.session ? 
  * draft was and was not able to read); confirm. Nothing changes before the confirmation, and the confirmation applies
  * the preview on screen, not a new draft.
  */
-export function MergeDialog({ project, targets, onClose, reload }: {
+export function MergeDialog({ project, targets, onClose, reload, initialTarget = '' }: {
   project: ProjectDetail;
   targets: Array<{ id: string; title: string }>;
   onClose(): void;
   reload?: () => void;
+  /** A target already chosen (a suggested merge); the user can still change it. */
+  initialTarget?: string;
 }) {
   const { write } = useWrite(reload);
-  const [target, setTarget] = useState('');
+  const [target, setTarget] = useState(initialTarget);
   const [whole, setWhole] = useState(true);
   const [chosen, setChosen] = useState<string[]>([]);
   const [preview, setPreview] = useState<MergePreviewView | null>(null);
@@ -208,6 +210,7 @@ export function MergeDialog({ project, targets, onClose, reload }: {
                   <dd>
                     <div className="merge-after">{empty ? '（证据不足，草稿没有写这一项）' : draft[field]}</div>
                     {change === undefined ? null : <div className="merge-before">{`现在：${change.before ?? '（空）'}`}</div>}
+                    {field === 'title' && draft.title_change_reason ? <div className="merge-reason">{`改名原因：${draft.title_change_reason}`}</div> : null}
                     {change?.locked ? (
                       <label className="merge-locked">
                         <input type="checkbox" checked={overwrite.includes(field)} onChange={() => setOverwrite(toggle(overwrite, field))} />

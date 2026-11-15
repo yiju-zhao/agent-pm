@@ -21,7 +21,18 @@ export type QuestionOption = {
   args?: Record<string, unknown>;
   /** Dot path inside `args` that the user's free text fills in, e.g. `fields.done_criteria`. */
   text_arg?: string;
+  /** What choosing it does, in a line, when the label alone does not say. */
+  detail?: string;
 };
+
+/**
+ * Why the user, not the AI, has to decide. An AI asks only for these: the user's own authority over the board (closing,
+ * merging, their locked text, their links), instructions of theirs that contradict each other, a risk (security,
+ * something irreversible), or a fact no conversation contains. Which project a session is for, or whether work is a
+ * new project, is not on the list: the AI decides that itself.
+ */
+export const WHY_USER = ['user_authority', 'conflict', 'risk', 'missing_information'] as const;
+export type WhyUser = (typeof WHY_USER)[number];
 
 /** The question only makes sense while `table:id`'s `col` still equals `equals`. */
 export type Guard = { table: DomainTable; id: string; col: string; equals: unknown };
@@ -36,6 +47,12 @@ export type QuestionDraft = {
   guards: Guard[];
   dedupe_key: string;
   created_by: Actor;
+  /** What happened, in a sentence or two, so the question itself can be short. */
+  context?: string | null;
+  why_user?: WhyUser | null;
+  /** The option the asker recommends (an index into `options`), and why. */
+  recommended?: number | null;
+  recommend_reason?: string | null;
 };
 
 /** ISO instant `days` before now; stored timestamps are ISO strings, so they compare as text. */
@@ -105,9 +122,9 @@ function checkOption(option: QuestionOption, creator: Actor): void {
 }
 
 /** The usual pair for proposing one operation: do it, or decline. */
-export function confirmOptions(op: OpName, args: object): QuestionOption[] {
+export function confirmOptions(op: OpName, args: object, detail?: string): QuestionOption[] {
   return [
-    { label: '确认', op, args: { ...args } },
+    { label: '确认', op, args: { ...args }, ...(detail ? { detail } : {}) },
     { label: '拒绝', op: null },
   ];
 }
@@ -158,8 +175,9 @@ export function createQuestion(db: DatabaseSync, deps: DomainDeps, draft: Questi
   const id = deps.newId('q');
   db.prepare(
     `INSERT INTO questions (id, kind, prompt, options, project_id, session_key, status, answer, evidence, guards,
-                            dedupe_key, rejected, resolution_note, created_by, created_at, resolved_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'pending', NULL, ?, ?, ?, 0, NULL, ?, ?, NULL)`,
+                            dedupe_key, rejected, resolution_note, created_by, created_at, resolved_at,
+                            context, why_user, recommended, recommend_reason)
+     VALUES (?, ?, ?, ?, ?, ?, 'pending', NULL, ?, ?, ?, 0, NULL, ?, ?, NULL, ?, ?, ?, ?)`,
   ).run(
     id,
     draft.kind,
@@ -172,6 +190,10 @@ export function createQuestion(db: DatabaseSync, deps: DomainDeps, draft: Questi
     draft.dedupe_key,
     draft.created_by,
     deps.now().toISOString(),
+    draft.context ?? null,
+    draft.why_user ?? null,
+    draft.recommended ?? null,
+    draft.recommend_reason ?? null,
   );
   return { id, deduped: false };
 }
@@ -230,11 +252,12 @@ const label = z.string().trim().min(1).max(200);
 const args = z.record(z.string(), z.unknown()).optional();
 
 /** An option that may do nothing (`op: null`). */
-export const ChoiceOption = z.object({ label, op: z.enum(OP_NAMES).nullable(), args }).strict();
+const detail = z.string().trim().min(1).max(300).optional();
+export const ChoiceOption = z.object({ label, op: z.enum(OP_NAMES).nullable(), args, detail }).strict();
 /** The user's free text fills `text_arg`, so both an op and the path are required. */
-export const TextOption = z.object({ label, op: z.enum(OP_NAMES), args, text_arg: z.string().min(1) }).strict();
+export const TextOption = z.object({ label, op: z.enum(OP_NAMES), args, text_arg: z.string().min(1), detail }).strict();
 /** The single thing the user is asked to approve; `askUser` adds the 拒绝 option. */
-export const ConfirmOption = z.object({ label, op: z.enum(OP_NAMES), args }).strict();
+export const ConfirmOption = z.object({ label, op: z.enum(OP_NAMES), args, detail }).strict();
 
 /** The fields every kind of `AskUserInput` shares; exported so a tool can offer them as a flat input shape. */
 export const ASK_COMMON_SHAPE = {
@@ -244,6 +267,13 @@ export const ASK_COMMON_SHAPE = {
   /** Questions about the same topic share a dedupe key; defaults to the kind. */
   topic: z.string().trim().min(1).max(200).optional(),
   evidence: z.array(z.string().regex(EVIDENCE_RE)).min(1),
+  /** What happened, so `prompt` can be the question alone. An AI must give it. */
+  context: z.string().trim().min(1).max(800).optional(),
+  /** Why the user has to decide this. An AI must give it. */
+  why_user: z.enum(WHY_USER).optional(),
+  /** The recommended option: its index (for confirm, 0 is yes and 1 is no), and why. */
+  recommended: z.int().min(0).max(5).optional(),
+  recommend_reason: z.string().trim().min(1).max(500).optional(),
 };
 
 export const AskUserInput = z.discriminatedUnion('kind', [
@@ -274,6 +304,43 @@ function checkAiOption(option: QuestionOption): void {
       `invalid option ${JSON.stringify(option.label)}: an AI cannot ask to move a project to ${stage}; call transition_stage, which asks the user itself`,
     );
   }
+}
+
+/** Operations that only say which project a session is for, or start one: the AI decides those itself. */
+const ATTRIBUTION_OPS: readonly string[] = ['link_session', 'create_project', 'ignore_session'];
+
+/**
+ * The curator's question (see curator-tools' ask_user), made as easy to answer as it can be, or why it may not be asked. It must say what happened
+ * (`context`) and why the user has to decide (`why_user`); a question that only places a session or starts a project is
+ * the AI's to decide; free text is for missing facts only; a choice between doing one thing and nothing is a yes/no
+ * question; and a choice has at most four options.
+ */
+export function shapeAiQuestion(ask: AskUserInput): { ok: true; ask: AskUserInput } | { ok: false; message: string } {
+  if (!ask.context || !ask.why_user) return { ok: false, message: '提问必须给 context（发生了什么，一两句）和 why_user（为什么必须由用户决定）。' };
+  const options = ask.kind === 'choice' ? ask.options : [ask.option];
+  const ops = options.map((o) => o.op).filter((op): op is OpName => op !== null);
+  if (ops.length > 0 && ops.every((op) => ATTRIBUTION_OPS.includes(op))) {
+    return {
+      ok: false,
+      message: 'session 归属哪个项目、要不要新建项目，由你自己判断：用 link_session（拿不准时给较低的 confidence）或 create_project；确实无关的工作不记录即可。不要问用户。',
+    };
+  }
+  if (ask.kind === 'text' && ask.why_user !== 'missing_information') return { ok: false, message: '只有缺少对话里没有的事实（why_user=missing_information）时才能让用户填写文字；能给选项就给选项。' };
+  if (ask.kind === 'choice') {
+    if (ask.options.length > 4) return { ok: false, message: '选项最多 4 个：合并相近的选项，或拆成一个是/否问题。' };
+    const doing = ask.options.filter((o) => o.op !== null);
+    if (ask.options.length === 2 && doing.length === 1) {
+      // "Do X" or "do nothing" is a yes/no question.
+      const yes = doing[0]!;
+      const recommended = ask.recommended === undefined ? undefined : ask.options[ask.recommended]?.op === null ? 1 : 0;
+      const { options: _options, ...rest } = ask;
+      const option = { label: yes.label, op: yes.op!, ...(yes.args ? { args: yes.args } : {}), ...(yes.detail ? { detail: yes.detail } : {}) };
+      return { ok: true, ask: { ...rest, kind: 'confirm', option, ...(recommended === undefined ? {} : { recommended }) } };
+    }
+  }
+  const count = ask.kind === 'choice' ? ask.options.length : 2;
+  if (ask.recommended !== undefined && ask.recommended >= count) return { ok: false, message: `recommended 必须是 0 到 ${count - 1} 之间的选项序号。` };
+  return { ok: true, ask };
 }
 
 /**
@@ -309,6 +376,10 @@ export function askUser(db: DatabaseSync, deps: DomainDeps, input: unknown, acto
         guards: [],
         dedupe_key: `ask:${projectId ?? '-'}:${sessionKey ?? '-'}:${ask.topic ?? ask.kind}`,
         created_by: actor,
+        context: ask.context ?? null,
+        why_user: ask.why_user ?? null,
+        recommended: ask.recommended ?? null,
+        recommend_reason: ask.recommend_reason ?? null,
       }),
     );
     return { status: 'proposed', question_ids: [id] };

@@ -4,7 +4,8 @@ import type { SessionView } from '../server/sessions-repo.ts';
 import { readLocks } from './changes.ts';
 import type { OpName } from './ops.ts';
 import { expireQuestions, QUESTION_TTL_DAYS } from './questions.ts';
-import type { QuestionOption } from './questions.ts';
+import type { QuestionOption, WhyUser } from './questions.ts';
+import { sessionProjectName } from './project-names.ts';
 import { CLOSED } from './stage.ts';
 import { PRIORITIES } from './types.ts';
 import type { DomainDeps, Priority, Stage } from './types.ts';
@@ -98,6 +99,7 @@ export type QuestionOptionView = {
   op: OpName | null;
   args: Record<string, unknown> | null;
   text_arg?: string;
+  detail?: string;
 };
 
 /** A question as the page shows it. */
@@ -113,6 +115,15 @@ export type QuestionView = {
   created_by: string;
   created_at: string;
   resolution_note: string | null;
+  /** What happened, when the asker said; the prompt is then the question alone. */
+  context: string | null;
+  /** Why the user has to decide (see `WHY_USER` in questions.ts); null for questions from before it was asked. */
+  why_user: WhyUser | null;
+  /** The asker's recommended option (index into `options`), and why. */
+  recommended: number | null;
+  recommend_reason: string | null;
+  /** Set when an automatic decider answered it instead of the user: who, how sure, which option, the event it ran. */
+  auto: { decider: string; confidence: number; option_index: number; event_id: number | null; reason: string } | null;
 };
 
 export type ProjectCard = {
@@ -140,6 +151,8 @@ export type ProjectCard = {
   open_blockers: BlockerRow[];
   active_sessions: SessionTag[];
   pending_questions: QuestionView[];
+  /** The Paseo projects (or folders) its sessions work in, the one most of them use first. */
+  project_names: string[];
 };
 
 export type EventView = {
@@ -296,10 +309,13 @@ function loadContributions(db: DatabaseSync, projectId: string): ContributionRow
   return asRows<ContributionRow>(rows).map((r) => ({ ...r }));
 }
 
-type QuestionRaw = Omit<QuestionView, 'options' | 'evidence'> & { options: string; evidence: string };
+type QuestionRaw = Omit<QuestionView, 'options' | 'evidence' | 'auto'> & { options: string; evidence: string; answer: string | null };
 
 const QUESTION_COLUMNS =
-  'id, kind, prompt, options, project_id, session_key, status, evidence, created_by, created_at, resolution_note';
+  'id, kind, prompt, options, project_id, session_key, status, evidence, created_by, created_at, resolution_note, context, why_user, recommended, recommend_reason, answer';
+
+/** Easiest first: yes/no, then a choice, then free text; newest first within each. */
+const QUESTION_ORDER = "CASE kind WHEN 'confirm' THEN 0 WHEN 'choice' THEN 1 ELSE 2 END, created_at DESC, rowid DESC";
 
 function questionView(r: QuestionRaw): QuestionView {
   return {
@@ -312,6 +328,7 @@ function questionView(r: QuestionRaw): QuestionView {
           ? { label: o.label, has_op: false, op: null, args: null }
           : { label: o.label, has_op: true, op: o.op, args: { ...(o.args ?? {}) } };
       if (o.text_arg !== undefined) view.text_arg = o.text_arg;
+      if (o.detail !== undefined) view.detail = o.detail;
       return view;
     }),
     project_id: r.project_id,
@@ -321,7 +338,20 @@ function questionView(r: QuestionRaw): QuestionView {
     created_by: r.created_by,
     created_at: r.created_at,
     resolution_note: r.resolution_note,
+    context: r.context ?? null,
+    why_user: r.why_user ?? null,
+    recommended: r.recommended ?? null,
+    recommend_reason: r.recommend_reason ?? null,
+    auto: autoDecision(r.answer),
   };
+}
+
+/** The automatic decider's record in a question's answer, when it was the one that answered. */
+function autoDecision(answer: string | null): QuestionView['auto'] {
+  const value = jsonValue(answer);
+  if (value === null || typeof value !== 'object' || !('decider' in value)) return null;
+  const a = value as { decider: string; confidence: number; option_index: number; event_id: number | null; reason: string };
+  return { decider: a.decider, confidence: a.confidence, option_index: a.option_index, event_id: a.event_id, reason: a.reason };
 }
 
 /** Pending questions of a project, newest first. Those past their time limit are left out even before `listQuestions` expires them. */
@@ -330,7 +360,7 @@ function loadPendingQuestions(db: DatabaseSync, now: Date, projectId: string): Q
   const rows = db
     .prepare(
       `SELECT ${QUESTION_COLUMNS} FROM questions
-       WHERE project_id = ? AND status = 'pending' AND created_at >= ? ORDER BY created_at DESC, rowid DESC`,
+       WHERE project_id = ? AND status = 'pending' AND created_at >= ? ORDER BY ${QUESTION_ORDER}`,
     )
     .all(projectId, cutoff);
   return asRows<QuestionRaw>(rows).map(questionView);
@@ -411,8 +441,19 @@ function assemble(db: DatabaseSync, now: Date, project: ProjectRaw, sessions: Ma
     open_blockers: blockers.filter((b) => b.status !== 'cleared'),
     active_sessions: activeSessions,
     pending_questions: loadPendingQuestions(db, now, project.id),
+    project_names: namesByUse(db, contributions.map((c) => c.session_key)),
   };
   return { card, milestones, todos, blockers, contributions };
+}
+
+/** The project names of `keys`, the most used first (ties by name). */
+function namesByUse(db: DatabaseSync, keys: string[]): string[] {
+  const counts = new Map<string, number>();
+  for (const key of keys) {
+    const name = sessionProjectName(db, key);
+    if (name !== null) counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([name]) => name);
 }
 
 function sessionIndex(db: DatabaseSync, now: Date): Map<string, SessionView> {
@@ -660,7 +701,7 @@ export function listQuestions(
   }
   const rows = db
     .prepare(
-      `SELECT ${QUESTION_COLUMNS} FROM questions WHERE ${where.join(' AND ')} ORDER BY created_at DESC, rowid DESC`,
+      `SELECT ${QUESTION_COLUMNS} FROM questions WHERE ${where.join(' AND ')} ORDER BY ${QUESTION_ORDER}`,
     )
     .all(...params);
   return asRows<QuestionRaw>(rows).map(questionView);

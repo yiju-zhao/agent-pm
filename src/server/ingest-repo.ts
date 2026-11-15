@@ -185,6 +185,8 @@ export function applyPaseoSnapshot(db: DatabaseSync, src: PaseoSource, push: Sna
       }
       if (!fresh) ensureSessionRow(db, identity.key, fields, nowIso);
       upsertObservation(db, fields, nowIso);
+      // An older collector does not send the project: what is stored stays.
+      if (a.project_name) db.prepare('UPDATE session_sources SET project_name = ? WHERE source_id = ? AND external_id = ?').run(a.project_name, src.sourceId, a.agent_id);
       db.prepare(
         `UPDATE session_sources SET identity_note = coalesce(?, CASE WHEN identity_note LIKE 'late_identity_overlap%' THEN identity_note END)
          WHERE source_id = ? AND external_id = ?`,

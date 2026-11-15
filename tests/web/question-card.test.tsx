@@ -31,6 +31,11 @@ function question(over: Partial<QuestionView> = {}): QuestionView {
     created_by: 'ai:curator',
     created_at: '2026-10-30T10:00:00.000Z',
     resolution_note: null,
+    context: null,
+    why_user: null,
+    recommended: null,
+    recommend_reason: null,
+    auto: null,
     ...over,
   };
 }
@@ -112,7 +117,7 @@ test('the question id is encoded into the path', async () => {
   expect(lastRequest().url).toBe('/questions/q%2Fodd%20id/answer');
 });
 
-test('a confirm question works like a choice', async () => {
+test('a confirm question is answered with 是 or 否', async () => {
   const confirm = question({
     kind: 'confirm',
     options: [
@@ -121,7 +126,8 @@ test('a confirm question works like a choice', async () => {
     ],
   });
   render(<QuestionCard question={confirm} onDone={onDone} />);
-  fireEvent.click(screen.getByRole('button', { name: '确认' }));
+  expect(screen.getByRole('button', { name: '否' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '是' }));
   await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
   expect(lastRequest().body).toEqual({ option_index: 0 });
 });
@@ -262,4 +268,47 @@ test('evidence shows as small tags: digests and chunks open the drawer, the othe
 test('no evidence, no tags', () => {
   const { container } = render(<QuestionCard question={question({ evidence: [] })} />);
   expect(container.querySelector('.evidence')).toBeNull();
+});
+
+test('a decision says what kind of answer it takes, why it is yours, what happened, and what the AI recommends', () => {
+  render(
+    <QuestionCard
+      question={question({
+        kind: 'confirm',
+        prompt: '清理 Git 历史吗？',
+        context: '机密原稿已推送进 reports/。',
+        why_user: 'risk',
+        recommended: 0,
+        recommend_reason: '越早清理影响越小',
+        options: [
+          { label: '清理历史', has_op: true, op: 'record_decision', args: { project: 'p_1', text: '清理' }, detail: '重写 reports/ 的历史并强推' },
+          { label: '拒绝', has_op: false, op: null, args: null },
+        ],
+      })}
+    />,
+  );
+  expect(screen.getByText('是 / 否')).toBeTruthy();
+  expect(screen.getByText('有风险')).toBeTruthy();
+  expect(screen.getByText('机密原稿已推送进 reports/。')).toBeTruthy();
+  expect(screen.getByText('选「是」将：清理历史，重写 reports/ 的历史并强推')).toBeTruthy();
+  expect(screen.getByText('AI 建议').parentElement!.textContent).toBe('AI 建议是：越早清理影响越小');
+  expect(screen.getByRole('button', { name: '是' }).getAttribute('aria-describedby')).toBeTruthy();
+});
+
+test('a choice lists what each option does and marks the recommended one', () => {
+  render(
+    <QuestionCard
+      question={question({
+        recommended: 1,
+        options: [
+          { label: '整包批准', has_op: true, op: 'record_decision', args: {}, detail: '全部推进' },
+          { label: '只批准 09、10、17', has_op: true, op: 'record_decision', args: {}, detail: '其余暂缓' },
+        ],
+      })}
+    />,
+  );
+  expect(screen.getByText('选择')).toBeTruthy();
+  const second = screen.getByRole('button', { name: '只批准 09、10、17' }).closest('li')!;
+  expect(second.textContent).toBe('只批准 09、10、17其余暂缓建议');
+  expect(screen.getByText('全部推进')).toBeTruthy();
 });

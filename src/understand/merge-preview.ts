@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import { readRow } from '../domain/changes.ts';
 import { DRAFT_FIELDS, evidenceSessions, liveSessions } from '../domain/merge.ts';
+import { sessionProjectName } from '../domain/project-names.ts';
 import type { DraftText, MergeScope } from '../domain/merge.ts';
 import type { DomainDeps } from '../domain/types.ts';
 import { contentCuts, isHerdrChunk } from '../server/content-cuts.ts';
@@ -56,6 +57,8 @@ export type MergeCoverage = {
 };
 
 export type MergeDraft = DraftText & {
+  /** Why the title is not the target's current one; null when it was kept. */
+  title_change_reason: string | null;
   /** What the evidence does not say but a reader would need. */
   unknowns: string[];
   /** The chunks each field rests on. */
@@ -123,6 +126,7 @@ const FactSchema = z.object({
 
 const DraftSchema = z.object({
   title: z.string().trim().min(1).max(200),
+  title_change_reason: z.string().trim().max(500),
   summary: z.string().trim().min(1).max(4000),
   why: z.string().trim().max(4000),
   // Twelve lines of 300 stay under the 4000 characters a project field may hold.
@@ -151,12 +155,23 @@ const DRAFT_SYSTEM = [
   PROJECT_GUIDE,
   '旧的项目记录只说明项目原来叫什么，可能已经过时或不完整：它不是证据，不要照抄、拼接或把里面的说法当成事实；证据与它不一致时以证据为准。',
   '先找出这些 session 共同服务的那个可独立验收的目标，再写：title、summary、why、done_criteria（数组，每条一个可验证的结果）。',
+  'title 默认沿用目标项目现在的标题，title_change_reason 留空字符串。只有证据显示目标项目现在的标题已经与工作明显不符时才改，改时以 session 所在项目名为准，并在 title_change_reason 里说明证据显示了什么偏差。',
   '一个 session 可能同时为别的项目做过事：只采用服务于这个目标的内容，其余的不要写进来。',
   '证据里找不到动因时 why 留空字符串；找不到任何完成条件时 done_criteria 留空数组，并在 unknowns 里说明。不要为了填满而编写。',
   'unknowns 列出证据没有说明、但读者需要知道的事（例如验收是否通过、范围是否包含某部分）；没有就留空数组。',
   'evidence 为写了内容的字段各给出所依据的 chunk id（只能是本次给出的 id；summary 必须有，done_criteria 非空时也必须有）。',
   RULES,
 ].join('\n');
+
+/** Each project name of `sessions` once, with how many of them work in it. */
+function projectNames(db: DatabaseSync, sessions: string[]): string {
+  const counts = new Map<string, number>();
+  for (const key of new Set(sessions)) {
+    const name = sessionProjectName(db, key);
+    if (name !== null) counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  return [...counts].map(([name, n]) => `- ${name}（${n} 个 session）`).join('\n');
+}
 
 function projectRecord(db: DatabaseSync, id: string, label: string): string {
   const p = readRow(db, 'projects', id) ?? {};
@@ -232,6 +247,7 @@ export async function draftMerge(db: DatabaseSync, deps: DomainDeps, runner: Llm
   const gaps = sessions.filter((s) => s.status !== 'read');
   const prompt = [
     scope.mode === 'project' ? '用户要把整个来源项目并入目标项目。' : `用户要把来源项目中的 ${scope.sessions.length} 个 session 移到目标项目；来源项目的其余内容不在本次范围内。`,
+    `## 这些 session 所在的项目（Paseo 项目名或工作目录名）\n${projectNames(db, windows.map((w) => w.session)) || '（没有项目名）'}`,
     '## 旧的项目记录（仅供参考，不是证据）',
     // A partial merge takes sessions, not the source project: its record describes work that is not coming over.
     [projectRecord(db, scope.target, '目标项目'), ...(scope.mode === 'project' ? [projectRecord(db, scope.source, '来源项目')] : [])].join('\n'),
@@ -249,8 +265,12 @@ export async function draftMerge(db: DatabaseSync, deps: DomainDeps, runner: Llm
     const message = unknown.length > 0 ? `草稿引用了未提供的证据（chunk ${[...new Set(unknown)].join(', ')}），已作废` : '草稿没有为简介和完成标准给出证据，已作废';
     return { ok: false, kind: 'bad_output', message, coverage };
   }
+  // The title stays the target's unless the model says why it no longer fits: a project keeps its name.
+  const current = String(readRow(db, 'projects', scope.target)?.title ?? '');
+  const reason = out.data.title_change_reason.trim();
   const draft: MergeDraft = {
-    title: out.data.title,
+    title: reason === '' && current !== '' ? current : out.data.title,
+    title_change_reason: reason === '' || out.data.title === current ? null : reason,
     summary: out.data.summary,
     why: out.data.why,
     done_criteria: out.data.done_criteria.map((line) => `- ${line.replace(/^[-*]\s*/, '')}`).join('\n'),

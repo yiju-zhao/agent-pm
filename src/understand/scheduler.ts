@@ -10,6 +10,8 @@ import type { LlmErrorKind, LlmRunner } from './llm.ts';
 import { pickProjectReview, reviewDigestDependency, reviewFailure, runProjectReview } from './project-review.ts';
 import type { ProjectReview } from './project-review.ts';
 import { markStageReviewed, pickRestageBatch, runRestage } from './restage.ts';
+import { llmDecider, pickTriage, runTriage } from './decider.ts';
+import type { Decider } from './decider.ts';
 import type { SchedulerStatus } from './status.ts';
 
 export { disabledStatus } from './status.ts';
@@ -105,6 +107,7 @@ export class Scheduler {
   private readonly deps: DomainDeps;
   private readonly runner: LlmRunner;
   private readonly modelsOf: () => { digest: string; curate: string; restage?: string };
+  private readonly decider: Decider;
 
   private inFlight: Promise<TickResult> | null = null;
   private running: 'digest' | 'curate' | 'restage' | null = null;
@@ -136,11 +139,14 @@ export class Scheduler {
     deps: DomainDeps,
     runner: LlmRunner,
     models: { digest: string; curate: string; restage?: string } | (() => { digest: string; curate: string; restage?: string }),
+    decider?: Decider,
   ) {
     this.db = db;
     this.deps = deps;
     this.runner = runner;
     this.modelsOf = typeof models === 'function' ? models : () => models;
+    // Without one configured (Jev), the curator's model decides.
+    this.decider = decider ?? llmDecider(db, deps, runner, () => this.modelsOf().curate);
   }
 
   /**
@@ -323,6 +329,10 @@ export class Scheduler {
       return this.curate(now);
     }
 
+    // A question the evidence can settle is settled before the user ever has to look at it.
+    const question = pickTriage(this.db, this.deps.now());
+    if (question !== null) return this.triage(now, question);
+
     const realtime = this.pickRealtime(now);
     if (realtime !== null) return this.digest(now, realtime);
 
@@ -350,6 +360,17 @@ export class Scheduler {
     if (isPausing(result.kind) && !result.partial) return this.pause(now,result.kind);
     reviewFailure(this.db,this.deps.now(),job,result.message,result.partial || result.kind==='refused');
     return isPausing(result.kind) ? this.pause(now,result.kind) : 'skipped';
+  }
+
+  private async triage(now: number, question: NonNullable<ReturnType<typeof pickTriage>>): Promise<TickResult> {
+    this.running = 'curate';
+    const outcome = await runTriage(this.db, this.deps, this.decider, question);
+    if (outcome.status === 'decided') return 'curated';
+    if (outcome.status === 'failed') {
+      this.lastError = `自动决定失败（${this.decider.name}）：${outcome.message}；问题留给用户`;
+      if (outcome.kind !== 'jev' && isPausing(outcome.kind)) return this.pause(now, outcome.kind);
+    }
+    return 'skipped';
   }
 
   private async restage(now: number, ids: string[]): Promise<TickResult> {

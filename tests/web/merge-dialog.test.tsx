@@ -29,7 +29,7 @@ function preview(over: Partial<MergePreviewView> = {}): MergePreviewView {
     target: { id: 'p_2', title: '采集' },
     sessions: [A],
     session_labels: { [A]: '修采集 · gx10', 'codex:cccccccc': '关窗补读 · mac-mini' },
-    draft: { title: '采集可靠性', summary: '补齐漏采', why: '看板依赖完整证据', done_criteria: '- 中文批次入库', unknowns: ['真实机器尚未对账'], evidence: [] },
+    draft: { title: '采集可靠性', title_change_reason: '工作已收敛到采集可靠性', summary: '补齐漏采', why: '看板依赖完整证据', done_criteria: '- 中文批次入库', unknowns: ['真实机器尚未对账'], evidence: [] },
     coverage: { layer: 'chunks', mode: 'direct', model_calls: 1, sessions: [
       { session_key: A, side: 'source', status: 'read', chunks_total: 2, chunks_read: 2, chars_total: 10, chars_read: 10, truncated_chunks: 1, excerpted_chunks: 0 },
       { session_key: 'codex:cccccccc', side: 'target', status: 'refused', chunks_total: 0, chunks_read: 0, chars_total: 0, chars_read: 0, truncated_chunks: 0, excerpted_chunks: 0 },
@@ -102,6 +102,7 @@ test('choosing sessions, previewing and confirming: the preview shows every chan
   const draft = await within(dialog).findByRole('region', { name: '项目草稿' }, { timeout: 4000 });
   expect(within(draft).getByText('采集可靠性')).toBeTruthy();
   expect(within(draft).getByText('现在：采集')).toBeTruthy();
+  expect(within(draft).getByText('改名原因：工作已收敛到采集可靠性')).toBeTruthy();
   expect(within(draft).getByText('- 中文批次入库')).toBeTruthy();
   expect(within(draft).getByText('真实机器尚未对账')).toBeTruthy();
   const links = within(dialog).getByRole('region', { name: '关联变化' });
