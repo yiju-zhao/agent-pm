@@ -657,7 +657,8 @@ systemctl --user daemon-reload && systemctl --user enable --now agent-pm-paseo-c
 
 两台 daemon 均为 0.16.0-beta.1，采集器沿用锁定的 SDK 0.15.0，目录读取、心跳、快照和内容上报已实测通过。首次验收中心分别收到 10 / 2 个会话，其中未加载的 5 / 1 个只上报状态。
 
-- 运行代码及 SDK 的纯 JavaScript 运行依赖来自提交 `76d7164`，位于 `~/.local/share/agent-pm-paseo/releases/76d7164`；没有拷贝 Mac 原生模块，也没有安装中心服务的模型依赖。
+- 运行代码及 SDK 的纯 JavaScript 运行依赖最初来自提交 `76d7164`；2026-11-15 升级到 `003eaba`，位于 `~/.local/share/agent-pm-paseo/releases/003eaba`（依赖未变，`node_modules` 从旧版本目录复制），旧目录保留可回退。没有拷贝 Mac 原生模块，也没有安装中心服务的模型依赖。
+- 升级方式：在对应机器的 Paseo 终端里下载新版本源码，解到新的 `releases/<提交>`，把 `agent-pm-paseo-collector@<sourceId>.service.d/runtime.conf` 里的 `AGENT_PM_REPO` 指过去（原文件另存为 `runtime.conf.before-<提交>`），`daemon-reload` 后重启服务。回退就把 `runtime.conf` 换回去再重启。同次升级还把 herdr 采集器二进制 `~/.local/bin/herdr-pm` 换成 `003eaba` 构建的版本，旧二进制保留为 `herdr-pm.before-003eaba`。
 - 专用 Node 位于 `~/.local/opt/node-v26.13.0-linux-arm64/bin/node`，官方包的 SHA-256 已校验。各服务的 `runtime.conf` 单独设置 `AGENT_PM_REPO` 和 `PATH`，不替换系统或 Paseo 使用的 Node。
 - 配置为 `~/.config/herdr-pm/<sourceId>.json`，独立 token 为同目录 `<sourceId>.token`，权限均为 600；状态目录为 `~/.local/state/herdr-pm/<sourceId>`。
 - 两个用户的 `Linger=yes`，服务均已 `enable`；herdr 的 `herdr-pm-collector.service` 继续独立运行。

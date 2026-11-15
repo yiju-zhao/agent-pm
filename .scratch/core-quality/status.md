@@ -99,3 +99,12 @@
 ## 界面优化（2026-11-14）
 
 合并对话框：顶部步骤指示（选择范围 / 预览并确认）、范围用可选卡片、session 列表带全选与已选计数、草稿按字段成卡片（改写 / 与现在相同 / 你锁定过 标签，旧内容以引用样式显示）、关联变化与证据范围用状态标签、生成中有进度提示、操作栏与标题吸附在滚动区域上下、目标项目已有的 session 显示标题而不是 key。采集覆盖面板：折叠标题显示来源数与需要关注数，展开为来源卡片（状态点、四个数字、缺口列表、采集不到的范围）。用临时库在浏览器里看过两处的实际效果。其他页面没有改。
+
+## 采集器升级（2026-11-15 05:36–05:42Z）
+
+- 本机装了 bun 1.4.4（Homebrew），用 `scripts/build-collector.sh` 从 `003eaba` 构建 macOS 与 Linux arm64 两个二进制（macOS 版已重新签名）。
+- mac-mini：`~/.local/bin/herdr-pm` 换成新二进制（旧的在 `~/.config/herdr-pm/backups/herdr-pm-binary-before-core-quality-20261115`），重启 `ai.agent-pm.collector`，心跳正常。
+- gx10-c757、gx10-090e：通过各自 daemon 的 Paseo 终端（mac-mini 到这两台的 SSH 仍被拒），从 mac-mini 的临时 Tailscale 文件服务下载并校验 SHA-256，Paseo 采集器切到 `releases/003eaba`，herdr 采集器二进制替换（旧版本、旧 `runtime.conf` 都保留），重启后两个服务 active、NRestarts=0。临时文件服务、远程终端、两边下载的文件都已清理。
+- 升级后中心看到：3 个 Paseo 来源 connected、无错误；herdr mac-mini、gx10-c757、laptop 心跳正常。
+- **gx10-090e 的 herdr 来源仍然没有心跳**：原因不是采集器，而是那台机器上没有运行 herdr 服务（日志反复报 `server_not_running`），采集器拿不到快照就不上报。没有替用户启动 herdr。
+- **笔记本没有升级**：笔记本没有可达的 Paseo daemon（6767 端口拒绝连接），从 mac-mini 无法操作。它的 herdr 采集器仍是旧版本；要升级需在笔记本上把新二进制放到 `~/.local/bin/agent-pm`（或其采集器实际使用的路径）并重启采集器服务。
