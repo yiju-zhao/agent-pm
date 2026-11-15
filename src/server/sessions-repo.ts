@@ -145,6 +145,7 @@ export function applySnapshot(db: DatabaseSync, push: SnapshotPush, now: Date): 
       ensureSessionRow(db, s.key, o, nowIso);
       revive.run('ended', nowIso, s.key);
       upsertObservation(db, o, nowIso);
+      if (s.workspace) db.prepare('UPDATE session_sources SET workspace = ? WHERE source_id = ? AND external_id = ?').run(JSON.stringify(s.workspace), o.source_id, o.external_id);
     }
     const restart = db.prepare('UPDATE sessions SET first_seen = ?, predecessor_key = NULL WHERE key = ?');
     for (const key of revived) restart.run(nowIso, key);

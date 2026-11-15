@@ -3,6 +3,8 @@ import { stat } from 'node:fs/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { SnapshotPush, SnapshotSession } from '../shared/protocol.ts';
 import { makeSessionKey, parseSessionKey } from '../shared/session-key.ts';
+import { WorkspaceCache } from '../shared/workspace.ts';
+import type { Workspace } from '../shared/workspace.ts';
 import { createPmClient, RetryableError } from './client.ts';
 import type { PmClient } from './client.ts';
 import type { CollectorConfig } from './config.ts';
@@ -46,6 +48,8 @@ export type Deps = {
   startedAt: Date;
   /** One-line diagnostics for failures that do not abort the tick; defaults to stderr. */
   log?(line: string): void;
+  /** The repository state of a working directory, read-only; absent: not reported. */
+  workspace?(cwd: string): Promise<Workspace | null>;
 };
 
 type Tick = {
@@ -295,6 +299,7 @@ export async function collectOnce(
   for (const s of parsed) resolved.push(await resolveSession(s, t));
   // One session resumed in two panes is reported twice; the last occurrence wins.
   const sessions = [...new Map(resolved.map((s) => [s.key, s])).values()];
+  if (deps.workspace) for (const s of sessions) if (s.cwd) s.workspace = await deps.workspace(s.cwd);
 
   const last = store.lastPurgeCheck;
   const purgeDue = last === undefined || now.getTime() - last.getTime() >= PURGE_CHECK_INTERVAL_MS;
@@ -355,6 +360,7 @@ export function backoffDelay(pollMs: number, failures: number): number {
 /** Runs `collectOnce` every `pollMs` forever, logging failures to stderr and backing off exponentially. */
 export async function runCollector(cfg: CollectorConfig): Promise<never> {
   const store = await CursorStore.load(cfg.stateFile);
+  const workspaces = new WorkspaceCache();
   const deps: Deps = {
     readSnapshot: () => readHerdrSnapshot(cfg.herdrBin),
     readScreen: (paneId) => readHerdrScreen(cfg.herdrBin, paneId),
@@ -364,6 +370,7 @@ export async function runCollector(cfg: CollectorConfig): Promise<never> {
     client: createPmClient(cfg),
     now: () => new Date(),
     startedAt: new Date(),
+    workspace: (cwd) => workspaces.get(cwd),
   };
   // One reporter for the whole run: it remembers what each pane shows, so unchanged labels are not rewritten.
   const sidebar = cfg.sidebar ? new SidebarReporter(deps.reportMetadata, (line) => console.error(line)) : undefined;

@@ -8,6 +8,7 @@ import { SDK_STRUCTURED_OUTPUT_RETRIES } from './agent-sdk.ts';
 import { recordRun } from './llm.ts';
 import type { LlmCall, LlmErrorKind, LlmRunner } from './llm.ts';
 import { sessionProjectName } from '../domain/project-names.ts';
+import { sessionContext } from './context.ts';
 import { renderBrief, renderProjectIndex } from './render.ts';
 
 /**
@@ -164,10 +165,12 @@ export type DigestContext = {
   projectIndex: string;
   /** The session's project as Paseo names it (or its folder); projects are named after it. */
   projectName?: string | null;
+  /** The session's full context (status, repository on disk, earlier work); see context.ts. */
+  sessionContext?: string;
 };
 
 /** What the digester needs to know besides the chunks: the session, its projects and the project index. */
-export function loadDigestContext(db: DatabaseSync, now: Date, sessionKey: string): DigestContext {
+export function loadDigestContext(db: DatabaseSync, now: Date, sessionKey: string, windowStart?: string): DigestContext {
   const session = db
     .prepare('SELECT agent_kind, machine, cwd, title FROM sessions WHERE key = ?')
     .get(sessionKey) as DigestContext['session'] | undefined;
@@ -186,7 +189,13 @@ export function loadDigestContext(db: DatabaseSync, now: Date, sessionKey: strin
   }
 
   const unfinished = listProjects(db, now, {}).filter((card) => !card.closed);
-  return { session: session ?? null, linkedBriefs, projectIndex: renderProjectIndex(unfinished), projectName: sessionProjectName(db, sessionKey) };
+  return {
+    session: session ?? null,
+    linkedBriefs,
+    projectIndex: renderProjectIndex(unfinished),
+    projectName: sessionProjectName(db, sessionKey),
+    sessionContext: sessionContext(db, sessionKey, now, { before: windowStart }),
+  };
 }
 
 const SYSTEM_PROMPT = [
@@ -226,8 +235,8 @@ export function buildDigestPrompt(window: DigestWindow, context: DigestContext):
   const briefs = context.linkedBriefs.length > 0 ? context.linkedBriefs.join('\n\n---\n\n') : '（这个 session 还没有关联项目）';
   const index = context.projectIndex.trim() !== '' ? context.projectIndex : '（暂无项目）';
   const prompt = [
-    '## Session',
-    ...sessionLines(window, context.session, context.projectName ?? null),
+    '## Session（当前状态、仓库实际状态和之前的工作；仓库状态是采集器在机器上读到的事实）',
+    ...(context.sessionContext ? [context.sessionContext] : sessionLines(window, context.session, context.projectName ?? null)),
     `- 这段记录的时间：${window.tsStart} ~ ${window.tsEnd}${window.backfill ? '（历史导入）' : ''}`,
     '',
     '## 该 session 已关联的项目',
@@ -311,7 +320,7 @@ export async function runDigest(
     return { status: 'skipped', digestId: skipWindow(db, deps, window) };
   }
 
-  const { system, prompt } = buildDigestPrompt(window, loadDigestContext(db, deps.now(), window.sessionKey));
+  const { system, prompt } = buildDigestPrompt(window, loadDigestContext(db, deps.now(), window.sessionKey, window.tsStart));
   const call: LlmCall = {
     role: 'digest',
     model: opts.model,

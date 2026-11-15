@@ -11,6 +11,7 @@ import { SDK_STRUCTURED_OUTPUT_RETRIES } from './agent-sdk.ts';
 import { digestTag } from './curate.ts';
 import type { BatchDigest } from './curate.ts';
 import { neutralizeTags } from './digest.ts';
+import { projectSessionsContext } from './context.ts';
 import { recordRun } from './llm.ts';
 import type { LlmCall, LlmErrorKind, LlmRunner } from './llm.ts';
 import { renderBrief } from './render.ts';
@@ -206,6 +207,7 @@ export async function runBlockerReview(db: DatabaseSync, deps: DomainDeps, runne
     `## 开放的阻塞\n${blockers.map((b) => `- ${b.id} · ${b.kind} · 记于 ${b.created_at.slice(0, 16)} · ${b.text.replace(/\s+/g, ' ')}`).join('\n')}`,
     `## 本项目 session 在第一条阻塞记下之后的摘要（按时间先后）\n${own.map((d) => digestTag(d)).join('\n') || '（没有新的摘要）'}`,
     `## 其他 session 里提到同一件事的摘要，以及 agent 的主动上报\n${related.map((d) => digestTag(d)).join('\n') || '（没有）'}`,
+    `## 项目 session 的当前状态与仓库实际状态（事实：例如"领先上游 0 个提交"说明已推送）\n${neutralizeTags(projectSessionsContext(db, projectId, now), 'project', 'digest')}`,
     `## 系统状态（事实）\n${systemFacts(db)}`,
   ].join('\n\n');
   const schema: Record<string, unknown> = z.toJSONSchema(VerdictSchema);

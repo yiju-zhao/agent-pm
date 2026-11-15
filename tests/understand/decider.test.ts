@@ -108,7 +108,7 @@ test('the scheduler settles such questions before digesting, with the curator mo
 test('Jev is asked one typed choice question with the options as criteria, and its answer maps back', async () => {
   const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => new Response(JSON.stringify({ answers: { answer: { type: 'choice', choice: 'o1', confidence: 0.87 } } })));
   const jev = jevDecider({ key: 'k-secret', fetch: fetchMock as unknown as typeof fetch });
-  const out = await jev.decide({ question: '属于哪个？', context: null, options: [{ label: 'A', detail: null }, { label: 'B', detail: '第二个' }], project: null, evidence: 'e' });
+  const out = await jev.decide({ question: '属于哪个？', context: null, options: [{ label: 'A', detail: null }, { label: 'B', detail: '第二个' }], project: null, sessions: '', evidence: 'e' });
   expect(out).toEqual({ ok: true, option_index: 1, confidence: 0.87, reason: 'Jev 按证据判断' });
   const [url, init] = fetchMock.mock.calls[0]!;
   expect(url).toBe('https://api.typesafe.ai/v1/systemone');
@@ -118,11 +118,11 @@ test('Jev is asked one typed choice question with the options as criteria, and i
   expect(body.state).toMatchObject({ question: '属于哪个？', evidence: 'e' });
 
   const down = jevDecider({ key: 'k', fetch: (async () => new Response('', { status: 503 })) as unknown as typeof fetch });
-  expect(await down.decide({ question: 'q', context: null, options: [], project: null, evidence: '' })).toMatchObject({ ok: false, kind: 'jev' });
+  expect(await down.decide({ question: 'q', context: null, options: [], project: null, sessions: '', evidence: '' })).toMatchObject({ ok: false, kind: 'jev' });
 });
 
 test('the LLM decider logs its call and refuses an answer that does not fit', async () => {
   const decider = llmDecider(t.db, t.deps, async () => ({ ok: true, text: '', structured: { option_index: 'x' }, usage: { input_tokens: 1, output_tokens: 1, cache_read_tokens: 0 }, costUsd: 0, durationMs: 1 }), () => 'm');
-  expect(await decider.decide({ question: 'q', context: null, options: [{ label: 'A', detail: null }], project: null, evidence: '' })).toMatchObject({ ok: false, kind: 'bad_output' });
+  expect(await decider.decide({ question: 'q', context: null, options: [{ label: 'A', detail: null }], project: null, sessions: '', evidence: '' })).toMatchObject({ ok: false, kind: 'bad_output' });
   expect(t.db.prepare('SELECT ok, error_kind FROM llm_runs').get()).toEqual({ ok: 0, error_kind: 'bad_output' });
 });

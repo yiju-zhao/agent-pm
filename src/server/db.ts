@@ -471,6 +471,11 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE blockers ADD COLUMN reviewed_at TEXT;
   `,
+  // v13: the repository state of a session's working directory as its collector last read it (JSON; see
+  // shared/workspace.ts), so the models judge from what is on disk, not only from what was said.
+  `
+  ALTER TABLE session_sources ADD COLUMN workspace TEXT;
+  `,
 ];
 
 /** Opens (creating if needed) the central database in WAL mode and applies pending migrations. */

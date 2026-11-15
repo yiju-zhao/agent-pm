@@ -36,7 +36,7 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-function startCollector(): PaseoCollector {
+function startCollector(extra: { workspace?: () => Promise<import('../../src/shared/workspace.ts').Workspace | null> } = {}): PaseoCollector {
   const cfg = PaseoCollectorConfig.parse({
     server: 'http://center.test',
     sourceId: PASEO_SOURCE,
@@ -53,6 +53,7 @@ function startCollector(): PaseoCollector {
     client: createCenterClient({ server: cfg.server, token: PASEO_TOKEN, fetch: (u, i) => Promise.resolve(center.app.request(u, i)) }),
     state,
     outbox: new Outbox(cfg.stateDir),
+    ...(extra.workspace ? { workspace: extra.workspace } : {}),
     now: () => center.now,
     log: () => {},
   });
@@ -199,4 +200,15 @@ test('the Paseo project an agent works in reaches the center with its observatio
   await run();
   const row = center.db.prepare("SELECT project_name FROM session_sources WHERE external_id = 'named'").get() as { project_name: string | null };
   expect(row.project_name).toBe('proj');
+});
+
+test('the repository state of a live agent’s directory reaches the center with its observation', async () => {
+  fake.addAgent('ws');
+  const ws = { root: '/work/proj', branch: 'main', ahead: 1, behind: 0, dirty: 0, recent: [], checked_at: '2026-11-06T10:00:00.000Z' };
+  c = startCollector({ workspace: async () => ws });
+  await run();
+  await c.heartbeat();
+  await run();
+  const row = center.db.prepare("SELECT workspace FROM session_sources WHERE external_id = 'ws'").get() as { workspace: string | null };
+  expect(JSON.parse(row.workspace!)).toEqual(ws);
 });

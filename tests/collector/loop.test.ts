@@ -985,3 +985,14 @@ test('the heartbeat re-push does not touch the sidebar', async () => {
     { paneId: 'w1:p1', tokens: { pm_sid: '5d27595b', pm: 'project-1' }, ttlMs: SIDEBAR_TTL_MS },
   ]);
 });
+
+test('each session carries its directory’s repository state to the center', async () => {
+  await writeLines(transcript, [claudeUser(OLD_TS, 'hi')]);
+  const ws = { root: '/work/proj', branch: 'main', ahead: 2, behind: 0, dirty: 1, recent: [{ sha: 'abc1234', at: '2026-10-29T08:00:00Z', subject: 'fix' }], checked_at: '2026-10-29T08:00:00.000Z' };
+  const seen: string[] = [];
+  const deps = { ...fakeDeps(() => [claudePane()]), workspace: async (cwd: string) => (seen.push(cwd), ws) };
+  await collectOnce(cfg, await CursorStore.load(cfg.stateFile), deps);
+  expect(seen.length).toBeGreaterThan(0);
+  const row = db.prepare('SELECT workspace FROM session_sources WHERE session_key = ?').get(CLAUDE_KEY) as { workspace: string };
+  expect(JSON.parse(row.workspace)).toEqual(ws);
+});

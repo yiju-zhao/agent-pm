@@ -12,6 +12,7 @@ import { SDK_STRUCTURED_OUTPUT_RETRIES } from './agent-sdk.ts';
 import { neutralizeTags } from './digest.ts';
 import { recordRun } from './llm.ts';
 import type { LlmCall, LlmErrorKind, LlmRunner } from './llm.ts';
+import { projectSessionsContext, sessionContext } from './context.ts';
 import { renderBrief } from './render.ts';
 
 // Answering, without the user, the questions that do not need them.
@@ -39,6 +40,8 @@ export type DecisionInput = {
   context: string | null;
   options: Array<{ label: string; detail: string | null }>;
   project: string | null;
+  /** The sessions involved, as they are now (status, repository on disk). */
+  sessions: string;
   evidence: string;
 };
 
@@ -47,6 +50,7 @@ export type Decider = { name: string; decide(input: DecisionInput): Promise<Deci
 
 type QuestionRow = {
   id: string;
+  session_key: string | null;
   kind: 'choice' | 'text' | 'confirm';
   prompt: string;
   options: string;
@@ -69,7 +73,7 @@ export function mayAutoDecide(q: Pick<QuestionRow, 'kind' | 'options' | 'why_use
 /** The oldest pending AI question no decider has looked at and one may decide; marks the others as looked at. */
 export function pickTriage(db: DatabaseSync, now: Date): QuestionRow | null {
   const rows = db
-    .prepare(`SELECT id, kind, prompt, options, project_id, evidence, guards, why_user, context FROM questions
+    .prepare(`SELECT id, kind, prompt, options, project_id, session_key, evidence, guards, why_user, context FROM questions
       WHERE status = 'pending' AND created_by LIKE 'ai:%' AND triaged_at IS NULL ORDER BY created_at, rowid`)
     .all() as QuestionRow[];
   for (const row of rows) {
@@ -93,7 +97,7 @@ function evidenceText(db: DatabaseSync, refs: string[]): string {
   return parts.join('\n').slice(0, PROMPT_EVIDENCE_CHARS);
 }
 
-function decisionInput(db: DatabaseSync, now: Date, q: QuestionRow): DecisionInput {
+function decisionInput(db: DatabaseSync, now: Date, q: QuestionRow & { session_key?: string | null }): DecisionInput {
   const options = JSON.parse(q.options) as QuestionOption[];
   const project = q.project_id ? getProject(db, now, q.project_id) : null;
   return {
@@ -101,6 +105,7 @@ function decisionInput(db: DatabaseSync, now: Date, q: QuestionRow): DecisionInp
     context: q.context,
     options: options.map((o, i) => ({ label: q.kind === 'confirm' ? (i === 0 ? `是：${o.label}` : '否：不做') : o.label, detail: o.detail ?? null })),
     project: project ? renderBrief(project) : null,
+    sessions: q.session_key ? sessionContext(db, q.session_key, now) : q.project_id ? projectSessionsContext(db, q.project_id, now, 3) : '',
     evidence: evidenceText(db, JSON.parse(q.evidence) as string[]),
   };
 }
@@ -169,6 +174,7 @@ function renderInput(input: DecisionInput): string {
     input.context ? `## 背景\n${input.context}` : '',
     `## 选项（option_index 从 0 开始）\n${input.options.map((o, i) => `${i}. ${o.label}${o.detail ? `：${o.detail}` : ''}`).join('\n')}`,
     input.project ? `## 相关项目\n<project>${neutralizeTags(input.project, 'project', 'evidence')}</project>` : '',
+    input.sessions ? `## 相关 session 的当前状态与仓库实际状态（事实）\n${input.sessions}` : '',
     `## 证据\n${input.evidence || '（没有可读的证据）'}`,
   ].filter(Boolean).join('\n\n');
 }
@@ -208,7 +214,7 @@ export function jevDecider(opts: JevOptions): Decider {
       const criteria = Object.fromEntries(input.options.map((o, i) => [`o${i}`, `${o.label}${o.detail ? `：${o.detail}` : ''}`]));
       const body = {
         model: opts.model ?? 'jev-latest',
-        state: { question: input.question, context: input.context ?? '', project: input.project ?? '', evidence: input.evidence },
+        state: { question: input.question, context: input.context ?? '', project: input.project ?? '', sessions: input.sessions, evidence: input.evidence },
         questions: { answer: { type: 'choice', instructions: `Given \`evidence\` and \`project\`, which option answers \`question\`? Choose only what the evidence supports.`, criteria } },
       };
       let res: Response;

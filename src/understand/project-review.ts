@@ -5,6 +5,7 @@ import { reviewTarget } from '../domain/project-reviews.ts';
 import { curatorTools } from './curator-tools.ts';
 import type { CuratorBatch } from './curator-tools.ts';
 import { sessionProjectName } from '../domain/project-names.ts';
+import { projectSessionsContext } from './context.ts';
 import { digestTag, CURATOR_MAX_TURNS } from './curate.ts';
 import { neutralizeTags } from './digest.ts';
 import { recordRun } from './llm.ts';
@@ -121,6 +122,7 @@ export async function runProjectReview(db: DatabaseSync, deps: DomainDeps, runne
     `可引用的项目事件：${[...eventIds].map((id)=>`event:${id}`).join(', ')}`,
     '<project_records>'+neutralizeTags(projectText,'project_records','digest')+'</project_records>',
     `相关session：${family.sessions.join(', ')||'无'}；存在信息缺口的session：${family.gaps.join(', ')||'无'}。`,
+    '## 目标项目 session 的当前状态与仓库实际状态（事实）\n'+neutralizeTags(projectSessionsContext(db,job.project_id,deps.now()),'project_records','digest'),
     '## 本批历史摘要（包括以前已整理的摘要，按时间/写入顺序重放）',
     digests.map((d)=>digestTag(d,sessionProjectName(db,d.session_key))).join('\n')||'（没有可用摘要；仅使用现有项目记录和已确认事实）',
   ].join('\n\n');
