@@ -1,8 +1,10 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
+import { z } from 'zod';
 import type { ZodType } from 'zod';
 import { getActivity, MAX_ACTIVITY_DAYS } from '../domain/activity.ts';
+import { listReminders, snoozeReminder } from '../domain/reminders.ts';
 import { getEvidence, parseEvidenceRef } from '../domain/evidence.ts';
 import { sessionLinks } from '../domain/read.ts';
 import { defaultDeps } from '../domain/types.ts';
@@ -119,6 +121,14 @@ export function createApp(
     if (parseEvidenceRef(ref) === null) return c.json({ error: 'invalid' }, 400);
     const evidence = getEvidence(db, clock(), ref);
     return evidence === null ? c.json({ error: 'not_found' }, 404) : c.json(evidence);
+  });
+
+  // What waits on the user or has stalled, derived from sessions, projects and repositories (../domain/reminders.ts).
+  app.get('/reminders', (c) => c.json(listReminders(db, clock())));
+  app.post('/reminders/snooze', userAuth(config, db, clock), async (c) => {
+    const body = z.object({ key: z.string().min(1).max(2000), hours: z.number().int().min(1).max(24 * 90).nullable() }).strict().safeParse(await c.req.json().catch(() => undefined));
+    if (!body.success) return c.json({ error: 'invalid', message: z.prettifyError(body.error) }, 400);
+    return snoozeReminder(db, clock(), body.data.key, body.data.hours) ? c.json({ ok: true }) : c.json({ error: 'not_found', message: '这条提醒已经不存在' }, 404);
   });
 
   // Work and milestones per day over a period, for the overview and the review page (see ../domain/activity.ts).

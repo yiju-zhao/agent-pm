@@ -476,6 +476,16 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE session_sources ADD COLUMN workspace TEXT;
   `,
+  // v14: reminders the user put off. A reminder is derived from sessions, projects and repositories (see
+  // domain/reminders.ts); this only keeps "not now" (until a time) or "not again" (until it changes, by fingerprint).
+  `
+  CREATE TABLE reminder_snoozes (
+    key TEXT PRIMARY KEY,
+    until TEXT,
+    fingerprint TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  `,
 ];
 
 /** Opens (creating if needed) the central database in WAL mode and applies pending migrations. */

@@ -2042,3 +2042,21 @@ a.queue-more:hover { text-decoration: underline; }
 .same-members a { display: inline-block; padding: 1px 8px; border-radius: 2px; background: var(--color-paper-3); color: var(--color-ink-2); text-decoration: none; font-size: var(--text-sm); }
 .same-members a:hover { color: var(--color-accent-deep); }
 .merge-effects { font-size: var(--text-sm); color: var(--color-ink-2); padding-left: 1.2em; display: flex; flex-direction: column; gap: var(--space-2xs); }
+
+/* Reminders: nudges by category; they go away by themselves when the work moves on */
+.reminders { display: flex; flex-direction: column; gap: var(--space-sm); }
+.reminder-group { border-left: 2px solid var(--color-rule-2); padding-left: var(--space-sm); }
+.reminder-group.tone-bad { border-left-color: var(--color-error); }
+.reminder-group.tone-warn { border-left-color: var(--color-warning); }
+.reminder-group.tone-accent { border-left-color: var(--color-accent); }
+.reminder-hint { font-size: var(--text-xs); margin-bottom: var(--space-2xs); }
+.reminder-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 2px; }
+.reminder { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2xs) var(--space-sm); padding: 6px var(--space-xs); border-radius: var(--radius-input); font-size: var(--text-sm); }
+.reminder:hover { background: var(--color-paper-3); }
+.reminder-text { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; }
+.reminder-text strong { font-weight: 600; overflow-wrap: anywhere; }
+.reminder-text .dim { font-size: var(--text-xs); }
+.reminder-actions { display: flex; align-items: center; gap: var(--space-xs); font-size: var(--text-xs); }
+.reminder-actions a { color: var(--color-accent-deep); text-decoration: none; max-width: 16em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reminder-actions button { min-height: 24px; font-size: var(--text-xs); padding: 0 var(--space-xs); }
+.queue-note { font-size: var(--text-xs); margin-bottom: var(--space-2xs); }

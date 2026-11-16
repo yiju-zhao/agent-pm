@@ -6,6 +6,7 @@ import type { SessionListItem } from '../../../src/server/http.ts';
 import { errorText } from '../api.ts';
 import { projectHref } from '../components/project-card.tsx';
 import { QuestionCard } from '../components/question-card.tsx';
+import { Reminders, useReminderCount } from '../components/reminders.tsx';
 import { DayBars, Metric, Panel, ProgressBar, Sparkline, StagePipeline } from '../components/viz.tsx';
 import { relTime, shortDate, STATUS_LABEL, statusClass } from '../format.ts';
 import { splitQuestions } from '../home-model.ts';
@@ -17,9 +18,8 @@ import { useNow } from '../use-now.ts';
 // It only finds and points; editing stays on the project page.
 
 const ACTIVITY_DAYS = 14;
-/** The queue shows this many decisions and blockers in full; the rest are counted and linked. */
+/** The queue shows this many decisions in full; the rest are counted and linked. */
 const QUEUE_QUESTIONS = 3;
-const QUEUE_BLOCKERS = 6;
 const LIVE = new Set(['working', 'blocked', 'idle', 'unknown', 'done', 'offline']);
 const STATUS_ORDER = ['blocked', 'working', 'idle', 'done', 'unknown', 'offline'];
 
@@ -57,69 +57,32 @@ export function ActivityRow({ item, titles, now }: { item: ActivityItem; titles?
   );
 }
 
-function ActionQueue({ cards, sessions, coverage, questions, titles, now, reload }: {
-  cards: ProjectCard[]; sessions: SessionListItem[]; coverage: SourceCoverage[] | undefined; questions: QuestionView[]; titles: Map<string, string>; now: Date; reload(): void;
+function ActionQueue({ coverage, questions, titles, now, reload }: {
+  coverage: SourceCoverage[] | undefined; questions: QuestionView[]; titles: Map<string, string>; now: Date; reload(): void;
 }) {
   const { needYou, attribution } = splitQuestions(questions);
-  const waiting = sessions.filter((s) => s.effective_status === 'blocked' && !s.ignored);
-  // The server lists projects by priority; within a project, the newest blocker first.
-  // Only what waits on the user; technical and external blockers are the agents' and the world's, shown per project.
-  const open = cards.filter((c) => !c.closed).flatMap((c) => [...c.open_blockers].reverse().map((b) => ({ card: c, blocker: b })));
-  // A blocker the user was asked about shows as that question, not twice.
-  const asked = new Set(questions.map((q) => q.about_blocker).filter((id): id is string => id !== null));
-  const blocked = open.filter((b) => b.blocker.kind === 'user' && !asked.has(b.blocker.id));
-  const others = open.length - blocked.length;
   const faults = (coverage ?? []).filter((s) => s.state !== 'ok');
-  const stale = cards.filter((c) => !c.closed && (c.priority === 'P0' || c.priority === 'P1') && c.dormant_days !== null);
-  const empty = needYou.length + attribution.length + waiting.length + blocked.length + faults.length + stale.length === 0;
   return (
-    <Panel title="行动队列" meta={empty ? '没有待处理的事' : `${needYou.length} 个决定 · ${waiting.length} 个等你操作 · ${blocked.length} 个等你处理的阻塞`} className="queue">
-      {empty ? <p className="empty">一切正常：没有待你决定的问题、等你操作的 session 或阻塞。</p> : null}
-      {needYou.length > 0 ? (
-        <div className="queue-group">
-          <h3 className="group-label">{`待你决定 · ${needYou.length}`}</h3>
-          {needYou.slice(0, QUEUE_QUESTIONS).map((q) => <QuestionCard key={q.id} question={q} projectTitle={q.project_id ? titles.get(q.project_id) : undefined} onDone={reload} />)}
-          {needYou.length > QUEUE_QUESTIONS ? <a className="queue-more" href="#/inbox">{`另有 ${needYou.length - QUEUE_QUESTIONS} 个待决定 → Inbox`}</a> : null}
-        </div>
-      ) : null}
-      {attribution.length > 0 ? (
-        <a className="queue-row" href="#/inbox">
-          <span className="tag is-warn">归属</span>
-          <span className="queue-text">{`${attribution.length} 个 session 等你决定属于哪个项目`}</span>
-          <span className="queue-go">去 Inbox</span>
-        </a>
-      ) : null}
-      {waiting.length > 0 ? (
-        <div className="queue-group">
-          <h3 className="group-label">{`等你操作 · ${waiting.length}`}</h3>
-          {waiting.map((s) => (
-            <a key={s.key} className="queue-row" href={s.linked_projects[0] ? projectHref(s.linked_projects[0].id) : '#/sessions'}>
-              <span className="dot-cell"><i className={`sdot ${statusClass(s.effective_status)}`} /></span>
-              <span className="queue-text">
-                <strong>{s.title || s.short_id}</strong>
-                <span className="dim">{` · ${s.machine} · ${s.linked_projects.map((p) => p.title).join('、') || '未归属'}`}</span>
-              </span>
-              <span className="queue-go mono">{s.short_id}</span>
-            </a>
-          ))}
-        </div>
-      ) : null}
-      {blocked.length > 0 ? (
-        <div className="queue-group">
-          <h3 className="group-label">{`等你处理的阻塞 · ${blocked.length}`}</h3>
-          {blocked.slice(0, QUEUE_BLOCKERS).map(({ card, blocker }) => (
-            <a key={blocker.id} className="queue-row" href={projectHref(card.id)}>
-              <span className={`tag prio-${(card.priority ?? 'none').toLowerCase()}`}>{card.priority ?? '—'}</span>
-              <span className="queue-text">
-                <strong>{blocker.text}</strong>
-                <span className="dim">{` · ${card.title} · ${relTime(blocker.created_at, now)}`}</span>
-              </span>
-            </a>
-          ))}
-          {blocked.length > QUEUE_BLOCKERS ? <p className="queue-more">{`另有 ${blocked.length - QUEUE_BLOCKERS} 个，分布在 ${new Set(blocked.slice(QUEUE_BLOCKERS).map((b) => b.card.id)).size} 个项目，见项目组合的「阻塞」列`}</p> : null}
-        </div>
-      ) : null}
-      {others > 0 ? <p className="queue-more">{`另有 ${others} 个技术或外部阻塞由 agent 处理或在等外部条件，不需要你操作；AI 会按新进展自动复核，已解决的会自动解除。`}</p> : null}
+    <Panel title="行动队列" meta={`${needYou.length + attribution.length} 个需要你决策 · 提醒随进展自动更新`} className="queue">
+      <div className="queue-group">
+        <h3 className="group-label">{`需要你决策 · ${needYou.length + attribution.length}`}</h3>
+        <p className="dim queue-note">只有看板本身的事（项目归并、阶段、你锁定的内容）需要在这里决定。</p>
+        {needYou.length + attribution.length === 0 ? <p className="empty">没有需要你在 agent-pm 里决定的事。</p> : null}
+        {needYou.slice(0, QUEUE_QUESTIONS).map((q) => <QuestionCard key={q.id} question={q} projectTitle={q.project_id ? titles.get(q.project_id) : undefined} onDone={reload} />)}
+        {needYou.length > QUEUE_QUESTIONS ? <a className="queue-more" href="#/inbox">{`另有 ${needYou.length - QUEUE_QUESTIONS} 个待决定 → Inbox`}</a> : null}
+        {attribution.length > 0 ? (
+          <a className="queue-row" href="#/inbox">
+            <span className="tag is-warn">归属</span>
+            <span className="queue-text">{`${attribution.length} 个 session 等你决定属于哪个项目`}</span>
+            <span className="queue-go">去 Inbox</span>
+          </a>
+        ) : null}
+      </div>
+      <div className="queue-group">
+        <h3 className="group-label">提醒</h3>
+        <p className="dim queue-note">从 session、项目和仓库的实际状态得出；去对应的 session 处理，进展后会自动消失。</p>
+        <Reminders compact />
+      </div>
       {faults.length > 0 ? (
         <div className="queue-group">
           <h3 className="group-label">{`采集异常 · ${faults.length}`}</h3>
@@ -130,17 +93,6 @@ function ActionQueue({ cards, sessions, coverage, questions, titles, now, reload
                 <strong>{s.source_id}</strong>
                 <span className="dim">{` · ${s.state === 'never_reported' ? '已配置但从未上报' : s.state === 'offline' ? `采集器离线，最近心跳 ${s.collector_heartbeat ? relTime(s.collector_heartbeat, now) : '无'}` : 'daemon 未连接'}`}</span>
               </span>
-            </a>
-          ))}
-        </div>
-      ) : null}
-      {stale.length > 0 ? (
-        <div className="queue-group">
-          <h3 className="group-label">{`高优先级但停滞 · ${stale.length}`}</h3>
-          {stale.map((c) => (
-            <a key={c.id} className="queue-row" href={projectHref(c.id)}>
-              <span className={`tag prio-${(c.priority ?? 'none').toLowerCase()}`}>{c.priority}</span>
-              <span className="queue-text"><strong>{c.title}</strong><span className="dim">{` · ${c.dormant_days} 天没有动静`}</span></span>
             </a>
           ))}
         </div>
@@ -263,8 +215,7 @@ export function OverviewPage() {
   const pending = splitQuestions(inbox?.data ?? []);
   const live = list.filter((s) => LIVE.has(s.effective_status) && !s.ignored);
   const unlinked = live.filter((s) => s.linked_projects.length === 0);
-  const allBlockers = cards.filter((c) => !c.closed).flatMap((c) => c.open_blockers);
-  const blockers = allBlockers.filter((b) => b.kind === 'user').length;
+  const reminderCount = useReminderCount();
   const faults = (coverage.data ?? []).filter((s) => s.state !== 'ok').length;
   const a = activity.data;
   const reload = () => {
@@ -282,15 +233,15 @@ export function OverviewPage() {
         </div>
       ) : null}
       <div className="metrics" role="group" aria-label="关键指标">
-        <Metric label="待你决定" value={pending.needYou.length} tone={pending.needYou.length > 0 ? 'warn' : undefined} href="#/inbox" />
+        <Metric label="需要你决策" value={pending.needYou.length + pending.attribution.length} tone={pending.needYou.length + pending.attribution.length > 0 ? 'warn' : undefined} href="#/inbox" />
         <Metric label="等你操作" value={live.filter((s) => s.effective_status === 'blocked').length} tone={live.some((s) => s.effective_status === 'blocked') ? 'bad' : undefined} />
         <Metric label="运行中" value={live.filter((s) => s.effective_status === 'working').length} tone="ok" hint={`共 ${live.length} 个在线`} href="#/sessions" />
         <Metric label="未归属 session" value={unlinked.length} tone={unlinked.length > 0 ? 'warn' : undefined} href="#/sessions" />
-        <Metric label="等你处理的阻塞" value={blockers} tone={blockers > 0 ? 'bad' : undefined} hint={allBlockers.length > blockers ? `另有 ${allBlockers.length - blockers} 个技术/外部` : undefined} />
+        <Metric label="提醒" value={reminderCount ?? '—'} tone={(reminderCount ?? 0) > 0 ? 'accent' : undefined} href="#/inbox" hint="随进展自动更新" />
         <Metric label="采集异常" value={coverage.data === undefined ? '—' : faults} tone={faults > 0 ? 'bad' : undefined} href="#/sessions" hint={coverage.data === undefined ? '需要登录' : undefined} />
       </div>
       <div className="console-grid">
-        <ActionQueue cards={cards} sessions={list} coverage={coverage.data} questions={inbox?.data ?? []} titles={titles} now={now} reload={reload} />
+        <ActionQueue coverage={coverage.data} questions={inbox?.data ?? []} titles={titles} now={now} reload={reload} />
         <Fleet sessions={list} now={now} />
         <Portfolio cards={cards} activity={a} now={now} />
         <Panel title="工作量" meta={a ? `近 ${ACTIVITY_DAYS} 天收到 ${a.total_daily.reduce((x, y) => x + y, 0)} 段对话，其中未归属 ${a.unlinked_daily.reduce((x, y) => x + y, 0)} 段` : '加载中…'} actions={<a href="#/review">打开复盘 →</a>} className="volume">

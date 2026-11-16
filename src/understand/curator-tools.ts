@@ -155,7 +155,7 @@ const WRITE_OPS = [
   },
   {
     op: 'set_blocker',
-    description: '新增阻塞（text、kind: user/external/technical），或带 id 修改已有阻塞。阻塞只记真正卡住项目推进、且对话结束时仍未解决的事；进度说明、待验证事项、要修的 bug 记成 todo，需要用户拍板的事用 ask_user。kind=user 只用于必须用户本人行动的事。先看项目已有的阻塞，不重复记录。',
+    description: '新增阻塞（text、kind: user/external/technical），或带 id 修改已有阻塞。阻塞只记真正卡住项目推进、且对话结束时仍未解决的事；进度说明、待验证事项、要修的 bug 记成 todo。kind=user 用于 session 在等用户回复、拍板或动手的事（会作为提醒显示给用户），text 写清等的是什么。先看项目已有的阻塞，不重复记录。',
   },
   {
     op: 'clear_blocker',
@@ -251,7 +251,8 @@ const ASK_INPUT = {
 };
 
 const ASK_DESCRIPTION = [
-  '向用户提一个必须由用户拍板的问题。why_user 只能是：user_authority（用户才能做的决定）、conflict（用户自己的指示互相矛盾）、risk（安全、不可逆）、missing_information（对话里没有、也推断不出的事实）。',
+  '就看板本身的事向用户提一个必须由用户拍板的问题（why_user=user_authority），例如两个项目是否其实是同一个、项目阶段、用户锁定的内容。',
+  'agent-pm 只读 agent 的工作，在这里的回答到不了 agent：session 里的工作问题（指示冲突、风险、缺少信息、等用户回复或动手）不要问，用 set_blocker kind=user 记下，它会作为提醒显示给用户，并随进展自动消失。',
   'session 属于哪个项目、要不要新建项目由你自己决定，不要问（这类问题会被拒绝）。',
   'context 用一两句说清发生了什么；prompt 只写问题本身，一句话。能问是/否就用 kind=confirm（给一个 option，系统自动加"拒绝"）；',
   '多选用 kind=choice，最多 4 个 options，每个写 detail 说明选它会怎样；只有缺事实时才用 kind=text（要 text_arg，用户的输入填进去）。',

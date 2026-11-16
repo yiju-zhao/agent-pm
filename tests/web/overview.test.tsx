@@ -7,6 +7,7 @@ import type { SourceCoverage } from '../../src/server/coverage.ts';
 import { ToastProvider } from '../../web/src/components/toast.tsx';
 import { InboxProvider } from '../../web/src/inbox.tsx';
 import { OverviewPage } from '../../web/src/pages/overview.tsx';
+import type { Reminder } from '../../src/domain/reminders.ts';
 import { activity, item, projectActivity, source } from './console-fixtures.ts';
 import { blocker, card, question, sessionItem } from './fixtures.ts';
 
@@ -14,19 +15,20 @@ import { blocker, card, question, sessionItem } from './fixtures.ts';
 
 const fetchMock = vi.fn<typeof fetch>();
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
-let data: { projects: ProjectCard[]; sessions: SessionListItem[]; questions: QuestionView[]; coverage: SourceCoverage[] | null; activity: ReturnType<typeof activity> };
+let data: { projects: ProjectCard[]; sessions: SessionListItem[]; questions: QuestionView[]; coverage: SourceCoverage[] | null; activity: ReturnType<typeof activity>; reminders: Reminder[] };
 
 beforeAll(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 });
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-11-15T09:00:00.000Z') });
-  data = { projects: [], sessions: [], questions: [], coverage: [], activity: activity() };
+  data = { projects: [], sessions: [], questions: [], coverage: [], activity: activity(), reminders: [] };
   fetchMock.mockReset().mockImplementation(async (input) => {
     const path = String(input);
     if (path === '/projects') return json(data.projects);
     if (path === '/sessions') return json(data.sessions);
     if (path === '/questions?status=pending') return json(data.questions);
+    if (path === '/reminders') return json(data.reminders);
     if (path === '/coverage') return data.coverage === null ? json({ error: 'unauthorized' }, 401) : json(data.coverage);
     if (path.startsWith('/activity?days=14&tz=')) return json(data.activity);
     return json({ error: 'not_found' }, 404);
@@ -41,63 +43,11 @@ afterEach(() => {
 
 async function renderPage() {
   render(<ToastProvider><InboxProvider><OverviewPage /></InboxProvider></ToastProvider>);
-  await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(5));
+  await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(6));
   await screen.findByRole('region', { name: '项目组合' });
 }
 const panel = (name: string) => screen.getByRole('region', { name });
 const metric = (label: string) => within(screen.getByRole('group', { name: '关键指标' })).getByText(label).parentElement!;
-
-test('the key numbers count what needs the user, what runs and what is wrong', async () => {
-  data.questions = [question({ id: 'q_1', session_key: null }), question({ id: 'q_2', project_id: null, session_key: 'claude:x' })];
-  data.sessions = [
-    sessionItem({ key: 'a', effective_status: 'working', linked_projects: [{ id: 'p_1', title: 'dLLM 评测框架' }] }),
-    sessionItem({ key: 'b', effective_status: 'blocked', linked_projects: [] }),
-    sessionItem({ key: 'c', effective_status: 'ended', linked_projects: [] }),
-  ];
-  data.projects = [
-    card({ open_blockers: [blocker({ id: 'b_1', kind: 'user' }), blocker({ id: 'b_2', kind: 'user' }), blocker({ id: 'b_4', kind: 'technical' })] }),
-    card({ id: 'p_2', closed: true, stage: 'done', open_blockers: [blocker({ id: 'b_3', kind: 'user' })] }),
-  ];
-  data.coverage = [source(), source({ source_id: 'herdr:gx10', state: 'offline' })];
-  await renderPage();
-  await waitFor(() => expect(metric('待你决定').textContent).toContain('1'));
-  expect(metric('等你操作').textContent).toContain('1');
-  expect(metric('运行中').textContent).toBe('运行中1共 2 个在线');
-  expect(metric('未归属 session').textContent).toContain('1');
-  // Only what waits on the user counts; the technical one is mentioned beside it.
-  expect(metric('等你处理的阻塞').textContent).toBe('等你处理的阻塞2另有 1 个技术/外部');
-  await waitFor(() => expect(metric('采集异常').textContent).toContain('1'));
-});
-
-test('the action queue lists decisions, waiting agents, blockers, collection faults and stalled priorities, each with a way in', async () => {
-  data.questions = [1, 2, 3, 4].map((n) => question({ id: `q_${n}`, prompt: `问题 ${n}`, session_key: null }));
-  data.sessions = [sessionItem({ key: 'w', title: '等我确认的 agent', short_id: 'deadbeef', effective_status: 'blocked', linked_projects: [{ id: 'p_1', title: 'dLLM 评测框架' }] })];
-  data.projects = [
-    card({ open_blockers: [...Array.from({ length: 8 }, (_, i) => blocker({ id: `b_${i}`, kind: 'user', text: `阻塞 ${i}` })), blocker({ id: 'b_tech', kind: 'technical', text: '技术阻塞' })] }),
-    card({ id: 'p_2', title: '停了的 P1', priority: 'P1', dormant_days: 9 }),
-  ];
-  data.coverage = [source({ source_id: 'herdr:never', state: 'never_reported', collector_heartbeat: null })];
-  await renderPage();
-  const queue = panel('行动队列');
-  await waitFor(() => expect(within(queue).getByText('问题 1')).toBeTruthy());
-  expect(within(queue).queryByText('问题 4')).toBeNull();
-  expect(within(queue).getByRole('link', { name: '另有 1 个待决定 → Inbox' }).getAttribute('href')).toBe('#/inbox');
-  expect(within(queue).getByText('等我确认的 agent').closest('a')!.getAttribute('href')).toBe('#/p/p_1');
-  // The newest blockers first, six of them, the rest counted.
-  expect(within(queue).getByText('阻塞 7')).toBeTruthy();
-  expect(within(queue).queryByText('阻塞 1')).toBeNull();
-  expect(within(queue).getByText(/另有 2 个，分布在/)).toBeTruthy();
-  expect(within(queue).queryByText('技术阻塞')).toBeNull();
-  expect(within(queue).getByText(/另有 1 个技术或外部阻塞由 agent 处理/)).toBeTruthy();
-  await waitFor(() => expect(within(queue).getByText('herdr:never')).toBeTruthy());
-  expect(within(queue).getByText(/已配置但从未上报/)).toBeTruthy();
-  expect(within(queue).getByText('停了的 P1').closest('a')!.getAttribute('href')).toBe('#/p/p_2');
-});
-
-test('with nothing pending the queue says so', async () => {
-  await renderPage();
-  await waitFor(() => expect(within(panel('行动队列')).getByText(/一切正常/)).toBeTruthy());
-});
 
 test('the fleet shows each machine as a lane of its live sessions, the waiting ones first, unlinked ones marked', async () => {
   data.sessions = [
@@ -147,12 +97,53 @@ test('recent changes list the period’s milestones with their project, and the 
   expect(within(panel('工作量')).getByText(/收到 7 段对话，其中未归属 1 段/)).toBeTruthy();
 });
 
-test('a blocker the user was asked about shows only as that question', async () => {
-  data.projects = [card({ open_blockers: [blocker({ id: 'b_1', kind: 'user', text: '需要你推送' }), blocker({ id: 'b_2', kind: 'user', text: '需要你试听' })] })];
-  data.questions = [question({ id: 'q_b', prompt: '已经推送了吗？', session_key: null, about_blocker: 'b_1' })];
+
+const reminder = (over: Partial<Reminder>): Reminder => ({ key: 'blocker:b_1', category: 'waiting_you', text: '等你试听成片', detail: 'd', project_id: 'p_1', project_title: 'openlingo', session_key: null, short_id: null, since: null, fingerprint: 'f', ...over });
+
+test('the key numbers count decisions for the user, reminders, what runs and what is wrong', async () => {
+  data.questions = [question({ id: 'q_1', session_key: null }), question({ id: 'q_2', project_id: null, session_key: 'claude:x' })];
+  data.sessions = [
+    sessionItem({ key: 'a', effective_status: 'working', linked_projects: [{ id: 'p_1', title: 'dLLM 评测框架' }] }),
+    sessionItem({ key: 'b', effective_status: 'blocked', linked_projects: [] }),
+    sessionItem({ key: 'c', effective_status: 'ended', linked_projects: [] }),
+  ];
+  data.reminders = [reminder({}), reminder({ key: 'repo:/w', category: 'unpushed', text: '有 5 个提交没有推送' })];
+  data.coverage = [source(), source({ source_id: 'herdr:gx10', state: 'offline' })];
+  await renderPage();
+  await waitFor(() => expect(metric('需要你决策').textContent).toContain('2'));
+  expect(metric('等你操作').textContent).toContain('1');
+  expect(metric('运行中').textContent).toBe('运行中1共 2 个在线');
+  expect(metric('未归属 session').textContent).toContain('1');
+  await waitFor(() => expect(metric('提醒').textContent).toBe('提醒2随进展自动更新'));
+  await waitFor(() => expect(metric('采集异常').textContent).toContain('1'));
+});
+
+test('the queue separates decisions about the board from reminders, which carry no options to answer', async () => {
+  data.questions = [1, 2, 3, 4].map((n) => question({ id: `q_${n}`, prompt: `问题 ${n}`, session_key: null }));
+  data.reminders = [
+    reminder({ key: 'session:s', category: 'agent_waiting', text: '「打磨采集」在等你操作', project_id: null, project_title: null }),
+    reminder({}),
+    reminder({ key: 'stalled:p_2', category: 'stalled', text: 'P1 项目「CBRS」已经 12 天没有进展', project_id: 'p_2', project_title: 'CBRS' }),
+  ];
+  data.coverage = [source({ source_id: 'herdr:never', state: 'never_reported', collector_heartbeat: null })];
   await renderPage();
   const queue = panel('行动队列');
-  await waitFor(() => expect(within(queue).getByText('已经推送了吗？')).toBeTruthy());
-  expect(within(queue).queryByText('需要你推送')).toBeNull();
-  expect(within(queue).getByText('需要你试听')).toBeTruthy();
+  await waitFor(() => expect(within(queue).getByText('问题 1')).toBeTruthy());
+  expect(within(queue).queryByText('问题 4')).toBeNull();
+  expect(within(queue).getByRole('link', { name: '另有 1 个待决定 → Inbox' }).getAttribute('href')).toBe('#/inbox');
+  const waiting = await within(queue).findByRole('region', { name: 'agent 在等你' });
+  expect(within(waiting).getByText('「打磨采集」在等你操作')).toBeTruthy();
+  const you = within(queue).getByRole('region', { name: '等你回复或动手' });
+  expect(within(you).getByRole('link', { name: 'openlingo' }).getAttribute('href')).toBe('#/p/p_1');
+  // A reminder is not a question: no answer buttons, no put-off buttons in the compact view.
+  expect(within(you).queryByRole('button')).toBeNull();
+  expect(within(queue).getByRole('region', { name: '需要继续推进' })).toBeTruthy();
+  await waitFor(() => expect(within(queue).getByText('herdr:never')).toBeTruthy());
+});
+
+test('with nothing to decide or remind, the queue says so', async () => {
+  await renderPage();
+  const queue = panel('行动队列');
+  await waitFor(() => expect(within(queue).getByText('没有需要你在 agent-pm 里决定的事。')).toBeTruthy());
+  await waitFor(() => expect(within(queue).getByText(/没有需要提醒的事/)).toBeTruthy());
 });

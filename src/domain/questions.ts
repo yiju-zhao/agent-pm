@@ -330,7 +330,14 @@ export function shapeAiQuestion(ask: AskUserInput): { ok: true; ask: AskUserInpu
       message: 'session 归属哪个项目、要不要新建项目，由你自己判断：用 link_session（拿不准时给较低的 confidence）或 create_project；确实无关的工作不记录即可。不要问用户。',
     };
   }
-  if (ask.kind === 'text' && ask.why_user !== 'missing_information') return { ok: false, message: '只有缺少对话里没有的事实（why_user=missing_information）时才能让用户填写文字；能给选项就给选项。' };
+  // agent-pm only reads the agents' work: an answer here reaches no agent. Questions about that work (conflicting
+  // instructions, risks, missing facts) are the agent's to ask in its session; here they are reminders.
+  if (ask.why_user !== 'user_authority') {
+    return {
+      ok: false,
+      message: '只有看板本身的事（项目归并、阶段、你锁定的内容、关联）才问用户。session 里的工作问题（指示冲突、风险、缺少信息、等用户回复）用 set_blocker kind=user 记下，会作为提醒显示给用户。',
+    };
+  }
   if (ask.kind === 'choice') {
     if (ask.options.length > 4) return { ok: false, message: '选项最多 4 个：合并相近的选项，或拆成一个是/否问题。' };
     const doing = ask.options.filter((o) => o.op !== null);

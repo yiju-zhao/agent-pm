@@ -66,7 +66,7 @@ const SYSTEM_PROMPT = [
   '   它如果是在为某个已有项目的目标服务（一个 feature、一次 bug 修复、一项调研），不要建项目：关联到那个项目，并记成它的里程碑或 todo。',
   '   同一批里多条摘要指向同一个新目标时只建一个项目，其余 session 用 `link_session` 关联过去。',
   '4. 归属由你决定，不问用户：session 像某个已有项目就 `link_session`，拿不准时 confidence 填 0.5 左右；像哪个都不像、又是长期工作就按规则 3 新建；一次性的零碎工作不记录。',
-  '   需要用户的只有四类（ask_user 的 why_user）：user_authority 用户才能做的决定、conflict 用户自己的指示互相矛盾、risk 安全或不可逆的事、missing_information 对话里没有的事实。',
+  '   ask_user 只用于看板本身的事（项目是否同一个、阶段、用户锁定的内容）。agent-pm 只读 agent 的工作，在这里回答到不了 agent：session 里在等用户回复、拍板或动手的事，用 set_blocker kind=user 记下，会作为提醒显示，并随进展自动消失。',
   '   提问要好回答：context 一两句说清发生了什么，prompt 只写问题；能问是/否就用 confirm；多选最多 4 项，每项写 detail；给 recommended 和 recommend_reason。待回答的问题里已经有的，不要再问。',
   '5. 已有项目的更新：先用 `get_project`（参数是 `project_id`）看一眼，避免重复添加。只记摘要里明确出现的事实：',
   '   `upsert_todo`、`upsert_milestone`、`set_blocker`、`clear_blocker`、`record_decision`、`update_project`、`transition_stage`。',

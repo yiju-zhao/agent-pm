@@ -168,6 +168,8 @@ const WRITE_ROUTES: Array<[method: string, pattern: string, body?: unknown]> = [
   ['POST', '/events/:id/revert'],
   ['POST', '/questions/:id/answer', { option_index: 0 }],
   ['POST', '/questions/:id/dismiss'],
+  // Putting a reminder off (reminders.test.ts).
+  ['POST', '/reminders/snooze', { key: 'blocker:x', hours: 1 }],
   // Merge previews (merge-routes.test.ts): starting one calls the model, applying one writes.
   ['POST', '/projects/:id/merge-previews', { target: 'x' }],
   ['POST', '/merge-previews/:id/apply', {}],

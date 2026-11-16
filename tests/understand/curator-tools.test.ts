@@ -380,7 +380,7 @@ test('ask_user stores a question with what happened, why the user decides, and a
     kind: 'choice',
     prompt: '批准哪些条目？',
     context: '你前半句说整包批准，后半句只批准 09、10、17。',
-    why_user: 'conflict',
+    why_user: 'user_authority',
     project_id: p,
     topic: 'approve',
     evidence: [`digest:${d1}`],
@@ -397,16 +397,16 @@ test('ask_user stores a question with what happened, why the user decides, and a
     kind: 'choice',
     created_by: 'ai:curator',
     context: '你前半句说整包批准，后半句只批准 09、10、17。',
-    why_user: 'conflict',
+    why_user: 'user_authority',
     recommended: 1,
     recommend_reason: '后半句更具体，也是最后说的',
     dedupe_key: `ask:${p}:-:approve`,
   });
 });
 
-test('ask_user turns "do it or not" into a yes/no question, caps choices at four, and keeps free text for missing facts', async () => {
+test('ask_user turns "do it or not" into a yes/no question, caps choices at four, and leaves work questions to reminders', async () => {
   const p = t.user('create_project', { title: 'P' }).id;
-  const base = { context: 'c', why_user: 'risk', project_id: p, evidence: [`digest:${d1}`] };
+  const base = { context: 'c', why_user: 'user_authority', project_id: p, evidence: [`digest:${d1}`] };
   const yesNo = await call('ask_user', {
     ...base, kind: 'choice', prompt: '要清理 Git 历史吗？', topic: 'yn', recommended: 0,
     options: [{ label: '清理', op: 'record_decision', args: { project: p, text: '清理历史' } }, { label: '保留', op: null }],
@@ -421,8 +421,10 @@ test('ask_user turns "do it or not" into a yes/no question, caps choices at four
   });
   expect(five.result.message).toContain('最多 4 个');
 
-  const text = await call('ask_user', { ...base, kind: 'text', prompt: '为什么？', topic: 'why', option: { label: '原因', op: 'update_project', args: { project: p, fields: {} }, text_arg: 'fields.why' } });
-  expect(text.result.message).toContain('missing_information');
+  for (const why of ['conflict', 'risk', 'missing_information']) {
+    const work = await call('ask_user', { ...base, why_user: why, kind: 'confirm', prompt: '放行删除吗？', topic: why, option: { label: '放行', op: 'record_decision', args: { project: p, text: '放行' } } });
+    expect(work.result.message).toContain('set_blocker kind=user');
+  }
   const bare = await call('ask_user', { kind: 'confirm', prompt: '开工吗？', project_id: p, evidence: [`digest:${d1}`], option: { label: '开工', op: 'transition_stage', args: { project: p, stage: 'build' } } });
   expect(bare.result.message).toContain('context');
 });
@@ -446,7 +448,7 @@ test('ask_user accepts the confirm and text shapes', async () => {
   const text = await call('ask_user', {
     kind: 'text',
     context: '对话里没有提完成标准',
-    why_user: 'missing_information',
+    why_user: 'user_authority',
     prompt: '完成标准是什么？',
     topic: 't',
     evidence: [`chunk:${c1}`],
@@ -550,7 +552,7 @@ test('the batch counts tool calls that came back applied or proposed (questions 
     kind: 'choice',
     prompt: '先看哪个？',
     context: '两个方向都在对话里出现过',
-    why_user: 'missing_information',
+    why_user: 'user_authority',
     project_id: p,
     session_key: null,
     topic: 'owner',
