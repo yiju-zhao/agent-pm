@@ -21,7 +21,7 @@ export const CATEGORY: Record<ReminderCategory, { label: string; hint: string; t
 
 export const REMINDERS_PATH = '/reminders';
 
-function ReminderRow({ r, reload, compact }: { r: Reminder; reload(): void; compact: boolean }) {
+function ReminderRow({ r, reload, compact, inProject = false }: { r: Reminder; reload(): void; compact: boolean; inProject?: boolean }) {
   const toast = useToast();
   const now = useNow();
   const [busy, setBusy] = useState(false);
@@ -41,13 +41,14 @@ function ReminderRow({ r, reload, compact }: { r: Reminder; reload(): void; comp
   return (
     <li className={`reminder tone-${CATEGORY[r.category].tone}`} aria-label={r.text}>
       <span className="reminder-text">
+        {inProject ? <span className={`reminder-kind tone-${CATEGORY[r.category].tone}`}>{CATEGORY[r.category].label}</span> : null}
         <strong>{r.text}</strong>
         <span className="dim">
           {[r.project_id ? null : r.project_title, r.detail, r.since ? relTime(r.since, now) : null].filter(Boolean).join(' · ')}
         </span>
       </span>
       <span className="reminder-actions">
-        {r.project_id ? <a href={projectHref(r.project_id)}>{r.project_title ?? '项目'}</a> : null}
+        {r.project_id && !inProject ? <a href={projectHref(r.project_id)}>{r.project_title ?? '项目'}</a> : null}
         {!compact ? (
           <>
             {blockerId && r.project_id ? (
@@ -64,13 +65,17 @@ function ReminderRow({ r, reload, compact }: { r: Reminder; reload(): void; comp
   );
 }
 
-/** The reminders by category; `compact` shows a few per category without the put-off buttons (the command center). */
-export function Reminders({ compact = false, perCategory = compact ? 3 : Infinity }: { compact?: boolean; perCategory?: number }) {
+/**
+ * The reminders, by category (the command center: `compact`, a few per category, no put-off buttons) or by project
+ * (the Inbox: each project's reminders together, the projects that wait on the user first).
+ */
+export function Reminders({ compact = false, perCategory = compact ? 3 : Infinity, groupBy = 'category' }: { compact?: boolean; perCategory?: number; groupBy?: 'category' | 'project' }) {
   const reminders = useApi<Reminder[]>(REMINDERS_PATH, ['projects', 'sessions', 'questions']);
   const list = reminders.data ?? [];
   if (reminders.error) return <p className="dim">{`读不到提醒：${errorText(reminders.error)}`}</p>;
   if (reminders.data === undefined) return <p className="dim">加载中…</p>;
   if (list.length === 0) return <p className="empty">没有需要提醒的事：没有 agent 在等你，项目都在推进。</p>;
+  if (groupBy === 'project') return <ByProject list={list} reload={reminders.reload} />;
   const groups = (Object.keys(CATEGORY) as ReminderCategory[]).map((c) => ({ c, items: list.filter((r) => r.category === c) })).filter((g) => g.items.length > 0);
   return (
     <div className="reminders">
@@ -84,6 +89,41 @@ export function Reminders({ compact = false, perCategory = compact ? 3 : Infinit
           {items.length > perCategory ? <a className="queue-more" href="#/inbox">{`另有 ${items.length - perCategory} 条 → Inbox`}</a> : null}
         </section>
       ))}
+    </div>
+  );
+}
+
+const RANK = Object.keys(CATEGORY) as ReminderCategory[];
+
+/** Each project's reminders together, most pressing first inside; projects ordered by their most pressing reminder. */
+function ByProject({ list, reload }: { list: Reminder[]; reload(): void }) {
+  const groups = new Map<string, { id: string | null; title: string; items: Reminder[] }>();
+  for (const r of list) {
+    const key = r.project_id ?? '';
+    const g = groups.get(key) ?? { id: r.project_id, title: r.project_title ?? '未归属项目', items: [] };
+    g.items.push(r);
+    groups.set(key, g);
+  }
+  const top = (g: { items: Reminder[] }) => Math.min(...g.items.map((r) => RANK.indexOf(r.category)));
+  const ordered = [...groups.values()]
+    .map((g) => ({ ...g, items: [...g.items].sort((a, b) => RANK.indexOf(a.category) - RANK.indexOf(b.category)) }))
+    .sort((a, b) => (a.id === null ? 1 : 0) - (b.id === null ? 1 : 0) || top(a) - top(b) || b.items.length - a.items.length || a.title.localeCompare(b.title));
+  return (
+    <div className="reminders by-project">
+      {ordered.map((g) => {
+        const counts = RANK.map((c) => [c, g.items.filter((r) => r.category === c).length] as const).filter(([, n]) => n > 0);
+        return (
+          <section key={g.id ?? 'none'} className={`reminder-project tone-${CATEGORY[g.items[0]!.category].tone}`} aria-label={g.title}>
+            <header className="reminder-project-head">
+              {g.id ? <a href={projectHref(g.id)}><strong>{g.title}</strong></a> : <strong>{g.title}</strong>}
+              <span className="reminder-counts">{counts.map(([c, n]) => <span key={c} className={`reminder-kind tone-${CATEGORY[c].tone}`}>{`${CATEGORY[c].label} ${n}`}</span>)}</span>
+            </header>
+            <ul className="reminder-list">
+              {g.items.map((r) => <ReminderRow key={r.key} r={r} reload={reload} compact={false} inProject />)}
+            </ul>
+          </section>
+        );
+      })}
     </div>
   );
 }

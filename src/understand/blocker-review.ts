@@ -65,18 +65,32 @@ const SYSTEM = [
 
 type Blocker = { id: string; text: string; kind: string; created_at: string; created_by: string; reviewed_at: string | null };
 
-/** The next project with an open blocker that was never reviewed, or that got digests since it was. */
-export function pickBlockerReview(db: DatabaseSync): string | null {
+/**
+ * Every open blocker is looked at again at least this often, new digests or not: work finishes in other sessions and
+ * on disk too, and a reminder must not outlive what it reminds of.
+ */
+export const REREVIEW_AFTER_MS = 6 * 3600_000;
+
+/** Makes every open blocker due for review at once (the user asked for a fresh look). */
+export function requestBlockerReviews(db: DatabaseSync): void {
+  db.prepare("UPDATE blockers SET reviewed_at = NULL WHERE status = 'open' AND deleted_at IS NULL").run();
+}
+
+/**
+ * The next project with an open blocker that was never reviewed, got digests since it was, or was last reviewed
+ * `REREVIEW_AFTER_MS` ago; the longest unreviewed first.
+ */
+export function pickBlockerReview(db: DatabaseSync, now: Date): string | null {
   const row = db
     .prepare(
       `SELECT b.project_id AS id FROM blockers b JOIN projects p ON p.id = b.project_id
        WHERE b.status = 'open' AND b.deleted_at IS NULL AND p.deleted_at IS NULL AND p.stage NOT IN ('done', 'abandoned', 'merged')
-         AND (b.reviewed_at IS NULL OR EXISTS (
+         AND (b.reviewed_at IS NULL OR b.reviewed_at < ? OR EXISTS (
            SELECT 1 FROM digests d JOIN contributions c ON c.session_key = d.session_key AND c.project_id = b.project_id AND c.deleted_at IS NULL
            WHERE d.json IS NOT NULL AND d.created_at > b.reviewed_at))
        GROUP BY b.project_id ORDER BY min(coalesce(b.reviewed_at, '')), min(b.created_at) LIMIT 1`,
     )
-    .get() as { id: string } | undefined;
+    .get(new Date(now.getTime() - REREVIEW_AFTER_MS).toISOString()) as { id: string } | undefined;
   return row?.id ?? null;
 }
 

@@ -11,7 +11,7 @@ import { pickProjectReview, reviewDigestDependency, reviewFailure, runProjectRev
 import type { ProjectReview } from './project-review.ts';
 import { markStageReviewed, pickRestageBatch, runRestage } from './restage.ts';
 import { llmDecider, pickTriage, runTriage } from './decider.ts';
-import { pickBlockerReview, runBlockerReview } from './blocker-review.ts';
+import { pickBlockerReview, requestBlockerReviews, runBlockerReview } from './blocker-review.ts';
 import type { Decider } from './decider.ts';
 import type { SchedulerStatus } from './status.ts';
 
@@ -209,6 +209,8 @@ export class Scheduler {
   requestSync(): void {
     const max = (this.db.prepare('SELECT coalesce(max(id), 0) AS n FROM chunks').get() as { n: number }).n;
     this.sync = { chunk: max };
+    // A sync is a request for a fresh picture: every open blocker (and so every reminder from one) is judged again.
+    requestBlockerReviews(this.db);
   }
 
   /** Wake promptly after a committed structural edit; the existing one-call-at-a-time gate still applies. */
@@ -341,7 +343,7 @@ export class Scheduler {
 
     // Open blockers are checked against what the sessions said since, so the user's queue holds only what still blocks.
     if (this.blockerWaitUntil === null || now >= this.blockerWaitUntil) {
-      const project = pickBlockerReview(this.db);
+      const project = pickBlockerReview(this.db, this.deps.now());
       if (project !== null) return this.blockerReview(now, project);
     }
 

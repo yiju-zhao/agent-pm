@@ -51,3 +51,20 @@ test('marking a blocker reminder handled clears that blocker', async () => {
   fireEvent.click(await screen.findByRole('button', { name: '已处理' }));
   await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/projects/p_1/blockers/b_1' && init?.method === 'PATCH' && JSON.parse(String(init.body)).status === 'cleared')).toBe(true));
 });
+
+test('in the Inbox, reminders are grouped by project, the projects waiting on the user first, each line saying its kind', async () => {
+  reminders = [
+    reminder({ key: 'blocker:e', category: 'waiting_external', text: '等华硕售后', project_id: 'p_2', project_title: 'DGX Spark' }),
+    reminder({ key: 'blocker:y', text: '等你试听成片' }),
+    reminder({ key: 'repo:/w', category: 'unpushed', text: '有 5 个提交没有推送', project_id: 'p_1', project_title: 'openlingo' }),
+    reminder({ key: 'session:s', category: 'agent_waiting', text: '「某 session」在等你操作', project_id: null, project_title: null }),
+  ];
+  render(<ToastProvider><Reminders groupBy="project" /></ToastProvider>);
+  await screen.findByRole('region', { name: 'openlingo' });
+  const groups = [...document.querySelectorAll('section.reminder-project')].map((g) => g.getAttribute('aria-label'));
+  expect(groups).toEqual(['openlingo', 'DGX Spark', '未归属项目']);
+  const openlingo = screen.getByRole('region', { name: 'openlingo' });
+  expect(within(openlingo).getAllByRole('listitem').map((li) => li.getAttribute('aria-label'))).toEqual(['等你试听成片', '有 5 个提交没有推送']);
+  expect(openlingo.querySelector('.reminder-project-head')!.textContent).toBe('openlingo等你回复或动手 1还没推送 1');
+  expect(within(openlingo).getByRole('listitem', { name: '等你试听成片' }).textContent).toContain('等你回复或动手');
+});

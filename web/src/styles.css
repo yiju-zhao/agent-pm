@@ -2060,3 +2060,17 @@ a.queue-more:hover { text-decoration: underline; }
 .reminder-actions a { color: var(--color-accent-deep); text-decoration: none; max-width: 16em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .reminder-actions button { min-height: 24px; font-size: var(--text-xs); padding: 0 var(--space-xs); }
 .queue-note { font-size: var(--text-xs); margin-bottom: var(--space-2xs); }
+
+/* Reminders by project (Inbox) */
+.reminder-project { border: 1px solid var(--color-rule); border-left: 2px solid var(--color-rule-2); border-radius: var(--radius-input); background: var(--color-paper-2); padding: var(--space-xs) var(--space-sm); }
+.reminder-project.tone-bad { border-left-color: var(--color-error); }
+.reminder-project.tone-warn { border-left-color: var(--color-warning); }
+.reminder-project.tone-accent { border-left-color: var(--color-accent); }
+.reminder-project-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs) var(--space-sm); padding-bottom: var(--space-2xs); border-bottom: 1px solid var(--color-rule); margin-bottom: var(--space-2xs); }
+.reminder-project-head a { color: var(--color-ink); text-decoration: none; }
+.reminder-project-head a:hover { color: var(--color-accent-deep); }
+.reminder-counts { display: flex; flex-wrap: wrap; gap: var(--space-2xs); }
+.reminder-kind { display: inline-block; align-self: flex-start; padding: 0 6px; border-radius: 2px; font-size: var(--text-xs); background: var(--color-paper-3); color: var(--color-ink-2); margin-bottom: 2px; }
+.reminder-kind.tone-bad { background: var(--color-error-wash); color: var(--color-error); }
+.reminder-kind.tone-warn { background: var(--color-warning-wash); color: var(--color-warning-ink); }
+.reminder-kind.tone-accent { background: var(--color-accent-wash); color: var(--color-accent-deep); }

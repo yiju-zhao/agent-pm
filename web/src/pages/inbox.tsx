@@ -51,7 +51,7 @@ export function InboxPage() {
     <section className="inbox-section reminders-section" aria-label="提醒">
       <h3>提醒</h3>
       <p className="dim">这些不是要你在这里回答的问题：agent-pm 只读 agent 的工作。去对应的 session 处理；进展反映到 session、项目或仓库后，提醒会自动更新或消失。</p>
-      <Reminders />
+      <Reminders groupBy="project" />
     </section>
     <AutoDecisions />
   </main>;

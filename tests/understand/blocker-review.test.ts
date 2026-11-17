@@ -70,15 +70,15 @@ test('"resolved" without a digest that shows it is not acted on; a wrong kind is
 
 test('a project is reviewed again only after new digests arrive, and a failed call changes nothing', async () => {
   blocker('等 GPU');
-  expect(pickBlockerReview(t.db)).toBe(p);
+  expect(pickBlockerReview(t.db, t.deps.now())).toBe(p);
   const failed = await runBlockerReview(t.db, t.deps, async () => ({ ok: false, kind: 'overloaded', message: 'busy', durationMs: 1 }), 'm', p);
   expect(failed).toMatchObject({ ok: false, kind: 'overloaded' });
-  expect(pickBlockerReview(t.db)).toBe(p);
+  expect(pickBlockerReview(t.db, t.deps.now())).toBe(p);
   await runBlockerReview(t.db, t.deps, answer([]), 'm', p);
-  expect(pickBlockerReview(t.db)).toBeNull();
+  expect(pickBlockerReview(t.db, t.deps.now())).toBeNull();
   t.setNow('2026-11-11T10:00:00.000Z');
   digest('2026-11-11T09:00:00.000Z', '新进展');
-  expect(pickBlockerReview(t.db)).toBe(p);
+  expect(pickBlockerReview(t.db, t.deps.now())).toBe(p);
 });
 
 test('the scheduler reviews blockers when nothing more urgent is waiting', async () => {
@@ -109,4 +109,19 @@ test('a blocker that still waits on the user is kept as it is and asked about no
   expect(open()).toEqual([{ id: action, kind: 'user' }]);
   expect(t.db.prepare('SELECT count(*) AS n FROM questions').get()).toEqual({ n: 0 });
   expect(calls[0]!.system).not.toContain('question');
+});
+
+test('every open blocker is looked at again after six hours even without new digests, and at once on a sync', async () => {
+  blocker('等华硕售后', 'external');
+  await runBlockerReview(t.db, t.deps, answer([]), 'm', p);
+  expect(pickBlockerReview(t.db, t.deps.now())).toBeNull();
+  t.setNow('2026-11-10T15:59:00.000Z');
+  expect(pickBlockerReview(t.db, t.deps.now())).toBeNull();
+  t.setNow('2026-11-10T16:01:00.000Z');
+  expect(pickBlockerReview(t.db, t.deps.now())).toBe(p);
+  await runBlockerReview(t.db, t.deps, answer([]), 'm', p);
+  expect(pickBlockerReview(t.db, t.deps.now())).toBeNull();
+  const { requestBlockerReviews } = await import('../../src/understand/blocker-review.ts');
+  requestBlockerReviews(t.db);
+  expect(pickBlockerReview(t.db, t.deps.now())).toBe(p);
 });
