@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import { readRow } from '../domain/changes.ts';
 import { DRAFT_FIELDS, evidenceSessions, liveSessions } from '../domain/merge.ts';
+import { sessionProjectName } from '../domain/project-names.ts';
 import type { DraftText, MergeScope } from '../domain/merge.ts';
 import type { DomainDeps } from '../domain/types.ts';
 import { contentCuts, isHerdrChunk } from '../server/content-cuts.ts';
@@ -17,7 +18,7 @@ import { PROJECT_GUIDE } from './project-guide.ts';
 // in full whether or not it was ever summarized. That is the center's normalized copy, not the transcript on the agent's
 // machine: where the collector already cut a message, or a Paseo chunk is an excerpt of a longer event, that is counted
 // in the coverage. A session
-// the user ignores, or whose content the provider refused, is left out and reported as a gap; so is one without content.
+// the user ignores is left out. Refused chunks and missing content are reported as gaps.
 //
 // A small evidence set goes to the model in one call. A large one is read window by window (each window one model call
 // that extracts dated facts with the chunks they come from), and the draft is written from those facts. When there are
@@ -38,6 +39,8 @@ export type SessionCoverage = {
   status: 'read' | 'partial' | 'ignored' | 'refused' | 'empty';
   chunks_total: number;
   chunks_read: number;
+  refused_chunks?: number;
+  refusal_needs_review?: boolean;
   chars_total: number;
   chars_read: number;
   /** Chunks read in which a user or assistant message was cut at collection: what was dropped is not at the center. */
@@ -56,6 +59,8 @@ export type MergeCoverage = {
 };
 
 export type MergeDraft = DraftText & {
+  /** Why the title is not the target's current one; null when it was kept. */
+  title_change_reason: string | null;
   /** What the evidence does not say but a reader would need. */
   unknowns: string[];
   /** The chunks each field rests on. */
@@ -70,10 +75,10 @@ type Chunk = { id: number; kind: string; ts_start: string | null; text: string; 
 type Window = { session: string; chunks: Chunk[]; chars: number };
 
 function loadChunks(db: DatabaseSync, key: string): Chunk[] {
-  const rows = db.prepare('SELECT id, kind, ts_start, text, source_id FROM chunks WHERE session_key = ? ORDER BY ts_start, id').all(key) as Chunk[];
-  // Screen chunks are overlapping snapshots of one terminal: only the newest says anything the others do not.
-  const newestScreen = rows.filter((r) => r.kind === 'screen').at(-1);
-  return rows.filter((r) => r.kind !== 'screen' || r === newestScreen);
+  // Select the newest screen before testing isolation: an older snapshot can contain the same refused text.
+  return db.prepare(`SELECT id, kind, ts_start, text, source_id FROM chunks WHERE session_key=? AND digest_block_id IS NULL
+    AND (kind!='screen' OR id=(SELECT id FROM chunks WHERE session_key=? AND kind='screen' ORDER BY ts_start DESC,id DESC LIMIT 1))
+    ORDER BY ts_start,id`).all(key, key) as Chunk[];
 }
 
 function windowsOf(session: string, chunks: Chunk[]): Window[] {
@@ -123,6 +128,7 @@ const FactSchema = z.object({
 
 const DraftSchema = z.object({
   title: z.string().trim().min(1).max(200),
+  title_change_reason: z.string().trim().max(500),
   summary: z.string().trim().min(1).max(4000),
   why: z.string().trim().max(4000),
   // Twelve lines of 300 stay under the 4000 characters a project field may hold.
@@ -151,12 +157,23 @@ const DRAFT_SYSTEM = [
   PROJECT_GUIDE,
   '旧的项目记录只说明项目原来叫什么，可能已经过时或不完整：它不是证据，不要照抄、拼接或把里面的说法当成事实；证据与它不一致时以证据为准。',
   '先找出这些 session 共同服务的那个可独立验收的目标，再写：title、summary、why、done_criteria（数组，每条一个可验证的结果）。',
+  'title 默认沿用目标项目现在的标题，title_change_reason 留空字符串。只有证据显示目标项目现在的标题已经与工作明显不符时才改，改时以 session 所在项目名为准，并在 title_change_reason 里说明证据显示了什么偏差。',
   '一个 session 可能同时为别的项目做过事：只采用服务于这个目标的内容，其余的不要写进来。',
   '证据里找不到动因时 why 留空字符串；找不到任何完成条件时 done_criteria 留空数组，并在 unknowns 里说明。不要为了填满而编写。',
   'unknowns 列出证据没有说明、但读者需要知道的事（例如验收是否通过、范围是否包含某部分）；没有就留空数组。',
   'evidence 为写了内容的字段各给出所依据的 chunk id（只能是本次给出的 id；summary 必须有，done_criteria 非空时也必须有）。',
   RULES,
 ].join('\n');
+
+/** Each project name of `sessions` once, with how many of them work in it. */
+function projectNames(db: DatabaseSync, sessions: string[]): string {
+  const counts = new Map<string, number>();
+  for (const key of new Set(sessions)) {
+    const name = sessionProjectName(db, key);
+    if (name !== null) counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  return [...counts].map(([name, n]) => `- ${name}（${n} 个 session）`).join('\n');
+}
 
 function projectRecord(db: DatabaseSync, id: string, label: string): string {
   const p = readRow(db, 'projects', id) ?? {};
@@ -177,11 +194,15 @@ export async function draftMerge(db: DatabaseSync, deps: DomainDeps, runner: Llm
     const cover: SessionCoverage = { session_key: key, side, status: 'empty', chunks_total: 0, chunks_read: 0, chars_total: 0, chars_read: 0, truncated_chunks: 0, excerpted_chunks: 0 };
     sessions.push(cover);
     if (db.prepare('SELECT 1 FROM sessions WHERE key = ? AND ignored = 1').get(key)) cover.status = 'ignored';
-    else if (db.prepare('SELECT 1 FROM digest_blocks WHERE session_key = ?').get(key)) cover.status = 'refused';
-    if (cover.status !== 'empty') continue;
+    if (cover.status === 'ignored') continue;
+    const refused = db.prepare(`SELECT count(*) AS n, coalesce(sum(length(text)),0) AS chars
+      FROM chunks WHERE session_key=? AND digest_block_id IS NOT NULL`).get(key) as { n: number; chars: number };
+    cover.refused_chunks = refused.n;
+    cover.refusal_needs_review = !!db.prepare('SELECT 1 FROM digest_blocks WHERE session_key=? AND needs_review=1').get(key);
     const chunks = loadChunks(db, key);
-    cover.chunks_total = chunks.length;
-    cover.chars_total = chunks.reduce((n, c) => n + c.text.length, 0);
+    if (refused.n || cover.refusal_needs_review) cover.status = 'refused';
+    cover.chunks_total = chunks.length + refused.n;
+    cover.chars_total = chunks.reduce((n, c) => n + c.text.length, refused.chars);
     if (chunks.length > 0) perSession.push(windowsOf(key, chunks));
   }
   const kept = withinBudget(perSession);
@@ -193,14 +214,20 @@ export async function draftMerge(db: DatabaseSync, deps: DomainDeps, runner: Llm
     const cuts = read.map((c) => contentCuts(c.text, isHerdrChunk(c.source_id)));
     cover.truncated_chunks = cuts.filter((c) => c.message).length;
     cover.excerpted_chunks = cuts.filter((c) => c.excerpt).length;
-    cover.status = cover.chunks_read === cover.chunks_total ? 'read' : 'partial';
+    cover.status = cover.chunks_read === cover.chunks_total && !cover.refusal_needs_review ? 'read' : 'partial';
   }
   const windows = kept.flat();
   const direct = windows.reduce((n, w) => n + w.chars, 0) <= WINDOW_CHARS;
   const coverage: MergeCoverage = { layer: 'chunks', mode: direct ? 'direct' : 'condensed', model_calls: 0, sessions };
   if (windows.length === 0) return { ok: false, kind: 'no_evidence', message: '所选范围内没有可读取的会话内容，无法根据证据生成项目草稿', coverage };
 
+  const readIds = new Set(windows.flatMap((w) => w.chunks.map((c) => c.id)));
+  const inputIds = JSON.stringify([...readIds]);
   const ask = async <S extends z.ZodType>(system: string, prompt: string, schema: S): Promise<{ ok: true; data: z.output<S> } | { ok: false; kind: LlmErrorKind; message: string }> => {
+    // A digest can be refused while an earlier preview window awaits its response.
+    if (db.prepare('SELECT 1 FROM chunks WHERE digest_block_id IS NOT NULL AND id IN (SELECT value FROM json_each(?)) LIMIT 1').get(inputIds)) {
+      return { ok: false, kind: 'refused', message: '证据范围已变化，部分片段已隔离，请重新生成预览' };
+    }
     const call: LlmCall = { role: 'curate', model, system, prompt, outputSchema: jsonSchema(schema), maxTurns: MAX_TURNS };
     coverage.model_calls += 1;
     let result = await runner(call).catch((err: unknown) => ({ ok: false as const, kind: 'other' as const, message: err instanceof Error ? err.message : String(err), durationMs: 0 }));
@@ -210,7 +237,6 @@ export async function draftMerge(db: DatabaseSync, deps: DomainDeps, runner: Llm
     return result.ok ? { ok: true, data: parsed!.data as z.output<S> } : { ok: false, kind: result.kind, message: result.message };
   };
 
-  const readIds = new Set(windows.flatMap((w) => w.chunks.map((c) => c.id)));
   let material: string;
   if (direct) {
     material = kept.map((ws) => `<session key="${ws[0]!.session}">\n${ws.flatMap((w) => w.chunks).map(chunkTag).join('\n')}\n</session>`).join('\n\n');
@@ -232,10 +258,11 @@ export async function draftMerge(db: DatabaseSync, deps: DomainDeps, runner: Llm
   const gaps = sessions.filter((s) => s.status !== 'read');
   const prompt = [
     scope.mode === 'project' ? '用户要把整个来源项目并入目标项目。' : `用户要把来源项目中的 ${scope.sessions.length} 个 session 移到目标项目；来源项目的其余内容不在本次范围内。`,
+    `## 这些 session 所在的项目（Paseo 项目名或工作目录名）\n${projectNames(db, windows.map((w) => w.session)) || '（没有项目名）'}`,
     '## 旧的项目记录（仅供参考，不是证据）',
     // A partial merge takes sessions, not the source project: its record describes work that is not coming over.
     [projectRecord(db, scope.target, '目标项目'), ...(scope.mode === 'project' ? [projectRecord(db, scope.source, '来源项目')] : [])].join('\n'),
-    gaps.length > 0 ? `## 证据缺口\n以下 session 的内容没有读到或只读到一部分，不要猜测其中的内容：${gaps.map((s) => `${s.session_key}（${s.status}）`).join('、')}` : '',
+    gaps.length > 0 ? `## 证据缺口\n以下 session 的内容没有读到或只读到一部分，不要猜测其中的内容：${gaps.map((s) => `${s.session_key}（${s.status}，拒摘 ${s.refused_chunks ?? 0} 段${s.refusal_needs_review ? '，旧记录待核对' : ''}）`).join('、')}` : '',
     direct ? '## 证据：这些 session 的对话记录' : '## 证据：从这些 session 的对话记录逐段提取的事实（括号里是所依据的 chunk id）',
     material,
   ].filter(Boolean).join('\n\n');
@@ -249,8 +276,12 @@ export async function draftMerge(db: DatabaseSync, deps: DomainDeps, runner: Llm
     const message = unknown.length > 0 ? `草稿引用了未提供的证据（chunk ${[...new Set(unknown)].join(', ')}），已作废` : '草稿没有为简介和完成标准给出证据，已作废';
     return { ok: false, kind: 'bad_output', message, coverage };
   }
+  // The title stays the target's unless the model says why it no longer fits: a project keeps its name.
+  const current = String(readRow(db, 'projects', scope.target)?.title ?? '');
+  const reason = out.data.title_change_reason.trim();
   const draft: MergeDraft = {
-    title: out.data.title,
+    title: reason === '' && current !== '' ? current : out.data.title,
+    title_change_reason: reason === '' || out.data.title === current ? null : reason,
     summary: out.data.summary,
     why: out.data.why,
     done_criteria: out.data.done_criteria.map((line) => `- ${line.replace(/^[-*]\s*/, '')}`).join('\n'),

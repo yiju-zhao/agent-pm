@@ -114,7 +114,7 @@ export function mergeSignature(db: DatabaseSync, scope: MergeScope): string {
   const links = db.prepare('SELECT id, session_key, deleted_at, vetoed, summary, ts_start, ts_end, confidence FROM contributions WHERE project_id = ? ORDER BY id');
   const session = db.prepare(
     `SELECT (SELECT ignored FROM sessions WHERE key = ?) AS ignored,
-            (SELECT count(*) FROM digest_blocks WHERE session_key = ?) AS blocked,
+            (SELECT coalesce(max(id),0) FROM digest_blocks WHERE session_key = ?) AS last_refusal,
             (SELECT count(*) FROM chunks WHERE session_key = ?) AS chunks,
             (SELECT coalesce(max(id), 0) FROM chunks WHERE session_key = ?) AS last_chunk`,
   );

@@ -5,6 +5,15 @@ import type { OpName } from './ops.ts';
 import { confirmOptions } from './questions.ts';
 import type { Guard } from './questions.ts';
 
+const FIELD_NAME: Record<string, string> = { title: '标题', summary: '简介', why: '为什么', done_criteria: '完成标准', priority: '优先级', status: '状态', position: '顺序', milestone_id: '所属里程碑' };
+
+const STATUS_NAME: Record<string, string> = { todo: '待做', doing: '进行中', done: '完成' };
+
+function short(key: string, value: FieldValue): string {
+  const text = value === null ? '（空）' : key === 'status' ? (STATUS_NAME[String(value)] ?? String(value)) : String(value);
+  return text.length > 120 ? `${text.slice(0, 120)}…` : text;
+}
+
 /** A column value an operation can set. */
 export type FieldValue = string | number | null;
 
@@ -45,8 +54,10 @@ export function applyAiFieldEdits(
   if (keys.length === 0) return;
   ctx.propose({
     kind: 'confirm',
-    prompt: `AI 想修改你锁定的字段（${keys.join('、')}）：${ctx.reason}`,
-    options: confirmOptions(confirm.op, confirm.args(proposed)),
+    prompt: `用 AI 的新内容替换你锁定的${keys.map((k) => FIELD_NAME[k] ?? k).join('、')}？`,
+    context: `AI 的理由：${ctx.reason}`,
+    why_user: 'user_authority',
+    options: confirmOptions(confirm.op, confirm.args(proposed), keys.map((k) => `${FIELD_NAME[k] ?? k} → ${short(k, proposed[k])}`).join('；')),
     project_id: ctx.projectId,
     session_key: null,
     guards: keys.map((col): Guard => ({ table, id, col, equals: row[col] })),

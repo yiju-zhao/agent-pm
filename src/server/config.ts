@@ -43,6 +43,11 @@ export const ServerConfig = z
         curateModel: z.string().min(1).optional(),
         /** A file holding a `claude setup-token` token, used as CLAUDE_CODE_OAUTH_TOKEN. */
         oauthTokenFile: z.string().min(1).optional(),
+        /**
+         * A file holding a TypeSafe API key: Jev then decides the questions that do not need the user (sending their text
+         * and cited evidence to TypeSafe). Without it, the curator's model decides them.
+         */
+        jevKeyFile: z.string().min(1).optional(),
       })
       .optional(),
   })
@@ -128,9 +133,14 @@ export function loadServerConfig(path: string): ServerConfig {
   const config = parsed.data;
   // ':memory:' is SQLite's in-memory database, not a file name.
   const dbPath = config.dbPath === ':memory:' ? config.dbPath : resolve(dirname(path), config.dbPath);
-  const tokenFile = config.understanding?.oauthTokenFile;
-  if (config.understanding !== undefined && tokenFile !== undefined) {
-    return { ...config, dbPath, understanding: { ...config.understanding, oauthTokenFile: resolve(dirname(path), tokenFile) } };
+  if (config.understanding !== undefined) {
+    const { oauthTokenFile, jevKeyFile } = config.understanding;
+    const understanding = {
+      ...config.understanding,
+      ...(oauthTokenFile !== undefined ? { oauthTokenFile: resolve(dirname(path), oauthTokenFile) } : {}),
+      ...(jevKeyFile !== undefined ? { jevKeyFile: resolve(dirname(path), jevKeyFile) } : {}),
+    };
+    return { ...config, dbPath, understanding };
   }
   return { ...config, dbPath };
 }

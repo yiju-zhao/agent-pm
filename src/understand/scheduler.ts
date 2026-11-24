@@ -10,6 +10,9 @@ import type { LlmErrorKind, LlmRunner } from './llm.ts';
 import { pickProjectReview, reviewDigestDependency, reviewFailure, runProjectReview } from './project-review.ts';
 import type { ProjectReview } from './project-review.ts';
 import { markStageReviewed, pickRestageBatch, runRestage } from './restage.ts';
+import { llmDecider, pickTriage, runTriage } from './decider.ts';
+import { pickBlockerReview, requestBlockerReviews, runBlockerReview } from './blocker-review.ts';
+import type { Decider } from './decider.ts';
 import type { SchedulerStatus } from './status.ts';
 
 export { disabledStatus } from './status.ts';
@@ -105,6 +108,7 @@ export class Scheduler {
   private readonly deps: DomainDeps;
   private readonly runner: LlmRunner;
   private readonly modelsOf: () => { digest: string; curate: string; restage?: string };
+  private readonly decider: Decider;
 
   private inFlight: Promise<TickResult> | null = null;
   private running: 'digest' | 'curate' | 'restage' | null = null;
@@ -124,6 +128,8 @@ export class Scheduler {
   private curateFailures = 0;
   private curateWaitUntil: number | null = null;
   private restageFailures = 0;
+  /** After a failed blocker review, none is tried before this. */
+  private blockerWaitUntil: number | null = null;
   private restageWaitUntil: number | null = null;
   /** The session the last backfill window came from; the next one starts after it. */
   private backfillCursor: string | null = null;
@@ -136,11 +142,14 @@ export class Scheduler {
     deps: DomainDeps,
     runner: LlmRunner,
     models: { digest: string; curate: string; restage?: string } | (() => { digest: string; curate: string; restage?: string }),
+    decider?: Decider,
   ) {
     this.db = db;
     this.deps = deps;
     this.runner = runner;
     this.modelsOf = typeof models === 'function' ? models : () => models;
+    // Without one configured (Jev), the curator's model decides.
+    this.decider = decider ?? llmDecider(db, deps, runner, () => this.modelsOf().curate);
   }
 
   /**
@@ -200,6 +209,8 @@ export class Scheduler {
   requestSync(): void {
     const max = (this.db.prepare('SELECT coalesce(max(id), 0) AS n FROM chunks').get() as { n: number }).n;
     this.sync = { chunk: max };
+    // A sync is a request for a fresh picture: every open blocker (and so every reminder from one) is judged again.
+    requestBlockerReviews(this.db);
   }
 
   /** Wake promptly after a committed structural edit; the existing one-call-at-a-time gate still applies. */
@@ -225,9 +236,9 @@ export class Scheduler {
     const scalar = (sql: string): number => (this.db.prepare(sql).get() as { n: number }).n;
     const latest = (sql: string): string | null => (this.db.prepare(sql).get() as { at: string | null }).at;
     const counts = this.readChunkCounts(now);
-    const blocked = this.db.prepare(`SELECT b.session_key FROM digest_blocks b LEFT JOIN sessions s ON s.key=b.session_key
-      WHERE coalesce(s.ignored,0)=0 ORDER BY b.created_at`).all() as Array<{ session_key: string }>;
-    const refusal = blocked.length ? `上游拒绝摘要：${blocked.map((b) => b.session_key).join('、')}；已暂停这些会话的自动摘要，原文保留，其他会话正常处理` : null;
+    const blocked = this.db.prepare(`SELECT b.session_key, sum(b.needs_review) AS unresolved FROM digest_blocks b LEFT JOIN sessions s ON s.key=b.session_key
+      WHERE coalesce(s.ignored,0)=0 GROUP BY b.session_key ORDER BY min(b.created_at)`).all() as Array<{ session_key: string; unresolved: number }>;
+    const refusal = blocked.length ? `上游拒绝摘要：${blocked.map((b) => b.unresolved ? b.session_key + '（旧记录待核对）' : b.session_key).join('、')}。被拒片段保留原文，后续片段照常摘要` : null;
     return {
       enabled: true,
       paused_until: paused ? new Date(this.pausedUntil!).toISOString() : null,
@@ -263,18 +274,18 @@ export class Scheduler {
       waiting_sessions: scalar(
         `SELECT count(DISTINCT c.session_key) AS n FROM chunks c LEFT JOIN sessions s ON s.key = c.session_key
          WHERE c.digested = 0 AND c.backfill = 0 AND coalesce(s.ignored, 0) = 0
-         AND NOT EXISTS (SELECT 1 FROM digest_blocks b WHERE b.session_key = c.session_key)`,
+         AND c.digest_block_id IS NULL`,
       ),
       // Ignored sessions are never digested, so they are left out like in `waiting_sessions`.
       backfill: {
         sessions_total: scalar(
           `SELECT count(DISTINCT c.session_key) AS n FROM chunks c LEFT JOIN sessions s ON s.key = c.session_key
-           WHERE c.backfill = 1 AND coalesce(s.ignored, 0) = 0`,
+           WHERE c.backfill = 1 AND c.digest_block_id IS NULL AND coalesce(s.ignored, 0) = 0`,
         ),
         sessions_done: scalar(
           `SELECT count(*) AS n FROM (
              SELECT c.session_key FROM chunks c LEFT JOIN sessions s ON s.key = c.session_key
-             WHERE c.backfill = 1 AND coalesce(s.ignored, 0) = 0
+             WHERE c.backfill = 1 AND c.digest_block_id IS NULL AND coalesce(s.ignored, 0) = 0
              GROUP BY c.session_key HAVING sum(c.digested = 0) = 0
            )`,
         ),
@@ -323,8 +334,18 @@ export class Scheduler {
       return this.curate(now);
     }
 
+    // A question the evidence can settle is settled before the user ever has to look at it.
+    const question = pickTriage(this.db, this.deps.now());
+    if (question !== null) return this.triage(now, question);
+
     const realtime = this.pickRealtime(now);
     if (realtime !== null) return this.digest(now, realtime);
+
+    // Open blockers are checked against what the sessions said since, so the user's queue holds only what still blocks.
+    if (this.blockerWaitUntil === null || now >= this.blockerWaitUntil) {
+      const project = pickBlockerReview(this.db, this.deps.now());
+      if (project !== null) return this.blockerReview(now, project);
+    }
 
     const backfill = this.pickBackfill(now);
     if (backfill !== null) return this.digest(now, backfill);
@@ -350,6 +371,30 @@ export class Scheduler {
     if (isPausing(result.kind) && !result.partial) return this.pause(now,result.kind);
     reviewFailure(this.db,this.deps.now(),job,result.message,result.partial || result.kind==='refused');
     return isPausing(result.kind) ? this.pause(now,result.kind) : 'skipped';
+  }
+
+  private async blockerReview(now: number, projectId: string): Promise<TickResult> {
+    this.running = 'curate';
+    const outcome = await runBlockerReview(this.db, this.deps, this.runner, this.modelsOf().curate, projectId);
+    if (outcome.ok) {
+      this.blockerWaitUntil = null;
+      return 'curated';
+    }
+    this.lastError = `阻塞复核失败（${projectId}）：${outcome.message}`;
+    if (isPausing(outcome.kind)) return this.pause(now, outcome.kind);
+    this.blockerWaitUntil = now + BACKOFF_START_MS;
+    return 'skipped';
+  }
+
+  private async triage(now: number, question: NonNullable<ReturnType<typeof pickTriage>>): Promise<TickResult> {
+    this.running = 'curate';
+    const outcome = await runTriage(this.db, this.deps, this.decider, question);
+    if (outcome.status === 'decided') return 'curated';
+    if (outcome.status === 'failed') {
+      this.lastError = `自动决定失败（${this.decider.name}）：${outcome.message}；问题留给用户`;
+      if (outcome.kind !== 'jev' && isPausing(outcome.kind)) return this.pause(now, outcome.kind);
+    }
+    return 'skipped';
   }
 
   private async restage(now: number, ids: string[]): Promise<TickResult> {
@@ -543,7 +588,7 @@ export class Scheduler {
       .prepare(
         `SELECT DISTINCT c.session_key AS key FROM chunks c LEFT JOIN sessions s ON s.key = c.session_key
          WHERE c.digested = 0 AND c.backfill = 0 AND c.id <= ? AND coalesce(s.ignored, 0) = 0
-         AND NOT EXISTS (SELECT 1 FROM digest_blocks b WHERE b.session_key = c.session_key)`,
+         AND c.digest_block_id IS NULL`,
       )
       .all(marks.chunk) as Array<{ key: string }>;
     return keys.every((r) => this.cooling(r.key, now));
@@ -566,7 +611,7 @@ export class Scheduler {
         `SELECT c.session_key AS key, min(c.received_at) AS oldest
          FROM chunks c LEFT JOIN sessions s ON s.key = c.session_key
          WHERE c.digested = 0 AND c.backfill = ? AND coalesce(s.ignored, 0) = 0
-         AND NOT EXISTS (SELECT 1 FROM digest_blocks b WHERE b.session_key = c.session_key)
+         AND c.digest_block_id IS NULL
          GROUP BY c.session_key ORDER BY oldest, key`,
       )
       .all(backfill ? 1 : 0) as Candidate[];

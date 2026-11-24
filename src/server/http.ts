@@ -1,7 +1,10 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
+import { z } from 'zod';
 import type { ZodType } from 'zod';
+import { getActivity, MAX_ACTIVITY_DAYS } from '../domain/activity.ts';
+import { listReminders, snoozeReminder } from '../domain/reminders.ts';
 import { getEvidence, parseEvidenceRef } from '../domain/evidence.ts';
 import { sessionLinks } from '../domain/read.ts';
 import { defaultDeps } from '../domain/types.ts';
@@ -48,6 +51,7 @@ export function createApp(
 ): Hono {
   const scheduler = opts.scheduler ?? null;
   const app = new Hono();
+  const reminderSources = { config, startedAt: clock() };
   const deps: DomainDeps = { now: clock, newId: newId ?? defaultDeps().newId };
 
   // Anything not handled below is a bug: say so on stderr, tell the client only that it happened.
@@ -118,6 +122,24 @@ export function createApp(
     if (parseEvidenceRef(ref) === null) return c.json({ error: 'invalid' }, 400);
     const evidence = getEvidence(db, clock(), ref);
     return evidence === null ? c.json({ error: 'not_found' }, 404) : c.json(evidence);
+  });
+
+  // What waits on the user or has stalled, derived from sessions, projects and repositories (../domain/reminders.ts).
+  app.get('/reminders', (c) => c.json(listReminders(db, clock(), reminderSources)));
+  app.post('/reminders/snooze', userAuth(config, db, clock), async (c) => {
+    const body = z.object({ key: z.string().min(1).max(2000), hours: z.number().int().min(1).max(24 * 90).nullable() }).strict().safeParse(await c.req.json().catch(() => undefined));
+    if (!body.success) return c.json({ error: 'invalid', message: z.prettifyError(body.error) }, 400);
+    return snoozeReminder(db, clock(), body.data.key, body.data.hours, reminderSources) ? c.json({ ok: true }) : c.json({ error: 'not_found', message: '这条提醒已经不存在' }, 404);
+  });
+
+  // Work and milestones per day over a period, for the overview and the review page (see ../domain/activity.ts).
+  app.get('/activity', (c) => {
+    const days = Number(c.req.query('days') ?? '14');
+    const tz = Number(c.req.query('tz') ?? '0');
+    if (!Number.isInteger(days) || days < 1 || days > MAX_ACTIVITY_DAYS || !Number.isInteger(tz) || Math.abs(tz) > 14 * 60) {
+      return c.json({ error: 'invalid', message: `days must be 1–${MAX_ACTIVITY_DAYS}, tz minutes within ±840` }, 400);
+    }
+    return c.json(getActivity(db, clock(), { days, tzOffsetMinutes: tz, project: c.req.query('project') || undefined }));
   });
 
   // What each collection source has delivered and where it falls short (see ./coverage.ts).

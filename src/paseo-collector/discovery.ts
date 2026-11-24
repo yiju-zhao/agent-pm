@@ -63,6 +63,8 @@ export function toObservation(
   agent: AgentSnapshot,
   lifecycle: AgentObservation['lifecycle'],
   content: AgentObservation['content'],
+  projectName: string | null = null,
+  workspace: AgentObservation['workspace'] = null,
 ): AgentObservation {
   const native = nativeSessionId(agent);
   const permissions = agent.pendingPermissions?.length ?? 0;
@@ -83,6 +85,8 @@ export function toObservation(
     native_id: native?.id ?? null,
     native_id_origin: native?.origin ?? null,
     cwd: agent.cwd ?? '',
+    project_name: projectName?.trim().slice(0, 200) || null,
+    workspace,
     title: (agent.title ?? '').slice(0, 2000),
     workspace_id: agent.workspaceId ?? null,
     raw_status: String(agent.status).slice(0, 50),

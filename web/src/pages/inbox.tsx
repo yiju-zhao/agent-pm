@@ -9,6 +9,8 @@ import { QuestionCard } from '../components/question-card.tsx';
 import { SessionTag } from '../components/session-tag.tsx';
 import { splitQuestions } from '../home-model.ts';
 import { useInbox } from '../inbox.tsx';
+import { AutoDecisions, SameNameProjects } from '../components/inbox-extras.tsx';
+import { Reminders } from '../components/reminders.tsx';
 import { useApi } from '../use-api.ts';
 
 type Filter = 'all' | 'decisions' | 'sessions';
@@ -30,7 +32,7 @@ export function InboxPage() {
   const shown = filter === 'decisions' ? needYou.length : filter === 'sessions' ? attribution.length : count;
   const context = (question: QuestionView) => question.project_id ? <a className="inbox-context" href={projectHref(question.project_id)}><Icon name="projects" />{titles.get(question.project_id) ?? question.project_id}<span aria-hidden="true">↗</span></a> : <span className="inbox-context dim">项目决策</span>;
   return <main data-page="inbox" className="inbox-page">
-    <header className="inbox-page-head"><div><p className="eyebrow">你的工作收件箱</p><h2>Inbox <span className="heading-en">待处理事项</span></h2><p className="dim">需要你决定的事和待归属的会话，都在这里。</p></div>{questions.data !== undefined && !questions.error && <span className="inbox-total">{count} <span>项待处理</span></span>}</header>
+    <header className="inbox-page-head"><div><p className="eyebrow">你的工作收件箱</p><h2>Inbox <span className="heading-en">待处理事项</span></h2><p className="dim">上面是需要你在 agent-pm 里决定的事，下面是随进展自动更新的提醒。</p></div>{questions.data !== undefined && !questions.error && <span className="inbox-total">{count} <span>项待处理</span></span>}</header>
     <div className="inbox-filters" role="group" aria-label="Inbox 分类">
       {([{ id: 'all', label: '全部', count }, { id: 'decisions', label: '需要你', count: needYou.length }, { id: 'sessions', label: '会话归属', count: attribution.length }] as const).map((item) => <button type="button" key={item.id} aria-pressed={filter === item.id} onClick={() => setFilter(item.id)}>{item.label}<span className="count-badge">{item.count}</span></button>)}
     </div>
@@ -45,5 +47,12 @@ export function InboxPage() {
         })}
       </InboxSection>}
     </>}
+    {filter !== 'sessions' && projects.data ? <SameNameProjects cards={projects.data} reload={projects.reload} /> : null}
+    <section className="inbox-section reminders-section" aria-label="提醒">
+      <h3>提醒</h3>
+      <p className="dim">这些不是要你在这里回答的问题：agent-pm 只读 agent 的工作。去对应的 session 处理；进展反映到 session、项目或仓库后，提醒会自动更新或消失。</p>
+      <Reminders groupBy="project" />
+    </section>
+    <AutoDecisions />
   </main>;
 }

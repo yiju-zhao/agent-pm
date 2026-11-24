@@ -221,7 +221,8 @@ test('after the user unlinks, an ai relink becomes a confirm question instead of
   const q = question('q_1');
   expect(q).toMatchObject({
     kind: 'confirm',
-    prompt: `AI 想把 session ${s} 重新关联到「dLLM 评测」（你之前取消过）：它在跑评测`,
+    prompt: `把 session「${s}」重新关联到「dLLM 评测」？`,
+    context: '你之前取消过这个关联。AI 的理由：它在跑评测',
     project_id: p,
     session_key: s,
     status: 'pending',
@@ -483,7 +484,8 @@ test('an AI unlink of a link the user made becomes a confirm question', () => {
   const q = question('q_1');
   expect(q).toMatchObject({
     kind: 'confirm',
-    prompt: `AI 想取消你建立的关联：session ${S} ↔「dLLM 评测」：它其实在做别的`,
+    prompt: `取消你建立的关联：session「${S}」↔「dLLM 评测」？`,
+    context: 'AI 的理由：它其实在做别的',
     project_id: p,
     session_key: S,
     dedupe_key: `unlink:${S}:${p}`,
@@ -522,7 +524,8 @@ test('ai ignore_session is proposed; user ignore_session sets the flag', () => {
   expect(session(S).ignored).toBe(0);
   expect(question('q_1')).toMatchObject({
     kind: 'confirm',
-    prompt: `AI 建议不再追踪 session ${S}：只是个临时 shell`,
+    prompt: `不再追踪 session「${S}」？`,
+    context: 'AI 的理由：只是个临时 shell',
     project_id: null,
     session_key: S,
     dedupe_key: `ignore:${S}`,
@@ -565,7 +568,7 @@ test('an AI proposal to ignore an already ignored session asks nothing; un-ignor
 
   const r = t.ai('ignore_session', { session: key, ignored: false }, { reason: '其实在干活' });
   expect(r).toMatchObject({ status: 'proposed' });
-  expect(question(r.question_ids[0]).prompt).toBe(`AI 建议恢复追踪 session ${key}：其实在干活`);
+  expect(question(r.question_ids[0]).prompt).toBe(`恢复追踪 session「${key}」？`);
   expect(parse(question(r.question_ids[0]).guards)).toEqual([{ table: 'sessions', id: key, col: 'ignored', equals: 1 }]);
 });
 

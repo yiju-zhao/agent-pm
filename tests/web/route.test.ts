@@ -7,6 +7,11 @@ test('the empty hash and #/ are the home page', () => {
   expect(parseHash('#/')).toEqual({ page: 'home' });
 });
 
+test('#/projects is the project list and #/review the review page', () => {
+  expect(parseHash('#/projects')).toEqual({ page: 'projects' });
+  expect(parseHash('#/review/')).toEqual({ page: 'review' });
+});
+
 test('#/sessions is the sessions page', () => {
   expect(parseHash('#/sessions')).toEqual({ page: 'sessions' });
 });

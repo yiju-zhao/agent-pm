@@ -8,6 +8,8 @@ import { SessionTag } from './session-tag.tsx';
 
 /** How many open todos a card lists; the rest are only counted. */
 const MAX_TODOS = 3;
+/** A card shows this many blockers; the project page has them all. */
+const MAX_BLOCKERS = 3;
 
 export const projectHref = (id: string) => `#/p/${encodeURIComponent(id)}`;
 
@@ -98,12 +100,15 @@ export function ProjectCardView({
         </div>
       ))}
       {moreTodos > 0 ? <div className="todo dim">还有 {moreTodos} 条</div> : null}
-      {card.open_blockers.map((b) => (
+      {card.open_blockers.slice(0, MAX_BLOCKERS).map((b) => (
         <div key={b.id} className="blk">
           <Icon name="blocked" />
           {b.text}
         </div>
       ))}
+      {card.open_blockers.length > MAX_BLOCKERS ? (
+        <a className="blk-more" href={projectHref(card.id)}>{`另有 ${card.open_blockers.length - MAX_BLOCKERS} 个阻塞`}</a>
+      ) : null}
       {card.pending_questions.map((q) => (
         <QuestionCard
           key={q.id}

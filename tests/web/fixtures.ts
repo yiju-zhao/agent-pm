@@ -98,6 +98,12 @@ export function question(over: Partial<QuestionView> = {}): QuestionView {
     created_by: 'ai:curator',
     created_at: '2026-10-30T10:00:00.000Z',
     resolution_note: null,
+    context: null,
+    why_user: null,
+    recommended: null,
+    recommend_reason: null,
+    auto: null,
+    about_blocker: null,
     ...over,
   };
 }
@@ -126,6 +132,7 @@ export function card(over: Partial<ProjectCard> = {}): ProjectCard {
     open_blockers: [],
     active_sessions: [],
     pending_questions: [],
+    project_names: [],
     ...over,
   };
 }

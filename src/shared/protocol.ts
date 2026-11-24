@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { Workspace } from './workspace.ts';
 
 /** Agent type as reported by herdr's `agent` field, e.g. `claude`, `codex`. */
 export type AgentKind = string;
@@ -28,6 +29,8 @@ export const SnapshotSession = z.object({
   live_status: LiveStatus,
   fidelity: z.enum(['full', 'screen']),
   transcript_path: z.string().nullable(),
+  /** The working directory's repository state, read-only (see shared/workspace.ts); absent from older collectors. */
+  workspace: Workspace.nullable().optional(),
 });
 export type SnapshotSession = z.infer<typeof SnapshotSession>;
 

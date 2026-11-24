@@ -7,6 +7,8 @@ import type { Outbox } from './outbox.ts';
 import type { DirectoryEntry, DirectoryUpdate, PaseoSdk, TimelineSignal } from './sdk.ts';
 import type { StateDir } from './state-store.ts';
 import { nextBatch } from './timeline.ts';
+import { WorkspaceCache } from '../shared/workspace.ts';
+import type { Workspace } from '../shared/workspace.ts';
 
 // The Paseo collector's run loop. Three things run independently, so a slow or failing one never stalls another:
 //  - the heartbeat: every `heartbeatMs` a snapshot (collector alive, daemon health, the agents as last seen) renews
@@ -18,7 +20,7 @@ import { nextBatch } from './timeline.ts';
 //    and a periodic refresh of long turns. A failing agent backs off on its own.
 // Nothing here writes to the daemon or changes an agent; stopping the collector leaves every agent as it was.
 
-export const PASEO_COLLECTOR_VERSION = '0.2.0';
+export const PASEO_COLLECTOR_VERSION = '0.3.0';
 
 export type CollectorDeps = {
   sdk: PaseoSdk;
@@ -29,6 +31,8 @@ export type CollectorDeps = {
   log(line: string): void;
   /** Jitter source for backoff; tests pin it. */
   random?(): number;
+  /** Reads a directory's repository state; defaults to git (see shared/workspace.ts). Tests replace it. */
+  workspace?(cwd: string, now: () => Date): Promise<Workspace | null>;
 };
 
 type AgentState = {
@@ -77,12 +81,16 @@ export class PaseoCollector {
   private waiting: Array<() => void> = [];
   private stopping = false;
   private inflight = new Set<Promise<void>>();
+  private readonly workspaces: WorkspaceCache;
+  private readonly workspaceOf = new Map<string, Workspace | null>();
+  private workspacesBusy = false;
 
   constructor(cfg: PaseoCollectorConfig, deps: CollectorDeps) {
     this.cfg = cfg;
     this.deps = deps;
     this.startedAt = deps.now();
     this.slots = cfg.maxConcurrentAgents;
+    this.workspaces = new WorkspaceCache(deps.now, deps.workspace ?? undefined);
   }
 
   private log(msg: string): void {
@@ -193,7 +201,7 @@ export class PaseoCollector {
   }
 
   private observations(): AgentObservation[] {
-    return [...this.agents.values()].map((a) => toObservation(a.entry.agent, a.lifecycle, a.content));
+    return [...this.agents.values()].map((a) => toObservation(a.entry.agent, a.lifecycle, a.content, a.entry.project?.projectName ?? null, a.lifecycle === 'live' ? (this.workspaceOf.get(a.entry.agent.cwd ?? '') ?? null) : null));
   }
 
   /** One snapshot push: collector alive, daemon health, and (when connected) the agents. Also the long-turn refresh. */
@@ -208,6 +216,8 @@ export class PaseoCollector {
       if (!connected) this.directoryComplete = false;
       this.wasConnected = connected;
       if (!(await this.ensureLease())) return;
+      // Repository states are refreshed on the side; the snapshot carries what has been read so far.
+      if (connected) void this.readWorkspaces();
       const usage = this.deps.outbox.usage();
       const body: SnapshotV2 = {
         source_id: this.cfg.sourceId,
@@ -250,6 +260,18 @@ export class PaseoCollector {
       if (connected) for (const id of this.deps.outbox.agents()) if (!this.agents.has(id)) this.request(id, 0);
     } finally {
       this.heartbeatBusy = false;
+    }
+  }
+
+  /** The repository state of each live agent's directory, read-only and cached (see shared/workspace.ts). */
+  private async readWorkspaces(): Promise<void> {
+    if (this.workspacesBusy || this.stopping) return;
+    this.workspacesBusy = true;
+    try {
+      const dirs = new Set([...this.agents.values()].filter((a) => a.lifecycle === 'live').map((a) => a.entry.agent.cwd ?? '').filter(Boolean));
+      for (const dir of dirs) this.workspaceOf.set(dir, await this.workspaces.get(dir));
+    } finally {
+      this.workspacesBusy = false;
     }
   }
 

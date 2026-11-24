@@ -76,10 +76,11 @@ test('many historical digests are replayed in bounded chronological batches; res
 });
 
 test('refused session content is not resubmitted; the job records information gaps',async()=>{
- session();const p=project();digest(A,'不应重新发送的内容');
+ session();const p=project();digest(A,'可用的历史摘要');
+ t.db.prepare("INSERT INTO chunks(session_key,kind,text,backfill,digest_block_id) VALUES (?,'transcript','被拒的原文',0,1)").run(A);
  t.db.prepare('INSERT INTO digest_blocks(session_key,chunk_ids,message,created_at) VALUES (?,\'[]\',\'refused\',?)').run(A,NOW);
  t.user('link_session',{session:A,project:p});const j=job();expect(reviewDigestDependency(t.db,j)).toBeNull();
- await runProjectReview(t.db,t.deps,async call=>{expect(call.prompt).not.toContain('不应重新发送的内容');expect(call.prompt).toContain('信息缺口');return ok();},j,'m');
+ await runProjectReview(t.db,t.deps,async call=>{expect(call.prompt).toContain('可用的历史摘要');expect(call.prompt).not.toContain('被拒的原文');expect(call.prompt).toContain('信息缺口');return ok();},j,'m');
  expect(t.db.prepare('SELECT status FROM project_reviews WHERE id=?').get(j.id)).toEqual({status:'done_with_gaps'});
 });
 

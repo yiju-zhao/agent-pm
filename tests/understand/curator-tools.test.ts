@@ -353,33 +353,87 @@ test('a ts_end that is not a clean ISO instant is normalised or ignored instead 
 
 // ---- ask_user ----------------------------------------------------------------------------------------------------
 
-test('ask_user stores the question as ai:curator and reports it as proposed', async () => {
+test('ask_user refuses to ask which project a session is for: the curator decides that itself', async () => {
   const { out, result } = await call('ask_user', {
     kind: 'choice',
     prompt: '这个 session 属于哪个项目？',
+    context: '摘要里看不出来',
+    why_user: 'missing_information',
     project_id: null,
     session_key: 'claude:sess1111aaaabbbb',
     topic: 'which-project',
     evidence: [`digest:${d1}`],
-    reason: '摘要里看不出来',
     options: [
       { label: '新建项目', op: 'create_project', args: { title: '新课题', from_session: 'claude:sess1111aaaabbbb' } },
+      { label: '关联到 P', op: 'link_session', args: { session: 'claude:sess1111aaaabbbb', project: 'p_1' } },
       { label: '都不是', op: null },
     ],
   });
-  expect(out.isError).toBeFalsy();
+  expect(out.isError).toBe(true);
+  expect(result.message).toContain('由你自己判断');
+  expect(count(t.db, 'questions')).toBe(0);
+});
+
+test('ask_user stores a question with what happened, why the user decides, and a recommendation', async () => {
+  const p = t.user('create_project', { title: 'P' }).id;
+  const { result } = await call('ask_user', {
+    kind: 'choice',
+    prompt: '批准哪些条目？',
+    context: '你前半句说整包批准，后半句只批准 09、10、17。',
+    why_user: 'user_authority',
+    project_id: p,
+    topic: 'approve',
+    evidence: [`digest:${d1}`],
+    recommended: 1,
+    recommend_reason: '后半句更具体，也是最后说的',
+    options: [
+      { label: '整包批准', op: 'record_decision', args: { project: p, text: '整包批准' }, detail: '按建议全部推进' },
+      { label: '只批准 09、10、17', op: 'record_decision', args: { project: p, text: '只批准 09、10、17' }, detail: '其余暂缓' },
+      { label: '先不定', op: null },
+    ],
+  });
   expect(result).toMatchObject({ status: 'proposed' });
   expect(row(t.db, 'questions', result.question_ids[0])).toMatchObject({
     kind: 'choice',
     created_by: 'ai:curator',
-    session_key: 'claude:sess1111aaaabbbb',
-    dedupe_key: 'ask:-:claude:sess1111aaaabbbb:which-project',
+    context: '你前半句说整包批准，后半句只批准 09、10、17。',
+    why_user: 'user_authority',
+    recommended: 1,
+    recommend_reason: '后半句更具体，也是最后说的',
+    dedupe_key: `ask:${p}:-:approve`,
   });
+});
+
+test('ask_user turns "do it or not" into a yes/no question, caps choices at four, and leaves work questions to reminders', async () => {
+  const p = t.user('create_project', { title: 'P' }).id;
+  const base = { context: 'c', why_user: 'user_authority', project_id: p, evidence: [`digest:${d1}`] };
+  const yesNo = await call('ask_user', {
+    ...base, kind: 'choice', prompt: '要清理 Git 历史吗？', topic: 'yn', recommended: 0,
+    options: [{ label: '清理', op: 'record_decision', args: { project: p, text: '清理历史' } }, { label: '保留', op: null }],
+  });
+  const stored = row(t.db, 'questions', yesNo.result.question_ids[0]);
+  expect(stored).toMatchObject({ kind: 'confirm', recommended: 0 });
+  expect(JSON.parse(stored.options as string)).toEqual([{ label: '清理', op: 'record_decision', args: { project: p, text: '清理历史' } }, { label: '拒绝', op: null }]);
+
+  const five = await call('ask_user', {
+    ...base, kind: 'choice', prompt: '选哪个？', topic: 'five',
+    options: [1, 2, 3, 4, 5].map((n) => ({ label: `方案 ${n}`, op: 'record_decision', args: { project: p, text: `方案 ${n}` } })),
+  });
+  expect(five.result.message).toContain('最多 4 个');
+
+  for (const why of ['conflict', 'risk', 'missing_information']) {
+    const work = await call('ask_user', { ...base, why_user: why, kind: 'confirm', prompt: '放行删除吗？', topic: why, option: { label: '放行', op: 'record_decision', args: { project: p, text: '放行' } } });
+    expect(work.result.message).toContain('set_blocker kind=user');
+  }
+  const bare = await call('ask_user', { kind: 'confirm', prompt: '开工吗？', project_id: p, evidence: [`digest:${d1}`], option: { label: '开工', op: 'transition_stage', args: { project: p, stage: 'build' } } });
+  expect(bare.result.message).toContain('context');
 });
 
 test('ask_user accepts the confirm and text shapes', async () => {
   const confirm = await call('ask_user', {
     kind: 'confirm',
+    context: '讨论已经收敛',
+    why_user: 'user_authority',
     prompt: '开工吗？',
     topic: 'c',
     evidence: [`chunk:${c1}`],
@@ -393,6 +447,8 @@ test('ask_user accepts the confirm and text shapes', async () => {
 
   const text = await call('ask_user', {
     kind: 'text',
+    context: '对话里没有提完成标准',
+    why_user: 'user_authority',
     prompt: '完成标准是什么？',
     topic: 't',
     evidence: [`chunk:${c1}`],
@@ -402,7 +458,7 @@ test('ask_user accepts the confirm and text shapes', async () => {
 });
 
 test('ask_user checks its evidence like the write tools do', async () => {
-  const base = { kind: 'confirm', prompt: '开工吗？', option: { label: '开工', op: 'transition_stage', args: { project: 'p_1', stage: 'build' } } };
+  const base = { kind: 'confirm', prompt: '开工吗？', context: 'c', why_user: 'user_authority', option: { label: '开工', op: 'transition_stage', args: { project: 'p_1', stage: 'build' } } };
   for (const evidence of [['digest:999'], [`digest:${d3}`], ['chunk:999']]) {
     const out = await byName(tools, 'ask_user').handler({ ...base, evidence });
     expect(out.isError, evidence[0]).toBe(true);
@@ -494,14 +550,16 @@ test('the batch counts tool calls that came back applied or proposed (questions 
   // A question is state too: asking again under another topic would duplicate it.
   const asked = await run('ask_user', {
     kind: 'choice',
-    prompt: '归属？',
+    prompt: '先看哪个？',
+    context: '两个方向都在对话里出现过',
+    why_user: 'user_authority',
     project_id: p,
     session_key: null,
     topic: 'owner',
     evidence: cite(d1),
     options: [
-      { label: '是', op: null },
-      { label: '否', op: null },
+      { label: '甲', op: null },
+      { label: '乙', op: null },
     ],
   });
   expect(asked.isError).toBeFalsy();
@@ -527,4 +585,40 @@ test('once the batch is closed every tool refuses without touching anything', as
   expect(count(t.db, 'events')).toBe(before);
   expect(count(t.db, 'projects')).toBe(1);
   expect(count(t.db, 'questions')).toBe(0);
+});
+
+// ---- project names -----------------------------------------------------------------------------------------------
+
+/** A session Paseo reports as working in the project `name`. */
+function paseoSession(key: string, name: string): void {
+  addSession(key);
+  t.db.prepare("INSERT INTO session_sources (source_id, external_id, session_key, project_name, lifecycle) VALUES ('paseo-mini', ?, ?, ?, 'live')").run(`agent-${key}`, key, name);
+}
+const ENV = () => ({ reason: '新的长期工作', evidence: [`digest:${d1}`] });
+
+test('a new project from a session is named after the session’s Paseo project', async () => {
+  paseoSession('claude:s1', 'open-evo');
+  const free = await call('create_project', { title: '演进平台重构', from_session: 'claude:s1', ...ENV() });
+  expect(free.result).toMatchObject({ status: 'rejected', code: 'invalid' });
+  expect(free.result.message).toContain('「open-evo」');
+  expect(count(t.db, 'projects')).toBe(0);
+  expect((await call('create_project', { title: 'open-evo', from_session: 'claude:s1', ...ENV() })).result.status).toBe('applied');
+});
+
+test('a second project under the same name needs a reason; the reason is kept with the event', async () => {
+  paseoSession('claude:s1', 'open-evo');
+  paseoSession('claude:s2', 'open-evo');
+  await call('create_project', { title: 'open-evo', from_session: 'claude:s1', ...ENV() });
+  const again = await call('create_project', { title: 'open-evo：RSI 流水线', from_session: 'claude:s2', ...ENV() });
+  expect(again.result).toMatchObject({ status: 'rejected', code: 'invalid' });
+  expect(again.result.message).toMatch(/已有以「open-evo」命名的项目.*link_session/);
+  const reasoned = await call('create_project', { title: 'open-evo：RSI 流水线', from_session: 'claude:s2', name_reason: '独立验收的流水线目标', ...ENV() });
+  expect(reasoned.result.status).toBe('applied');
+  expect(lastEvent(t.db).reason).toBe('新的长期工作（命名：独立验收的流水线目标）');
+});
+
+test('without a known project name (a home directory, no Paseo) the title is the curator’s', async () => {
+  addSession('claude:home');
+  t.db.prepare("UPDATE sessions SET cwd = '/Users/eason' WHERE key = 'claude:home'").run();
+  expect((await call('create_project', { title: '家庭财务整理', from_session: 'claude:home', ...ENV() })).result.status).toBe('applied');
 });

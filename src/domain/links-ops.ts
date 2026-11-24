@@ -27,6 +27,13 @@ export function resolveSessionKey(db: DatabaseSync, key: string): string | null 
   }
 }
 
+/** How a question names a session: its title when it has one, else its key. */
+function sessionLabel(ctx: OpContext, key: string): string {
+  const row = ctx.db.prepare('SELECT title FROM sessions WHERE key = ?').get(key) as { title: string | null } | undefined;
+  const title = row?.title?.trim();
+  return title ? (title.length > 60 ? `${title.slice(0, 60)}…` : title) : key;
+}
+
 function requireSession(ctx: OpContext, key: string): string {
   const resolved = resolveSessionKey(ctx.db, key);
   if (resolved === null) throw new OpRejected('not_found', `session ${key} not found`);
@@ -82,7 +89,9 @@ export function linkSession(ctx: OpContext, args: OpArgs<'link_session'>): { id:
   if (ctx.ai && existing.deleted_at !== null && existing.vetoed === 1) {
     ctx.propose({
       kind: 'confirm',
-      prompt: `AI 想把 session ${session} 重新关联到「${String(project.title)}」（你之前取消过）：${ctx.reason}`,
+      prompt: `把 session「${sessionLabel(ctx, session)}」重新关联到「${String(project.title)}」？`,
+      context: `你之前取消过这个关联。AI 的理由：${ctx.reason}`,
+      why_user: 'user_authority',
       options: confirmOptions('link_session', { ...args, session }),
       project_id: args.project,
       session_key: session,
@@ -164,7 +173,9 @@ function unlinkSession(ctx: OpContext, args: OpArgs<'unlink_session'>): void {
   if (ctx.ai && link.actor === 'user') {
     ctx.propose({
       kind: 'confirm',
-      prompt: `AI 想取消你建立的关联：session ${session} ↔「${String(project.title)}」：${ctx.reason}`,
+      prompt: `取消你建立的关联：session「${sessionLabel(ctx, session)}」↔「${String(project.title)}」？`,
+      context: `AI 的理由：${ctx.reason}`,
+      why_user: 'user_authority',
       options: confirmOptions('unlink_session', { session, project: args.project }),
       project_id: args.project,
       session_key: session,
@@ -191,7 +202,9 @@ function ignoreSession(ctx: OpContext, args: OpArgs<'ignore_session'>): void {
   if ((session.ignored ?? 0) === target) return;
   ctx.propose({
     kind: 'confirm',
-    prompt: `AI 建议${args.ignored ? '不再' : '恢复'}追踪 session ${key}：${ctx.reason}`,
+    prompt: `${args.ignored ? '不再' : '恢复'}追踪 session「${sessionLabel(ctx, key)}」？`,
+    context: `AI 的理由：${ctx.reason}`,
+    why_user: 'user_authority',
     options: confirmOptions('ignore_session', { session: key, ignored: args.ignored }),
     project_id: null,
     session_key: key,

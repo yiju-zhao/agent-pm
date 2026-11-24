@@ -95,6 +95,13 @@ export function answerQuestion(
   const stored = picked.text === null ? { option_index: picked.index } : { option_index: picked.index, text: picked.text };
 
   const op = option.op;
+  if (op === null && option.clears_blocker !== undefined) {
+    return transaction(db, () => {
+      const result = runOp(db, deps, { op: 'clear_blocker', args: option.clears_blocker!, actor: 'user', question_id: id });
+      resolve(db, deps, id, { status: 'answered', answer: stored });
+      return result;
+    });
+  }
   if (op === null) {
     resolve(db, deps, id, { status: 'answered', answer: stored, rejected: true });
     return done();
@@ -111,6 +118,8 @@ export function answerQuestion(
     }
     return transaction(db, () => {
       const result = runOp(db, deps, { op, args, actor: 'user', question_id: id });
+      // A blocker the answer settles goes with it; one already cleared meanwhile needs nothing.
+      if (option.clears_blocker !== undefined) runOp(db, deps, { op: 'clear_blocker', args: option.clears_blocker, actor: 'user', question_id: id });
       // The op may have withdrawn this very question as stale (it moved the column the question guards); answered wins.
       resolve(db, deps, id, { status: 'answered', answer: stored });
       return result;

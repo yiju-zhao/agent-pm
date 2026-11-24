@@ -85,10 +85,12 @@ function transitionStage(ctx: OpContext, args: OpArgs<'transition_stage'>): void
   }
 
   if (ctx.ai && !aiMayTransition(from, to)) {
-    const where = target ? `合并到「${String(target.title)}」` : `转到${STAGE_LABEL[to]}`;
+    const where = target ? `合并到「${String(target.title)}」` : `从${STAGE_LABEL[from]}改为${STAGE_LABEL[to]}`;
     ctx.propose({
       kind: 'confirm',
-      prompt: `AI 建议把「${String(row.title)}」从${STAGE_LABEL[from]}${where}：${ctx.reason}`,
+      prompt: `把「${String(row.title)}」${where}？`,
+      context: `AI 的判断：${ctx.reason}`,
+      why_user: 'user_authority',
       options: confirmOptions('transition_stage', args),
       project_id: args.project,
       session_key: null,

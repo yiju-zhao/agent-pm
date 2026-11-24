@@ -9,6 +9,8 @@ const PATHS = {
   inbox: 'M2 3h12v10H2V3Zm0 6h3l1 2h4l1-2h3M5 5h6M5 7h6',
   board: 'M2 2h4v12H2V2Zm8 0h4v7h-4V2Z',
 
+  console: 'M2 2h12v12H2V2Zm0 4h12M6 6v8',
+  review: 'M2 13h12M4 13V8m3 5V4m3 9V7m3 6V2',
   warning: 'M8 1.5 15 14H1L8 1.5Zm0 4.5v4m0 2v.5',
   blocked: 'M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM3.5 12.5l9-9',
 } as const;

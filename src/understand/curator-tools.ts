@@ -3,8 +3,9 @@ import { z } from 'zod';
 import { execute } from '../domain/execute.ts';
 import { OP_SCHEMAS } from '../domain/ops.ts';
 import type { OpName } from '../domain/ops.ts';
-import { ASK_COMMON_SHAPE, askUser, ChoiceOption, ConfirmOption, TextOption } from '../domain/questions.ts';
-import { getProject } from '../domain/read.ts';
+import { ASK_COMMON_SHAPE, askUser, AskUserInput, ChoiceOption, ConfirmOption, shapeAiQuestion, TextOption } from '../domain/questions.ts';
+import { sessionProjectName, titleUsesName } from '../domain/project-names.ts';
+import { getProject, listProjects } from '../domain/read.ts';
 import type { DomainDeps, OpResult } from '../domain/types.ts';
 import { renderProjectMarkdown } from './render.ts';
 import type { ToolDef, ToolOutput } from './tool-def.ts';
@@ -154,11 +155,11 @@ const WRITE_OPS = [
   },
   {
     op: 'set_blocker',
-    description: '新增阻塞（text、kind: user/external/technical），或带 id 修改已有阻塞。',
+    description: '新增阻塞（text、kind: user/external/technical），或带 id 修改已有阻塞。阻塞只记真正卡住项目推进、且对话结束时仍未解决的事；进度说明、待验证事项、要修的 bug 记成 todo。kind=user 用于 session 在等用户回复、拍板或动手的事（会作为提醒显示给用户），text 写清等的是什么。先看项目已有的阻塞，不重复记录。',
   },
   {
     op: 'clear_blocker',
-    description: '把一条阻塞标记为已解决（需要 project 和阻塞 id）。只在对话里确认解决后使用。',
+    description: '把一条阻塞标记为已解决（需要 project 和阻塞 id）。对话显示它已解决或已不成立时就使用，不要让过时的阻塞留着。',
   },
   {
     op: 'link_session',
@@ -170,10 +171,37 @@ const WRITE_OPS = [
   },
 ] as const satisfies ReadonlyArray<{ op: OpName; description: string }>;
 
+/** `create_project` also takes the reason a title departs from the session's project name (see `namingRefusal`). */
+const NAMING_ENVELOPE = {
+  name_reason: z
+    .string()
+    .optional()
+    .describe('只在标题不以 session 所在项目名开头、或该项目名下已有看板项目时填写：为什么这是一个独立的新目标、为什么要换名字'),
+};
+
+/**
+ * Why a new project must not be created as asked, or null. A project is long-lived work named after the Paseo project
+ * (or folder) its session works in: the title starts with that name, and a second board project under the same name
+ * needs a stated reason (an independent goal in the same repository), since it is far more often the same work again.
+ */
+function namingRefusal(db: DatabaseSync, deps: DomainDeps, args: { title: string; from_session?: string }, nameReason: string | undefined): string | null {
+  if (nameReason?.trim()) return null;
+  const name = args.from_session ? sessionProjectName(db, args.from_session) : null;
+  if (name === null) return null;
+  if (!titleUsesName(args.title, name)) {
+    return `项目标题应以 session 所在项目名「${name}」开头（例如「${name}」或「${name}：<独立目标>」）。如果对话内容确实与「${name}」无关，填写 name_reason 说明。`;
+  }
+  const same = listProjects(db, deps.now(), {}).filter((p) => !p.closed && titleUsesName(p.title, name));
+  if (same.length > 0) {
+    return `看板上已有以「${name}」命名的项目：${same.map((p) => `${p.id}「${p.title}」`).join('、')}。同一个项目的工作请用 link_session 关联过去；只有这是该仓库里一个可独立验收的新目标时，才填写 name_reason 说明后新建。`;
+  }
+  return null;
+}
+
 function writeTool(db: DatabaseSync, deps: DomainDeps, run: RunState, spec: { op: OpName; description: string }): ToolDef {
   const { op } = spec;
   // Every entry of OP_SCHEMAS used here is a plain z.object(...).strict(), so its fields can be reused as they are.
-  const input: z.ZodRawShape = { ...OP_SCHEMAS[op].shape, ...WRITE_ENVELOPE };
+  const input: z.ZodRawShape = { ...OP_SCHEMAS[op].shape, ...WRITE_ENVELOPE, ...(op === 'create_project' ? NAMING_ENVELOPE : {}) };
   // The SDK validates before calling the handler; tests and other callers do not, so the handler checks too.
   const schema = z.strictObject(input);
   return {
@@ -184,14 +212,20 @@ function writeTool(db: DatabaseSync, deps: DomainDeps, run: RunState, spec: { op
       if (run.batch.closed) return ENDED;
       const parsed = schema.safeParse(raw);
       if (!parsed.success) return rejected('invalid', `invalid arguments for ${op}: ${z.prettifyError(parsed.error)}`);
-      const { reason, evidence, occurred_at, ...args } = parsed.data as {
+      const { reason: given, evidence, occurred_at, name_reason, ...args } = parsed.data as {
         reason: string;
         evidence: string[];
         occurred_at?: string;
+        name_reason?: string;
       } & Record<string, unknown>;
 
       const cited = checkEvidence(db, run.ids, evidence);
       if (!cited.ok) return rejected('missing_evidence', cited.message);
+      if (op === 'create_project') {
+        const refusal = namingRefusal(db, deps, args as { title: string; from_session?: string }, name_reason);
+        if (refusal !== null) return rejected('invalid', refusal);
+      }
+      const reason = name_reason ? `${given}（命名：${name_reason}）` : given;
       return resultOutput(
         landed(
           run,
@@ -217,8 +251,12 @@ const ASK_INPUT = {
 };
 
 const ASK_DESCRIPTION = [
-  '向用户提一个问题，由用户在网页上回答；用于你拿不准、又不该自己决定的事（这个 session 属于哪个项目、是否新建项目等）。',
-  'kind=choice 给 2 到 6 个 options；kind=text 或 confirm 给一个 option（text 要 text_arg，用户的输入填进去）。',
+  '就看板本身的事向用户提一个必须由用户拍板的问题（why_user=user_authority），例如两个项目是否其实是同一个、项目阶段、用户锁定的内容。',
+  'agent-pm 只读 agent 的工作，在这里的回答到不了 agent：session 里的工作问题（指示冲突、风险、缺少信息、等用户回复或动手）不要问，用 set_blocker kind=user 记下，它会作为提醒显示给用户，并随进展自动消失。',
+  'session 属于哪个项目、要不要新建项目由你自己决定，不要问（这类问题会被拒绝）。',
+  'context 用一两句说清发生了什么；prompt 只写问题本身，一句话。能问是/否就用 kind=confirm（给一个 option，系统自动加"拒绝"）；',
+  '多选用 kind=choice，最多 4 个 options，每个写 detail 说明选它会怎样；只有缺事实时才用 kind=text（要 text_arg，用户的输入填进去）。',
+  '给出 recommended（你建议的选项序号；confirm 里 0 是"是"、1 是"否"）和 recommend_reason。',
   '每个选项的 op 和 args 必须是一个合法操作；op 为 null 表示"什么都不做"。',
   '不能让用户移动项目到 done、abandoned、merged、parked，那类提议请直接调用 transition_stage。',
   '必须给 evidence（本批摘要 digest:<id> 或已有 chunk:<id>）；topic 相同的重复提问会合并。',
@@ -238,7 +276,11 @@ function askTool(db: DatabaseSync, deps: DomainDeps, run: RunState): ToolDef {
 
       const cited = checkEvidence(db, run.ids, ask.evidence);
       if (!cited.ok) return rejected('missing_evidence', cited.message);
-      return resultOutput(landed(run, askUser(db, deps, ask, CURATOR_ACTOR)));
+      const input = AskUserInput.safeParse(ask);
+      if (!input.success) return rejected('invalid', `invalid arguments for ask_user: ${z.prettifyError(input.error)}`);
+      const shaped = shapeAiQuestion(input.data);
+      if (!shaped.ok) return rejected('invalid', shaped.message);
+      return resultOutput(landed(run, askUser(db, deps, shaped.ask, CURATOR_ACTOR)));
     },
   };
 }

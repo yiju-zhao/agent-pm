@@ -34,6 +34,7 @@ function draft(prompt: string, over: Record<string, unknown> = {}): Record<strin
   const id = chunkIds(prompt)[0] ?? factIds(prompt)[0]!;
   return {
     title: '采集可靠性',
+    title_change_reason: '目标已从泛泛的采集变成采集可靠性',
     summary: '为看板用户补齐漏采的会话内容',
     why: '项目判断依赖完整证据',
     done_criteria: ['中文批次入库', '关窗尾部补读'],
@@ -191,15 +192,18 @@ test('ignored and provider-refused sessions are gaps: their content is never sen
   const source = project('来源', [A, B]);
   const target = project('目标', [C]);
   chunk(A, 'IGNORED-CONTENT');
-  chunk(B, 'REFUSED-CONTENT');
+  const denied = chunk(B, 'REFUSED-CONTENT');
+  chunk(B, 'LATER-CONTENT');
   chunk(C, 'readable');
   op('ignore_session', { session: A, ignored: true });
-  db.prepare("INSERT INTO digest_blocks (session_key, chunk_ids, message, created_at) VALUES (?, '[]', 'refused', ?)").run(B, NOW);
+  const block = db.prepare("INSERT INTO digest_blocks (session_key, chunk_ids, message, created_at) VALUES (?, ?, 'refused', ?)").run(B, JSON.stringify([denied]), NOW);
+  db.prepare('UPDATE chunks SET digest_block_id=? WHERE id=?').run(block.lastInsertRowid, denied);
   const view = await preview(source, { target });
   expect(view.status).toBe('ready');
   expect(calls[0]!.prompt).not.toContain('IGNORED-CONTENT');
   expect(calls[0]!.prompt).not.toContain('REFUSED-CONTENT');
-  expect(view.coverage!.sessions).toMatchObject([{ session_key: A, status: 'ignored', chunks_read: 0 }, { session_key: B, status: 'refused', chunks_read: 0 }, { session_key: C, status: 'read' }]);
+  expect(calls[0]!.prompt).toContain('LATER-CONTENT');
+  expect(view.coverage!.sessions).toMatchObject([{ session_key: A, status: 'ignored', chunks_read: 0 }, { session_key: B, status: 'partial', chunks_read: 1, refused_chunks: 1 }, { session_key: C, status: 'read' }]);
   expect(db.prepare('SELECT count(*) AS n FROM digest_blocks').get()).toEqual({ n: 1 });
 
   const none = project('空来源', []);
@@ -304,5 +308,19 @@ test('only one preview is drafted at a time, and a draft may leave why and the c
   const view = (await http('GET', `/merge-previews/${first.body.id}`)).body as MergePreviewView;
   expect(view).toMatchObject({ status: 'ready', draft: { why: '', done_criteria: '' } });
   expect(view.changes!.fields.map((f) => f.field)).toEqual(['title', 'summary']);
+  expect(view.draft!.title_change_reason).toBe('目标已从泛泛的采集变成采集可靠性');
   expect(calls[0]!.system).toContain('不要为了填满而编写');
+});
+
+test('a draft keeps the target project title unless it says why the name no longer fits, and is told the sessions project names', async () => {
+  const source = project('来源', [A]);
+  const target = project('agent-pm', [C]);
+  db.prepare("INSERT INTO session_sources (source_id, external_id, session_key, project_name, lifecycle) VALUES ('paseo-x', 'agent-a', ?, 'agent-pm', 'live')").run(A);
+  chunk(A, 'a');
+  answer = (call) => ok(draft(call.prompt, { title: '另起的名字', title_change_reason: '' }));
+  const kept = await preview(source, { target });
+  expect(kept.draft).toMatchObject({ title: 'agent-pm', title_change_reason: null });
+  expect(kept.changes!.fields.map((f) => f.field)).not.toContain('title');
+  expect(calls[0]!.prompt).toContain('- agent-pm（1 个 session）');
+  expect(calls[0]!.system).toContain('title 默认沿用目标项目现在的标题');
 });

@@ -762,6 +762,12 @@ test('a question view has the fields in the brief and nothing internal', () => {
     created_by: 'ai:curator',
     created_at: NOW,
     resolution_note: null,
+    context: null,
+    why_user: null,
+    recommended: null,
+    recommend_reason: null,
+    auto: null,
+    about_blocker: null,
   });
 });
 

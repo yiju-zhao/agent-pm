@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import type { ActivityView } from '../../src/domain/activity.ts';
+import { activity, item, projectActivity } from './console-fixtures.ts';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 import type { ProjectCard, ProjectDetail, QuestionView } from '../../src/domain/read.ts';
@@ -33,6 +35,8 @@ const applied = () => json({ status: 'applied', event_id: 7, question_ids: [], w
 
 let project: ProjectDetail | null;
 let projects: ProjectCard[];
+/** What `/activity` answers for this project; null: nothing (the status band then shows only the record's numbers). */
+let pulse: ActivityView | null = null;
 let pending: QuestionView[];
 /** What a write answers with, by `METHOD /path`; anything not listed is applied. */
 let writes: Record<string, () => Response>;
@@ -44,6 +48,7 @@ function serve(): void {
     if (route === 'GET /projects/p_1') return project === null ? json({ error: 'not_found', message: 'project p_1 not found' }, 404) : json(project);
     if (route === 'GET /projects') return json(projects);
     if (route === 'GET /questions?status=pending&project_id=p_1') return json(pending);
+    if (pulse !== null && path.startsWith('/activity?days=30&tz=') && path.endsWith('&project=p_1')) return json(pulse);
     if (init?.method !== undefined && init.method !== 'GET') return (writes[route] ?? applied)();
     return json({ error: 'not_found', message: route }, 404);
   });
@@ -457,6 +462,7 @@ test('the merge menu says 读不到项目列表 when the project list cannot be 
   fetchMock.mockImplementation(async (input) => {
     if (String(input) === '/projects') return new Response('down', { status: 500 });
     if (String(input) === '/projects/p_1') return json(project);
+    if (String(input).startsWith('/activity')) return json({ error: 'not_found' }, 404);
     return json([]);
   });
   await renderPage();
@@ -504,6 +510,7 @@ test('opening another project starts from scratch', async () => {
     const path = String(input);
     if (path === '/projects/p_7') return json(detail({ id: 'p_7', title: '另一个项目' }));
     if (path === '/projects') return json([]);
+    if (path.startsWith('/activity')) return json({ error: 'not_found' }, 404);
     return json([]);
   });
   view.rerender(
@@ -515,4 +522,21 @@ test('opening another project starts from scratch', async () => {
   );
   expect(await screen.findByRole('button', { name: '另一个项目' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'dLLM 评测框架' })).toBeNull();
+});
+
+test('the status band shows where the project stands, its recent work and its own changes', async () => {
+  project = detail({ stage: 'verify', open_blockers: [blocker()], todos: [todo({ id: 't_1' }), todo({ id: 't_2', status: 'done' })] });
+  pulse = activity({ days: ['2026-11-14', '2026-11-15'], projects: [projectActivity({ daily: [2, 5], marks: [{}, {}], totals: { chunks: 7, sessions: 2, decisions: 3, done: 4, stage_changes: 0, blockers_opened: 0, blockers_cleared: 0 } })], items: [item({ day: 1 })] });
+  await renderPage();
+  const metrics = screen.getByRole('group', { name: '项目指标' });
+  expect(within(metrics).getByRole('img', { name: '阶段：验证' })).toBeTruthy();
+  expect(within(metrics).getByText('开放阻塞').parentElement!.textContent).toBe('开放阻塞1');
+  expect(within(metrics).getByText('未完成 todo').parentElement!.textContent).toBe('未完成 todo1');
+  await waitFor(() => expect(within(metrics).getByText('30 天决策').parentElement!.textContent).toBe('30 天决策3'));
+  expect(screen.getByRole('region', { name: '投入' }).textContent).toContain('近 30 天 7 段对话 · 2 个 session');
+  const changes = screen.getByRole('region', { name: '最近变化' });
+  expect(within(changes).getByText('评测集先用公开 v2')).toBeTruthy();
+  // Its own feed: no project name on every row.
+  expect(within(changes).queryByRole('link')).toBeNull();
+  pulse = null;
 });

@@ -193,7 +193,8 @@ test('user edit locks the field; ai update of a locked field becomes a confirm q
   expect(r).toMatchObject({ status: 'applied', question_ids: [expect.any(String)] });
   expect(project(p)).toMatchObject({ title: '用户标题', summary: '新摘要' });
   const q = question(r.question_ids[0]);
-  expect(q.prompt).toBe('AI 想修改你锁定的字段（title）：r');
+  expect(q.prompt).toBe('用 AI 的新内容替换你锁定的标题？');
+  expect(q).toMatchObject({ context: 'AI 的理由：r', why_user: 'user_authority' });
   expect(q).toMatchObject({
     kind: 'confirm',
     status: 'pending',
@@ -204,7 +205,7 @@ test('user edit locks the field; ai update of a locked field becomes a confirm q
   });
   expect(JSON.parse(q.guards as string)).toEqual([{ table: 'projects', id: p, col: 'title', equals: '用户标题' }]);
   expect(JSON.parse(q.options as string)).toEqual([
-    { label: '确认', op: 'update_project', args: { project: p, fields: { title: 'AI 标题' } } },
+    { label: '确认', op: 'update_project', args: { project: p, fields: { title: 'AI 标题' } }, detail: '标题 → AI 标题' },
     { label: '拒绝', op: null },
   ]);
 });
@@ -215,7 +216,8 @@ test('ai update of only locked fields is proposed as one question with the field
   const r = t.ai('update_project', { project: p, fields: { title: 't', summary: 'AI', priority: 'P0' } }, { reason: '优先级变了' });
   expect(r).toMatchObject({ status: 'proposed', question_ids: [expect.any(String)] });
   const q = question(r.question_ids[0]);
-  expect(q.prompt).toBe('AI 想修改你锁定的字段（priority、summary、title）：优先级变了');
+  expect(q.prompt).toBe('用 AI 的新内容替换你锁定的优先级、简介、标题？');
+  expect(JSON.parse(q.options as string)[0].detail).toBe('优先级 → P0；简介 → AI；标题 → t');
   expect(q.dedupe_key).toBe(`update:projects:${p}:priority,summary,title`);
   expect(JSON.parse(q.guards as string)).toHaveLength(3);
   expect(events(p)).toHaveLength(2);
@@ -296,7 +298,8 @@ test('an ai stage proposal names the stages and guards the current stage', () =>
   const p = aiProject('dLLM 评测');
   const r = t.ai('transition_stage', { project: p, stage: 'done' }, { reason: '评测跑完了' });
   const q = question(r.question_ids[0]);
-  expect(q.prompt).toBe('AI 建议把「dLLM 评测」从idea转到完成：评测跑完了');
+  expect(q.prompt).toBe('把「dLLM 评测」从idea改为完成？');
+  expect(q.context).toBe('AI 的判断：评测跑完了');
   expect(q.dedupe_key).toBe(`stage:${p}:done`);
   expect(JSON.parse(q.guards as string)).toEqual([{ table: 'projects', id: p, col: 'stage', equals: 'idea' }]);
   expect(JSON.parse(q.options as string)[0]).toEqual({ label: '确认', op: 'transition_stage', args: { project: p, stage: 'done' } });
@@ -308,7 +311,7 @@ test('an ai merge proposal names the target', () => {
   const r = t.ai('transition_stage', { project: a, stage: 'merged', merge_into: b });
   expect(r).toMatchObject({ status: 'proposed' });
   const q = question(r.question_ids[0]);
-  expect(q.prompt).toBe('AI 建议把「A 项目」从idea合并到「B 项目」：r');
+  expect(q.prompt).toBe('把「A 项目」合并到「B 项目」？');
   expect(JSON.parse(q.options as string)[0].args).toEqual({ project: a, stage: 'merged', merge_into: b });
   expect(project(a).stage).toBe('idea');
 });

@@ -456,6 +456,80 @@ export const MIGRATIONS: string[] = [
     updated_at TEXT NOT NULL
   );
   `,
+  // v11: the project a session belongs to in Paseo (projects are named after it), and questions written for a quick
+  // answer: what happened, why the user has to decide, and what the AI recommends. `triaged_at` marks a question an
+  // automatic decider has looked at, whatever it concluded.
+  `
+  ALTER TABLE session_sources ADD COLUMN project_name TEXT;
+  ALTER TABLE questions ADD COLUMN context TEXT;
+  ALTER TABLE questions ADD COLUMN why_user TEXT;
+  ALTER TABLE questions ADD COLUMN recommended INTEGER;
+  ALTER TABLE questions ADD COLUMN recommend_reason TEXT;
+  ALTER TABLE questions ADD COLUMN triaged_at TEXT;
+  `,
+  // v12: when an open blocker was last checked against what happened since (see understand/blocker-review.ts).
+  `
+  ALTER TABLE blockers ADD COLUMN reviewed_at TEXT;
+  `,
+  // v13: the repository state of a session's working directory as its collector last read it (JSON; see
+  // shared/workspace.ts), so the models judge from what is on disk, not only from what was said.
+  `
+  ALTER TABLE session_sources ADD COLUMN workspace TEXT;
+  `,
+  // v14: reminders the user put off. A reminder is derived from sessions, projects and repositories (see
+  // domain/reminders.ts); this only keeps "not now" (until a time) or "not again" (until it changes, by fingerprint).
+  `
+  CREATE TABLE reminder_snoozes (
+    key TEXT PRIMARY KEY,
+    until TEXT,
+    fingerprint TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  `,
+  // v15: keep each refused window and point its original chunks at it. Retain even malformed legacy records.
+  `
+  ALTER TABLE digest_blocks RENAME TO old_digest_blocks;
+  CREATE TABLE digest_blocks (
+    id INTEGER PRIMARY KEY,
+    session_key TEXT NOT NULL,
+    chunk_ids TEXT NOT NULL,
+    message TEXT NOT NULL,
+    run_id INTEGER,
+    created_at TEXT NOT NULL,
+    needs_review INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX digest_blocks_session ON digest_blocks(session_key);
+  ALTER TABLE chunks ADD COLUMN digest_block_id INTEGER;
+  CREATE INDEX chunks_refused ON chunks(digest_block_id) WHERE digest_block_id IS NOT NULL;
+  INSERT INTO digest_blocks(session_key,chunk_ids,message,run_id,created_at)
+    SELECT session_key,chunk_ids,message,run_id,created_at FROM old_digest_blocks;
+  -- A pending session may already have acquired a native key. Follow its persisted identity before matching IDs.
+  WITH RECURSIVE aliases(original, session_key) AS (
+    SELECT session_key,session_key FROM digest_blocks
+    UNION SELECT a.original,s.merged_into FROM aliases a JOIN sessions s ON s.key=a.session_key WHERE s.merged_into IS NOT NULL
+  )
+  UPDATE digest_blocks AS b SET session_key=coalesce((
+    SELECT a.session_key FROM aliases a JOIN sessions s ON s.key=a.session_key
+    WHERE a.original=b.session_key AND s.merged_into IS NULL
+  ),b.session_key);
+  UPDATE chunks AS c SET digest_block_id=b.id
+    FROM digest_blocks b, json_each(CASE WHEN json_valid(b.chunk_ids) THEN b.chunk_ids ELSE '[]' END) j
+    WHERE j.type='integer' AND c.id=j.value AND c.session_key=b.session_key
+      AND json_type(CASE WHEN json_valid(b.chunk_ids) THEN b.chunk_ids ELSE 'null' END)='array';
+  UPDATE digest_blocks AS b SET needs_review=1 WHERE
+    CASE WHEN NOT json_valid(chunk_ids) THEN 1
+         WHEN json_type(chunk_ids)!='array' OR json_array_length(chunk_ids)=0 THEN 1
+         ELSE json_array_length(chunk_ids)!=(SELECT count(*) FROM chunks c WHERE c.digest_block_id=b.id) END;
+  -- A damaged list cannot identify the exact input. Hold its pre-refusal candidates for manual matching;
+  -- later arrivals remain eligible. A valid list containing missing numeric IDs needs no speculative match.
+  UPDATE chunks AS c SET digest_block_id=b.id FROM digest_blocks b
+    WHERE b.needs_review=1 AND c.session_key=b.session_key AND c.digested=0 AND c.digest_block_id IS NULL
+      AND (c.received_at IS NULL OR c.received_at<=b.created_at)
+      AND CASE WHEN NOT json_valid(b.chunk_ids) THEN 1
+               WHEN json_type(b.chunk_ids)!='array' OR json_array_length(b.chunk_ids)=0 THEN 1
+               ELSE EXISTS (SELECT 1 FROM json_each(b.chunk_ids) WHERE type!='integer') END;
+  DROP TABLE old_digest_blocks;
+  `,
 ];
 
 /** Opens (creating if needed) the central database in WAL mode and applies pending migrations. */
