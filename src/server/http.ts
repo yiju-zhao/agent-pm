@@ -51,6 +51,7 @@ export function createApp(
 ): Hono {
   const scheduler = opts.scheduler ?? null;
   const app = new Hono();
+  const reminderSources = { config, startedAt: clock() };
   const deps: DomainDeps = { now: clock, newId: newId ?? defaultDeps().newId };
 
   // Anything not handled below is a bug: say so on stderr, tell the client only that it happened.
@@ -124,11 +125,11 @@ export function createApp(
   });
 
   // What waits on the user or has stalled, derived from sessions, projects and repositories (../domain/reminders.ts).
-  app.get('/reminders', (c) => c.json(listReminders(db, clock())));
+  app.get('/reminders', (c) => c.json(listReminders(db, clock(), reminderSources)));
   app.post('/reminders/snooze', userAuth(config, db, clock), async (c) => {
     const body = z.object({ key: z.string().min(1).max(2000), hours: z.number().int().min(1).max(24 * 90).nullable() }).strict().safeParse(await c.req.json().catch(() => undefined));
     if (!body.success) return c.json({ error: 'invalid', message: z.prettifyError(body.error) }, 400);
-    return snoozeReminder(db, clock(), body.data.key, body.data.hours) ? c.json({ ok: true }) : c.json({ error: 'not_found', message: '这条提醒已经不存在' }, 404);
+    return snoozeReminder(db, clock(), body.data.key, body.data.hours, reminderSources) ? c.json({ ok: true }) : c.json({ error: 'not_found', message: '这条提醒已经不存在' }, 404);
   });
 
   // Work and milestones per day over a period, for the overview and the review page (see ../domain/activity.ts).

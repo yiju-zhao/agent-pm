@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Reminder, ReminderCategory } from '../../../src/domain/reminders.ts';
 import { apiSend, errorText } from '../api.ts';
 import { relTime } from '../format.ts';
@@ -16,6 +16,7 @@ export const CATEGORY: Record<ReminderCategory, { label: string; hint: string; t
   waiting_you: { label: '等你回复或动手', hint: 'session 里在等你的回复、决定或操作；去那个 session 处理', tone: 'warn' },
   stalled: { label: '需要继续推进', hint: '高优先级项目一周以上没有进展', tone: 'warn' },
   unpushed: { label: '还没推送', hint: '提交两小时以上还没推送到远端', tone: 'accent' },
+  source_offline: { label: '采集来源断联', hint: '检查该来源的采集器，恢复心跳后提醒会消失', tone: 'bad' },
   waiting_external: { label: '等外部', hint: '等厂商、额度或其他人；条件满足后会自动消失', tone: 'muted' },
 };
 
@@ -71,6 +72,11 @@ function ReminderRow({ r, reload, compact, inProject = false }: { r: Reminder; r
  */
 export function Reminders({ compact = false, perCategory = compact ? 3 : Infinity, groupBy = 'category' }: { compact?: boolean; perCategory?: number; groupBy?: 'category' | 'project' }) {
   const reminders = useApi<Reminder[]>(REMINDERS_PATH, ['projects', 'sessions', 'questions']);
+  // Crossing the heartbeat threshold and a snooze expiring can both happen without a stream event.
+  useEffect(() => {
+    const timer = setInterval(reminders.reload, 60_000);
+    return () => clearInterval(timer);
+  }, [reminders.reload]);
   const list = reminders.data ?? [];
   if (reminders.error) return <p className="dim">{`读不到提醒：${errorText(reminders.error)}`}</p>;
   if (reminders.data === undefined) return <p className="dim">加载中…</p>;

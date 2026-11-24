@@ -236,9 +236,9 @@ export class Scheduler {
     const scalar = (sql: string): number => (this.db.prepare(sql).get() as { n: number }).n;
     const latest = (sql: string): string | null => (this.db.prepare(sql).get() as { at: string | null }).at;
     const counts = this.readChunkCounts(now);
-    const blocked = this.db.prepare(`SELECT b.session_key FROM digest_blocks b LEFT JOIN sessions s ON s.key=b.session_key
-      WHERE coalesce(s.ignored,0)=0 ORDER BY b.created_at`).all() as Array<{ session_key: string }>;
-    const refusal = blocked.length ? `上游拒绝摘要：${blocked.map((b) => b.session_key).join('、')}；已暂停这些会话的自动摘要，原文保留，其他会话正常处理` : null;
+    const blocked = this.db.prepare(`SELECT b.session_key, sum(b.needs_review) AS unresolved FROM digest_blocks b LEFT JOIN sessions s ON s.key=b.session_key
+      WHERE coalesce(s.ignored,0)=0 GROUP BY b.session_key ORDER BY min(b.created_at)`).all() as Array<{ session_key: string; unresolved: number }>;
+    const refusal = blocked.length ? `上游拒绝摘要：${blocked.map((b) => b.unresolved ? b.session_key + '（旧记录待核对）' : b.session_key).join('、')}。被拒片段保留原文，后续片段照常摘要` : null;
     return {
       enabled: true,
       paused_until: paused ? new Date(this.pausedUntil!).toISOString() : null,
@@ -274,18 +274,18 @@ export class Scheduler {
       waiting_sessions: scalar(
         `SELECT count(DISTINCT c.session_key) AS n FROM chunks c LEFT JOIN sessions s ON s.key = c.session_key
          WHERE c.digested = 0 AND c.backfill = 0 AND coalesce(s.ignored, 0) = 0
-         AND NOT EXISTS (SELECT 1 FROM digest_blocks b WHERE b.session_key = c.session_key)`,
+         AND c.digest_block_id IS NULL`,
       ),
       // Ignored sessions are never digested, so they are left out like in `waiting_sessions`.
       backfill: {
         sessions_total: scalar(
           `SELECT count(DISTINCT c.session_key) AS n FROM chunks c LEFT JOIN sessions s ON s.key = c.session_key
-           WHERE c.backfill = 1 AND coalesce(s.ignored, 0) = 0`,
+           WHERE c.backfill = 1 AND c.digest_block_id IS NULL AND coalesce(s.ignored, 0) = 0`,
         ),
         sessions_done: scalar(
           `SELECT count(*) AS n FROM (
              SELECT c.session_key FROM chunks c LEFT JOIN sessions s ON s.key = c.session_key
-             WHERE c.backfill = 1 AND coalesce(s.ignored, 0) = 0
+             WHERE c.backfill = 1 AND c.digest_block_id IS NULL AND coalesce(s.ignored, 0) = 0
              GROUP BY c.session_key HAVING sum(c.digested = 0) = 0
            )`,
         ),
@@ -588,7 +588,7 @@ export class Scheduler {
       .prepare(
         `SELECT DISTINCT c.session_key AS key FROM chunks c LEFT JOIN sessions s ON s.key = c.session_key
          WHERE c.digested = 0 AND c.backfill = 0 AND c.id <= ? AND coalesce(s.ignored, 0) = 0
-         AND NOT EXISTS (SELECT 1 FROM digest_blocks b WHERE b.session_key = c.session_key)`,
+         AND c.digest_block_id IS NULL`,
       )
       .all(marks.chunk) as Array<{ key: string }>;
     return keys.every((r) => this.cooling(r.key, now));
@@ -611,7 +611,7 @@ export class Scheduler {
         `SELECT c.session_key AS key, min(c.received_at) AS oldest
          FROM chunks c LEFT JOIN sessions s ON s.key = c.session_key
          WHERE c.digested = 0 AND c.backfill = ? AND coalesce(s.ignored, 0) = 0
-         AND NOT EXISTS (SELECT 1 FROM digest_blocks b WHERE b.session_key = c.session_key)
+         AND c.digest_block_id IS NULL
          GROUP BY c.session_key ORDER BY oldest, key`,
       )
       .all(backfill ? 1 : 0) as Candidate[];

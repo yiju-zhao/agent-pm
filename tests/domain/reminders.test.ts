@@ -69,3 +69,33 @@ test('"later" hides a reminder for a while; "not again" until what it says chang
   expect(keys()).toEqual([['waiting_you', `blocker:${b}`]]);
   expect(snoozeReminder(t.db, t.deps.now(), 'blocker:nope', 1)).toBe(false);
 });
+
+test('a configured source warns after an hour, snoozes per outage, and clears on recovery', () => {
+  const config = { collectors: { mini: 'test' } };
+  const sources = { config, startedAt: new Date(NOW) };
+  const reminders = () => listReminders(t.db, t.deps.now(), sources).filter(r => r.category === 'source_offline');
+  expect(reminders()).toHaveLength(0);
+  t.setNow('2026-11-16T13:01:00.000Z');
+  expect(reminders().map(r => r.key)).toEqual(['source:herdr:mini']);
+  expect(snoozeReminder(t.db, t.deps.now(), 'source:herdr:mini', null, sources)).toBe(true);
+  t.setNow('2026-11-21T12:00:00.000Z');
+  expect(reminders()).toHaveLength(0);
+  t.db.prepare('UPDATE ingest_sources SET collector_heartbeat=?').run(t.deps.now().toISOString());
+  expect(reminders()).toHaveLength(0);
+  t.setNow('2026-11-21T13:01:00.000Z');
+  expect(reminders()).toHaveLength(1);
+  t.db.prepare('UPDATE ingest_sources SET collector_heartbeat=?').run(t.deps.now().toISOString());
+  expect(reminders()).toHaveLength(0);
+});
+
+test('never-reported sources have a grace period; retired sources stay out of reminders', () => {
+  const sources = { config: { collectors: { unused: 'test' } }, startedAt: new Date(NOW) };
+  const offline = () => listReminders(t.db, t.deps.now(), sources).filter(r => r.category === 'source_offline');
+  expect(offline()).toHaveLength(0);
+  t.setNow('2026-11-16T13:01:00.000Z');
+  expect(offline().map(r => r.key)).toEqual(['source:herdr:unused']);
+  expect(snoozeReminder(t.db, t.deps.now(), 'source:herdr:unused', 24, sources)).toBe(true);
+  expect(offline()).toHaveLength(0);
+  t.setNow('2026-11-17T13:02:00.000Z');
+  expect(offline().map(r => r.key)).toEqual(['source:herdr:unused']);
+});

@@ -321,7 +321,7 @@ curl -s -XPOST $S/events/2/revert -H "Authorization: Bearer $T"
 预览做什么、不做什么：
 
 - 草稿（标题、简介、为什么、完成标准、未知事项）由整理员模型根据**目标项目已有 session 加上本次并入 session 的已存正文**重写，不是拼接两个项目的旧文字，也不经过摘要；旧项目记录只作参考，部分合并时来源项目的旧记录和未选 session 的内容不会交给模型。每个字段带所依据的 chunk id，引用了没给过的 chunk 的草稿直接作废。
-- 内容多时按 10 万字符一段先逐段提取事实再汇总；超过 24 段时每个 session 保留开头和最近的若干段，跳过的部分在「证据范围」里写明。被你忽略的 session、被模型提供方拒绝过的 session 不会发送，作为缺口列出。
+- 内容多时按 10 万字符一段先逐段提取事实再汇总；超过 24 段时每个 session 保留开头和最近的若干段，跳过的部分在「证据范围」里写明。预览跳过被忽略的 session 和被模型拒绝的片段，并列出缺口；同一 session 的其余证据仍可读取。
 - 这里的「正文」是中心保存的归一化内容，不是 agent 机器上的原始 transcript：采集时被截断的消息、Paseo 较长事件的节选都会按 session 计数显示。
 - 生成预览不改任何项目、关联或阶段。确认时在一个事务里写入预览中的确切内容：关联的迁移和去重由代码按规则执行，不由模型决定；你锁定过的字段默认保留，逐个勾选才会被草稿替换；写入的字段随即锁定。
 - 预览记录了生成时的输入（两个项目的文字、阶段、锁，双方全部关联，相关 session 的内容量、忽略和拒绝状态）。其中任何一项之后变了，预览即过期，确认会被拒绝（`409 stale`），需要重新生成。模型失败、输出不合格、生成期间输入变化都只留下一条失败的预览。
@@ -338,9 +338,11 @@ curl -s -XPOST $S/events/2/revert -H "Authorization: Bearer $T"
 
 整理员只能写目标项目，所有写入仍经过原有领域操作并记录事件。用户锁定或编辑的内容、删除记录和否决不能被绕过；删除用户编辑过的条目仍需确认。用户中途撤销或改变关联时，旧任务停止后续写入，新请求读取最新状态；已产生的 AI 事件保留，可逐条撤销。
 
-上游拒绝或被忽略的 session 不重发原文，任务完成时记录 `done_with_gaps`，不会谎称信息完整。无写入的临时失败退避重试，发生部分写入后的失败不自动重放；`GET /status` 暴露 `pending_project_reviews`、`reviewing_project`、`failed_project_reviews`，失败会保留为可检查的状态。
+上游拒绝的片段保留原文、拒绝原因和调用记录，继续显示为信息缺口。同一 session 后续窗口照常处理。项目复核使用其余有效摘要，跳过被忽略的 session 和被隔离的片段，任务完成时记录 `done_with_gaps`，不会谎称信息完整。无写入的临时失败退避重试，发生部分写入后的失败不自动重放；`GET /status` 暴露 `pending_project_reviews`、`reviewing_project`、`failed_project_reviews`，失败会保留为可检查的状态。
 
 ## 采集覆盖核验
+
+Inbox 会提醒已配置的来源连续 1 小时没有上报心跳（短时间休眠的笔记本不会触发）。尚未上报的静态来源从本次中心启动算起，单独签发的 herdr 采集 key 从创建时算起。再次收到心跳后提醒自动消失。「明天再提醒」搁置 24 小时，「不再提醒」对同一次断联一直有效；恢复后再次断联会重新提醒。已移出配置且没有有效采集 key 的历史来源仅在覆盖页保留。
 
 `GET /coverage`（管理员）和 `Session` 页顶部的「采集覆盖核验」按来源列出实际收到了什么，避免把「采集器在线」当成「内容收齐」：
 
@@ -394,6 +396,8 @@ ls -l ~/.config/herdr-pm/claude-oauth-token         # 应为 -rw-------
 也可以不改配置，在网页 **设置 → 模型服务** 里粘贴 OAuth token 或 API key：它们写在配置文件旁的 `secrets/` 目录（权限 600），不进数据库，网页上之后只显示末四位。网页里选了凭据就用它；没选时用 `oauthTokenFile`；都没有时用本机登录。
 
 token 只放在这个文件里，**不要写进 launchd plist 或配置 JSON**。没有 `oauthTokenFile` 时，中心用这台机器上 Claude Code 自己的登录（环境变量 `CLAUDE_CODE_OAUTH_TOKEN` 也行），启动时会打印一行提示。整个理解层可以用 `"understanding": { "enabled": false }` 关掉，关掉后 `/status` 显示 `enabled: false`，`/sync` 返回 409。
+
+v15 起，模型拒绝摘要时只隔离该窗口实际提交的 chunk。手动同步、重启和历史回填都跳过这些片段，保留原文及拒绝记录，顶栏显示有拒摘缺口的会话数。迁移旧记录按已保存的 chunk ID 匹配，无法完整匹配的记录标为待核对。若连 ID 列表都不可辨认，迁移时暂存该次拒绝前可能涉入的未摘要片段，等待人工核对。其余积压会自动进入现有摘要和整理队列，启用理解层前应核对本次积压量和模型凭据。
 
 ### 看进度：`GET /status`、手动刷新：`POST /sync`
 
@@ -623,7 +627,8 @@ rows = [["state_icon", "machine", "workspace", "tab"], ["agent", "$pm_sid", "$pm
 - `paseo.url`：daemon 的 WebSocket 地址，`ws://<listen>/ws`。示例里的 `127.0.0.1:6767` 只是占位：daemon 监听在 Tailscale 地址上时要写那个地址。
 - `paseo.serverId`：同上。daemon 启用了密码时加 `"passwordFile"`。
 - `tokenFile`：只含 token 的文件（`chmod 600`）。token 和 daemon 密码都只从文件读，不进配置、日志或服务模板。
-- `stateDir`：每个来源一个，**不能共用**（目录锁保证同一时间只有一个进程用它；它记着这个来源和 daemon 的身份，换来源会拒绝启动）。里面只有待提交批次（outbox）和身份，没有位置：位置以中心为准，删掉这个目录只会让采集器从中心的位置继续。
+- `stateDir`：每个来源一个，**不能共用**（目录锁保证同一时间只有一个进程用它；它记着这个来源和 daemon 的身份，换来源会拒绝启动）。请保留其中的身份和未确认批次（outbox）。确认位置由中心保存。
+- 状态目录应放在本机文件系统上。采集器打开 `collector-lock.sqlite` 持有 SQLite 独占锁；正常退出、强制终止或机器重启都会释放内核锁。`collector.lock` 保留旧版本能读取的 PID。升级时自动检查旧十进制 PID：无关进程、Linux 非主线程、晚于锁文件才启动的进程均可接管；仍在运行的旧采集器继续持锁。升级时先停旧实例，保留原状态目录，无需手动删锁。
 - 可选：`includeArchivedHistory`（首次导入已归档的 agent，默认关）、`includeBackground`（默认开，后台 workspace 的 agent 也列出）、`exclude`（`{"projectKeys": [...], "labels": {...}}`，被排除的标为不再跟踪，不算结束）、`maxConcurrentAgents`、`maxOutboxBytes`（outbox 到上限时暂停读内容，心跳照常，不丢批次）。
 
 手动跑一次（前台，Ctrl-C 停止）：

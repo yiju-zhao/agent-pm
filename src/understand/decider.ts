@@ -91,7 +91,7 @@ function evidenceText(db: DatabaseSync, refs: string[]): string {
     if (!m) continue;
     const row = (m[1] === 'digest'
       ? db.prepare('SELECT json AS text FROM digests WHERE id = ?').get(Number(m[2]))
-      : db.prepare('SELECT text FROM chunks WHERE id = ?').get(Number(m[2]))) as { text: string | null } | undefined;
+      : db.prepare('SELECT text FROM chunks WHERE id = ? AND digest_block_id IS NULL').get(Number(m[2]))) as { text: string | null } | undefined;
     if (row?.text) parts.push(`<evidence ref="${ref}">${neutralizeTags(row.text.slice(0, EVIDENCE_CHARS), 'evidence')}</evidence>`);
   }
   return parts.join('\n').slice(0, PROMPT_EVIDENCE_CHARS);

@@ -1135,17 +1135,46 @@ test('a refused digest is durably isolated, never consumed, and other sessions c
   expect(restarted.status().blocked_reason).toContain(A);
 });
 
-test('sync and new content do not resubmit a provider-refused session; history remains incomplete', async () => {
+test('restart and manual sync digest later windows once while the refused window stays a gap', async () => {
   addSession(A);
-  const id = addChunk(A, BIG, { backfill: 1 });
-  const { runner, calls } = fakeRunner(() => ({ ok: false, kind: 'refused', message: 'provider declined', durationMs: 1 }));
+  const id = addChunk(A, 'DECLINED-' + BIG, { backfill: 1 });
+  const { runner, calls } = fakeRunner((call) => call.prompt.includes('DECLINED-')
+    ? { ok: false, kind: 'refused', message: 'provider declined', durationMs: 1 } : ok());
   const s = scheduler(runner);
   expect(await s.tick()).toBe('skipped');
-  addChunk(A, BIG);
-  s.requestSync();
-  expect(await s.tick()).toBe('idle');
-  expect(calls).toHaveLength(1); expect(digested(id)).toBe(0);
-  expect(s.status()).toMatchObject({ blocked_sessions: 1, waiting_sessions: 0, backfill: { sessions_total: 1, sessions_done: 0 } });
+  const later = addChunk(A, 'AFTER-' + BIG);
+  const restarted = scheduler(runner);
+  restarted.requestSync();
+  expect(await restarted.tick()).toBe('digested');
+  expect(digested(later)).toBe(1);
+  restarted.requestSync();
+  expect(await restarted.tick()).toBe('idle');
+  expect(calls.filter(c => c.prompt.includes('DECLINED-'))).toHaveLength(1);
+  expect(calls.filter(c => c.prompt.includes('AFTER-'))).toHaveLength(1);
+  expect(digested(id)).toBe(0);
+  expect(s.status()).toMatchObject({ blocked_sessions: 1, waiting_sessions: 0, backfill: { sessions_total: 0, sessions_done: 0 } });
   t.db.prepare('UPDATE sessions SET ignored=1 WHERE key=?').run(A);
   expect(s.status().blocked_sessions).toBe(0); expect(s.status().last_error).toBeNull();
+});
+
+test('two refusals in the same session retain both windows and still allow the next backfill', async () => {
+  addSession(A);
+  const { runner, calls } = fakeRunner(call => call.prompt.includes('DENY')
+    ? { ok: false, kind: 'refused', message: 'provider declined', durationMs: 1 } : ok());
+  const s = scheduler(runner);
+  const first = addChunk(A, 'DENY-1' + BIG);
+  expect(await s.tick()).toBe('skipped');
+  const second = addChunk(A, 'DENY-2' + BIG);
+  expect(await s.tick()).toBe('skipped');
+  const normal = addChunk(A, 'healthy' + BIG, { backfill: 1 });
+  expect(await s.tick()).toBe('digested');
+  expect(await s.tick()).toBe('idle');
+  expect(calls).toHaveLength(3);
+  expect(calls[1]!.prompt).not.toContain('DENY-1');
+  expect(calls[2]!.prompt).not.toContain('DENY');
+  expect(t.db.prepare('SELECT chunk_ids FROM digest_blocks ORDER BY id').all()).toEqual([
+    { chunk_ids: JSON.stringify([first]) }, { chunk_ids: JSON.stringify([second]) },
+  ]);
+  expect(digested(normal)).toBe(1);
+  expect(s.status().blocked_sessions).toBe(1);
 });

@@ -35,7 +35,7 @@ export function migrateSessionIdentity(db: DatabaseSync, fromKey: string, toKey:
   const toHasContent = to !== undefined && db.prepare('SELECT 1 FROM chunks WHERE session_key = ? LIMIT 1').get(toKey) !== undefined;
   let overlapChunks = 0;
   if (fromOwner !== null && toOwner !== null && fromOwner !== toOwner && toHasContent) {
-    overlapChunks = Number(db.prepare('UPDATE chunks SET digested = 1 WHERE session_key = ? AND digested = 0').run(fromKey).changes);
+    overlapChunks = Number(db.prepare('UPDATE chunks SET digested = 1 WHERE session_key = ? AND digested = 0 AND digest_block_id IS NULL').run(fromKey).changes);
     db.prepare(
       `UPDATE session_sources SET identity_note = ? WHERE session_key = ? AND source_id = ?`,
     ).run(`late_identity_overlap: content before ${nowIso} kept as evidence, not analysed again`, fromKey, fromOwner);
@@ -44,7 +44,13 @@ export function migrateSessionIdentity(db: DatabaseSync, fromKey: string, toKey:
   }
 
   db.prepare('UPDATE OR IGNORE chunks SET session_key = ? WHERE session_key = ?').run(toKey, fromKey);
-  db.prepare('DELETE FROM chunks WHERE session_key = ?').run(fromKey);
+  // A colliding refused chunk keeps its original ID and bytes on the alias for evidence lookups.
+  // If the native row contains exactly the same bytes, keep that copy out of model inputs too.
+  db.prepare(`UPDATE chunks AS target SET digest_block_id=old.digest_block_id FROM chunks old
+    WHERE old.session_key=? AND old.digest_block_id IS NOT NULL AND target.session_key=?
+      AND target.offset_start=old.offset_start AND target.text=old.text AND target.digest_block_id IS NULL`).run(fromKey, toKey);
+  db.prepare('DELETE FROM chunks WHERE session_key = ? AND digest_block_id IS NULL').run(fromKey);
+  db.prepare('UPDATE digest_blocks SET session_key = ? WHERE session_key = ?').run(toKey, fromKey);
   db.prepare('UPDATE digests SET session_key = ? WHERE session_key = ?').run(toKey, fromKey);
   // Project links and questions follow the session. This is a key rename, not a change to project state, so it is
   // written here directly and logs no event.

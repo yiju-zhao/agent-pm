@@ -58,7 +58,7 @@ function UnderstandingStatus() {
       <span>{status ? understandingText(status) : error ? errorText(error) : '…'}</span>
       {(status?.blocked_sessions ?? 0) > 0 ? (
         <a className="dim" href="#/sessions" title={status?.blocked_reason ?? '上游拒绝处理，原文已保留，等待审阅'}>
-          {status!.blocked_sessions} 个会话摘要已暂停
+          {status!.blocked_sessions} 个会话有拒摘缺口
         </a>
       ) : null}
       {status?.last_error ? (

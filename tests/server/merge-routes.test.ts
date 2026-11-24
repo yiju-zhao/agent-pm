@@ -192,15 +192,18 @@ test('ignored and provider-refused sessions are gaps: their content is never sen
   const source = project('来源', [A, B]);
   const target = project('目标', [C]);
   chunk(A, 'IGNORED-CONTENT');
-  chunk(B, 'REFUSED-CONTENT');
+  const denied = chunk(B, 'REFUSED-CONTENT');
+  chunk(B, 'LATER-CONTENT');
   chunk(C, 'readable');
   op('ignore_session', { session: A, ignored: true });
-  db.prepare("INSERT INTO digest_blocks (session_key, chunk_ids, message, created_at) VALUES (?, '[]', 'refused', ?)").run(B, NOW);
+  const block = db.prepare("INSERT INTO digest_blocks (session_key, chunk_ids, message, created_at) VALUES (?, ?, 'refused', ?)").run(B, JSON.stringify([denied]), NOW);
+  db.prepare('UPDATE chunks SET digest_block_id=? WHERE id=?').run(block.lastInsertRowid, denied);
   const view = await preview(source, { target });
   expect(view.status).toBe('ready');
   expect(calls[0]!.prompt).not.toContain('IGNORED-CONTENT');
   expect(calls[0]!.prompt).not.toContain('REFUSED-CONTENT');
-  expect(view.coverage!.sessions).toMatchObject([{ session_key: A, status: 'ignored', chunks_read: 0 }, { session_key: B, status: 'refused', chunks_read: 0 }, { session_key: C, status: 'read' }]);
+  expect(calls[0]!.prompt).toContain('LATER-CONTENT');
+  expect(view.coverage!.sessions).toMatchObject([{ session_key: A, status: 'ignored', chunks_read: 0 }, { session_key: B, status: 'partial', chunks_read: 1, refused_chunks: 1 }, { session_key: C, status: 'read' }]);
   expect(db.prepare('SELECT count(*) AS n FROM digest_blocks').get()).toEqual({ n: 1 });
 
   const none = project('空来源', []);

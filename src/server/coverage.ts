@@ -51,6 +51,7 @@ export type SourceCoverage = {
     excerpted_chunks: number;
     /** Chunks delivered but not summarized yet. */
     undigested_chunks: number;
+    refused_chunks: number;
   };
   /** Known holes in the delivered timelines, by reason. */
   gaps: Record<string, number>;
@@ -97,17 +98,23 @@ function cutCounts(db: DatabaseSync, sourceId: string): { truncated_chunks: numb
   return out;
 }
 
-export function sourceCoverage(db: DatabaseSync, config: ServerConfig, now: Date): SourceCoverage[] {
-  const rows = new Map((db.prepare('SELECT * FROM ingest_sources').all() as SourceRow[]).map((r) => [r.source_id, r]));
-  const configured = new Map<string, { kind: SourceKind; machine: string }>();
+export type SourceConfig = Pick<ServerConfig, 'collectors' | 'paseoCollectors'>;
+
+export function configuredSources(db: DatabaseSync, config: SourceConfig) {
+  const configured = new Map<string, { kind: SourceKind; machine: string; createdAt?: string }>();
   for (const machine of Object.keys(config.collectors)) configured.set(herdrSourceId(machine), { kind: 'herdr', machine });
   for (const [id, entry] of Object.entries(config.paseoCollectors ?? {})) configured.set(id, { kind: 'paseo', machine: entry.machine });
   // A herdr collector key made in the UI names its machine in its scope (a Paseo source must be in the config anyway).
-  for (const key of db.prepare("SELECT scope FROM api_keys WHERE revoked_at IS NULL AND scope LIKE 'ingest:herdr:%'").all() as Array<{ scope: string }>) {
+  for (const key of db.prepare("SELECT scope, min(created_at) AS createdAt FROM api_keys WHERE revoked_at IS NULL AND scope LIKE 'ingest:herdr:%' GROUP BY scope").all() as Array<{ scope: string; createdAt: string }>) {
     const machine = key.scope.slice('ingest:herdr:'.length);
-    configured.set(herdrSourceId(machine), { kind: 'herdr', machine });
+    if (!configured.has(herdrSourceId(machine))) configured.set(herdrSourceId(machine), { kind: 'herdr', machine, createdAt: key.createdAt });
   }
+  return configured;
+}
 
+export function sourceCoverage(db: DatabaseSync, config: ServerConfig, now: Date): SourceCoverage[] {
+  const configured = configuredSources(db, config);
+  const rows = new Map((db.prepare('SELECT * FROM ingest_sources').all() as SourceRow[]).map((r) => [r.source_id, r]));
   const count = (sql: string, ...args: string[]) => (db.prepare(sql).get(...args) as { n: number }).n;
   const ids = [...new Set([...configured.keys(), ...rows.keys()])].sort();
   return ids.map((id): SourceCoverage => {
@@ -146,7 +153,8 @@ export function sourceCoverage(db: DatabaseSync, config: ServerConfig, now: Date
         error: state.error ?? 0,
         chunks: count('SELECT count(*) AS n FROM chunks WHERE source_id = ?', id),
         ...cutCounts(db, id),
-        undigested_chunks: count('SELECT count(*) AS n FROM chunks WHERE source_id = ? AND digested = 0', id),
+        undigested_chunks: count('SELECT count(*) AS n FROM chunks WHERE source_id = ? AND digested = 0 AND digest_block_id IS NULL', id),
+        refused_chunks: count('SELECT count(*) AS n FROM chunks WHERE source_id = ? AND digest_block_id IS NOT NULL', id),
       },
       gaps: Object.fromEntries((db.prepare('SELECT reason, count(*) AS n FROM ingest_gaps WHERE source_id = ? GROUP BY reason').all(id) as Array<{ reason: string; n: number }>).map((r) => [r.reason, r.n])),
       backlog: diagnostics === null ? null : { outbox_batches: diagnostics.outbox_batches ?? 0, outbox_bytes: diagnostics.outbox_bytes ?? 0, lagging_agents: diagnostics.lagging_agents ?? 0 },

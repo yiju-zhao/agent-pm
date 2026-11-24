@@ -13,7 +13,7 @@ function source(over: Omit<Partial<SourceCoverage>, 'content'> & { content?: Par
     source_id: 'herdr:mac-mini', kind: 'herdr', machine: 'mac-mini', configured: true, state: 'ok',
     collector_heartbeat: '2026-11-13T09:59:00.000Z', collector_version: '0.1.0', daemon_status: null, last_snapshot_at: null,
     sessions: { total: 3, live: 2, ended: 1, purged: 0, untracked: 0, ignored: 0 },
-    content: { with_content: 3, without_content: 0, screen_only: 0, catching_up: 0, unloaded: 0, paused: 0, error: 0, chunks: 10, truncated_chunks: 0, tool_cut_chunks: 0, excerpted_chunks: 0, undigested_chunks: 0, ...content },
+    content: { with_content: 3, without_content: 0, screen_only: 0, catching_up: 0, unloaded: 0, paused: 0, error: 0, chunks: 10, truncated_chunks: 0, tool_cut_chunks: 0, excerpted_chunks: 0, refused_chunks: 0, undigested_chunks: 0, ...content },
     gaps: {}, backlog: null, last_error: null, limits: ['首次观察之前就已关闭的 session 不会被发现'],
     ...rest,
   };

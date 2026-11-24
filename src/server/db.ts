@@ -486,6 +486,50 @@ export const MIGRATIONS: string[] = [
     created_at TEXT NOT NULL
   );
   `,
+  // v15: keep each refused window and point its original chunks at it. Retain even malformed legacy records.
+  `
+  ALTER TABLE digest_blocks RENAME TO old_digest_blocks;
+  CREATE TABLE digest_blocks (
+    id INTEGER PRIMARY KEY,
+    session_key TEXT NOT NULL,
+    chunk_ids TEXT NOT NULL,
+    message TEXT NOT NULL,
+    run_id INTEGER,
+    created_at TEXT NOT NULL,
+    needs_review INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX digest_blocks_session ON digest_blocks(session_key);
+  ALTER TABLE chunks ADD COLUMN digest_block_id INTEGER;
+  CREATE INDEX chunks_refused ON chunks(digest_block_id) WHERE digest_block_id IS NOT NULL;
+  INSERT INTO digest_blocks(session_key,chunk_ids,message,run_id,created_at)
+    SELECT session_key,chunk_ids,message,run_id,created_at FROM old_digest_blocks;
+  -- A pending session may already have acquired a native key. Follow its persisted identity before matching IDs.
+  WITH RECURSIVE aliases(original, session_key) AS (
+    SELECT session_key,session_key FROM digest_blocks
+    UNION SELECT a.original,s.merged_into FROM aliases a JOIN sessions s ON s.key=a.session_key WHERE s.merged_into IS NOT NULL
+  )
+  UPDATE digest_blocks AS b SET session_key=coalesce((
+    SELECT a.session_key FROM aliases a JOIN sessions s ON s.key=a.session_key
+    WHERE a.original=b.session_key AND s.merged_into IS NULL
+  ),b.session_key);
+  UPDATE chunks AS c SET digest_block_id=b.id
+    FROM digest_blocks b, json_each(CASE WHEN json_valid(b.chunk_ids) THEN b.chunk_ids ELSE '[]' END) j
+    WHERE j.type='integer' AND c.id=j.value AND c.session_key=b.session_key
+      AND json_type(CASE WHEN json_valid(b.chunk_ids) THEN b.chunk_ids ELSE 'null' END)='array';
+  UPDATE digest_blocks AS b SET needs_review=1 WHERE
+    CASE WHEN NOT json_valid(chunk_ids) THEN 1
+         WHEN json_type(chunk_ids)!='array' OR json_array_length(chunk_ids)=0 THEN 1
+         ELSE json_array_length(chunk_ids)!=(SELECT count(*) FROM chunks c WHERE c.digest_block_id=b.id) END;
+  -- A damaged list cannot identify the exact input. Hold its pre-refusal candidates for manual matching;
+  -- later arrivals remain eligible. A valid list containing missing numeric IDs needs no speculative match.
+  UPDATE chunks AS c SET digest_block_id=b.id FROM digest_blocks b
+    WHERE b.needs_review=1 AND c.session_key=b.session_key AND c.digested=0 AND c.digest_block_id IS NULL
+      AND (c.received_at IS NULL OR c.received_at<=b.created_at)
+      AND CASE WHEN NOT json_valid(b.chunk_ids) THEN 1
+               WHEN json_type(b.chunk_ids)!='array' OR json_array_length(b.chunk_ids)=0 THEN 1
+               ELSE EXISTS (SELECT 1 FROM json_each(b.chunk_ids) WHERE type!='integer') END;
+  DROP TABLE old_digest_blocks;
+  `,
 ];
 
 /** Opens (creating if needed) the central database in WAL mode and applies pending migrations. */

@@ -325,7 +325,7 @@ test('useToast outside a provider does nothing', () => {
 test('a paused-for-review digest shows a separate link without a runtime warning', async () => {
   serve(understanding({ blocked_sessions: 1, blocked_reason: '上游拒绝摘要，原文保留', last_error: null }));
   renderApp();
-  const link = await screen.findByRole('link', { name: '1 个会话摘要已暂停' });
+  const link = await screen.findByRole('link', { name: '1 个会话有拒摘缺口' });
   expect(link.getAttribute('href')).toBe('#/sessions');
   expect(link.getAttribute('title')).toBe('上游拒绝摘要，原文保留');
   expect(screen.queryByRole('img', { name: '最近一次出错' })).toBeNull();
@@ -334,7 +334,7 @@ test('a paused-for-review digest shows a separate link without a runtime warning
 test('a new runtime error still warns alongside a paused digest', async () => {
   serve(understanding({ blocked_sessions: 1, blocked_reason: '历史摘要暂停', last_error: '新的连接故障' }));
   renderApp();
-  expect(await screen.findByRole('link', { name: '1 个会话摘要已暂停' })).toBeTruthy();
+  expect(await screen.findByRole('link', { name: '1 个会话有拒摘缺口' })).toBeTruthy();
   expect(screen.getByRole('img', { name: '最近一次出错' }).getAttribute('title')).toBe('新的连接故障');
 });
 

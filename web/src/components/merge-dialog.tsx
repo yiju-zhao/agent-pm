@@ -268,6 +268,8 @@ export function MergeDialog({ project, targets, onClose, reload, initialTarget =
                     {COVERAGE_LABEL[s.status]}
                     {s.status === 'read' || s.status === 'partial' ? `，${s.chunks_read}/${s.chunks_total} 段` : ''}
                   </span>
+                  {s.refused_chunks ? <span className="tag merge-tag-warn">{`拒摘 ${s.refused_chunks} 段`}</span> : null}
+                  {s.refusal_needs_review ? <span className="tag merge-tag-warn">旧拒摘记录待核对</span> : null}
                   {s.truncated_chunks > 0 ? <span className="tag merge-tag-warn">{`其中 ${s.truncated_chunks} 段有消息在采集时已被截断`}</span> : null}
                   {s.excerpted_chunks > 0 ? <span className="tag">{`${s.excerpted_chunks} 段是较长事件的节选`}</span> : null}
                 </span>

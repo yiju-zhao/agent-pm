@@ -35,6 +35,7 @@ function shortfalls(s: SourceCoverage): string[] {
   if (c.paused > 0) out.push(`${c.paused} 个因积压暂停`);
   if (c.error > 0) out.push(`${c.error} 个读取出错`);
   for (const [reason, n] of Object.entries(s.gaps)) out.push(`${GAP_LABEL[reason] ?? reason} ${n} 处`);
+  if (c.refused_chunks > 0) out.push(`${c.refused_chunks} 段被上游拒摘，原文保留`);
   if (c.truncated_chunks > 0) out.push(`${c.truncated_chunks}/${c.chunks} 段有消息在采集时被截断（被截掉的部分中心没有）`);
   if (s.backlog !== null && s.backlog.outbox_batches > 0) out.push(`采集器还有 ${s.backlog.outbox_batches} 批未送达`);
   if (s.last_error) out.push(`最近错误：${s.last_error}`);
@@ -81,7 +82,7 @@ export function CoveragePanel({ now }: { now: Date }) {
                     <div><dt>发现</dt><dd>{s.sessions.total}</dd></div>
                     <div><dt>有正文</dt><dd>{s.content.with_content}</dd></div>
                     <div><dt>正文段</dt><dd>{s.content.chunks}</dd></div>
-                    <div><dt>未摘要</dt><dd>{s.content.undigested_chunks}</dd></div>
+                    <div><dt>待摘要</dt><dd>{s.content.undigested_chunks}</dd></div>
                   </dl>
                   <div className="dim">{breakdown(s)}</div>
                   {issues.length > 0 ? (

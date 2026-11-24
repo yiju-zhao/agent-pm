@@ -233,6 +233,21 @@ test('pending merge keeps the native chunk when offsets collide', () => {
   ]);
 });
 
+test('pending identity merge preserves a refused original and isolates an identical native copy', () => {
+  const pending = 'pending:laptop:term_1';
+  applySnapshot(db, push('laptop', [session(pending, 'term_1')]), t0);
+  insertChunks(db, { machine: 'laptop', chunks: [
+    chunk(pending, 1000, 1500, { text: 'original' }), chunk(Y, 1000, 1500, { text: 'original' }),
+  ] }, t0);
+  const { id } = db.prepare('SELECT id FROM chunks WHERE session_key=?').get(pending) as { id: number };
+  const block = db.prepare("INSERT INTO digest_blocks(session_key,chunk_ids,message,created_at) VALUES (?,?,'declined',?)").run(pending, JSON.stringify([id]), t0.toISOString());
+  db.prepare('UPDATE chunks SET digest_block_id=? WHERE id=?').run(block.lastInsertRowid, id);
+  applySnapshot(db, push('laptop', [session(Y, 'term_1')]), t1);
+  expect(db.prepare('SELECT text,digested FROM chunks WHERE id=?').get(id)).toEqual({ text: 'original', digested: 0 });
+  expect(db.prepare('SELECT digest_block_id FROM chunks WHERE session_key=?').get(Y)).toEqual({ digest_block_id: Number(block.lastInsertRowid) });
+  expect(db.prepare('SELECT session_key FROM digest_blocks').get()).toEqual({ session_key: Y });
+});
+
 function addContribution(
   id: string,
   session_key: string,

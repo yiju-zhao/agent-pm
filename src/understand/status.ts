@@ -8,7 +8,7 @@ export type SchedulerStatus = {
   last_error: string | null;
   running: 'digest' | 'curate' | 'restage' | null;
   waiting_sessions: number;
-  /** Sessions awaiting review after the provider refused a digest; not queued for automatic retry. */
+  /** Sessions with one or more refused windows or unresolved legacy records. */
   blocked_sessions?: number;
   /** Review information, separate from the last runtime failure. */
   blocked_reason?: string | null;

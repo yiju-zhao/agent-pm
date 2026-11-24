@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { expect, test } from 'vitest';
+import { nextWindow } from '../../src/understand/digest.ts';
 import { MIGRATIONS, openDb } from '../../src/server/db.ts';
 
 function tableNames(db: DatabaseSync): string[] {
@@ -157,7 +158,7 @@ test('lookup indexes exist', () => {
     expect(indexColumns(db, 'contributions')).toEqual(['project_id']);
     expect(indexColumns(db, 'todos')).toEqual(['project_id']);
     expect(indexColumns(db, 'milestones')).toEqual(['project_id']);
-    expect(indexColumns(db, 'chunks')).toEqual(['digested,session_key']);
+    expect(indexColumns(db, 'chunks')).toEqual(['digest_block_id', 'digested,session_key']);
     expect(indexColumns(db, 'digests')).toEqual(['curated']);
   } finally {
     db.close();
@@ -188,4 +189,27 @@ test('a v3 database upgrades to v4: existing projects await a stage review, new 
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test('v14 refusals map only matching chunk IDs and retain unresolved records for review', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'agent-pm-v14-'));
+  try {
+    const path = join(dir, 'test.db');
+    const old = new DatabaseSync(path);
+    for (const sql of MIGRATIONS.slice(0, 14)) old.exec(sql);
+    old.exec(`PRAGMA user_version=14;
+      INSERT INTO chunks(id,session_key,text,backfill) VALUES (1,'s','refused',0),(2,'s','later',0),(3,'other','foreign',0),(4,'broken','unknown original',0);
+      UPDATE chunks SET received_at='2026-09-28';
+      INSERT INTO digest_blocks VALUES ('s','[1,3,999]','provider declined',17,'2026-10-01'),
+                                      ('broken','bad JSON','old reason',18,'2026-10-01');`);
+    old.close();
+    const db = openDb(path);
+    try {
+      expect(db.prepare('SELECT id FROM chunks WHERE digest_block_id IS NULL ORDER BY id').all()).toEqual([{ id:2 }, { id:3 }]);
+      expect(db.prepare('SELECT chunk_ids,run_id FROM digest_blocks WHERE needs_review=1 ORDER BY run_id').all())
+        .toEqual([{chunk_ids:'[1,3,999]',run_id:17},{chunk_ids:'bad JSON',run_id:18}]);
+      expect(nextWindow(db, 's', 'realtime')?.chunkIds).toEqual([2]);
+      expect(db.prepare('SELECT text,digested FROM chunks WHERE id=1').get()).toEqual({ text:'refused', digested:0 });
+    } finally { db.close(); }
+  } finally { await rm(dir,{ recursive:true, force:true }); }
 });

@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { listSessions } from '../server/sessions-repo.ts';
+import { configuredSources, type SourceConfig } from '../server/coverage.ts';
 import { Workspace } from '../shared/workspace.ts';
 import { listProjects, sessionLinks } from './read.ts';
 
@@ -10,7 +11,7 @@ import { listProjects, sessionLinks } from './read.ts';
 //
 // The user can only put one off: until a time ("later"), or until it changes ("not again", by its fingerprint).
 
-export const REMINDER_CATEGORIES = ['agent_waiting', 'waiting_you', 'stalled', 'unpushed', 'waiting_external'] as const;
+export const REMINDER_CATEGORIES = ['agent_waiting', 'waiting_you', 'stalled', 'unpushed', 'waiting_external', 'source_offline'] as const;
 export type ReminderCategory = (typeof REMINDER_CATEGORIES)[number];
 
 export type Reminder = {
@@ -29,6 +30,10 @@ export type Reminder = {
   fingerprint: string;
 };
 
+/** A sleeping laptop should not raise a reminder: only an outage this long does. */
+export const SOURCE_REMINDER_AFTER_MS = 60 * 60_000;
+type ReminderSources = { config: SourceConfig; startedAt: Date };
+
 /** A branch with commits not pushed for this long is worth a reminder. */
 export const UNPUSHED_AFTER_MS = 2 * 3600_000;
 /** A P0/P1 project quiet for this many days is "stalled". */
@@ -40,7 +45,7 @@ function snoozed(db: DatabaseSync, now: Date): Map<string, { until: string | nul
 }
 
 /** Every reminder that holds now, the ones put off left out, by category order then newest first. */
-export function listReminders(db: DatabaseSync, now: Date): Reminder[] {
+export function listReminders(db: DatabaseSync, now: Date, sources?: ReminderSources): Reminder[] {
   const out: Reminder[] = [];
   const cards = listProjects(db, now, {}).filter((c) => !c.closed);
   const title = new Map(cards.map((c) => [c.id, c.title]));
@@ -123,6 +128,23 @@ export function listReminders(db: DatabaseSync, now: Date): Reminder[] {
   }
   out.push(...repos.values());
 
+  if (sources) {
+    const heartbeat = db.prepare('SELECT collector_heartbeat FROM ingest_sources WHERE source_id=?');
+    for (const [id, source] of configuredSources(db, sources.config)) {
+      const row = heartbeat.get(id) as { collector_heartbeat: string | null } | undefined;
+      const last = row?.collector_heartbeat;
+      const since = last ?? source.createdAt ?? sources.startedAt.toISOString();
+      if (now.getTime() - Date.parse(since) < SOURCE_REMINDER_AFTER_MS) continue;
+      out.push({
+        key: `source:${id}`, category: 'source_offline',
+        text: last ? `采集来源 ${id} 已离线` : `采集来源 ${id} 尚未上报`,
+        detail: last ? '最后一次收到心跳' : '仍在等待首次心跳',
+        project_id: null, project_title: null, session_key: null, short_id: null,
+        since, fingerprint: last ?? 'never_reported',
+      });
+    }
+  }
+
   const off = snoozed(db, now);
   const order = (r: Reminder) => REMINDER_CATEGORIES.indexOf(r.category);
   return out
@@ -137,8 +159,8 @@ export function listReminders(db: DatabaseSync, now: Date): Reminder[] {
  * Puts a reminder off: for `hours`, or with `hours` null until what it says changes. Unknown keys are refused (a
  * reminder that already went away needs nothing). Returns false when there is no such reminder now.
  */
-export function snoozeReminder(db: DatabaseSync, now: Date, key: string, hours: number | null): boolean {
-  const current = listReminders(db, now).find((r) => r.key === key);
+export function snoozeReminder(db: DatabaseSync, now: Date, key: string, hours: number | null, sources?: ReminderSources): boolean {
+  const current = listReminders(db, now, sources).find((r) => r.key === key);
   if (current === undefined) return false;
   const until = hours === null ? null : new Date(now.getTime() + hours * 3600_000).toISOString();
   db.prepare(

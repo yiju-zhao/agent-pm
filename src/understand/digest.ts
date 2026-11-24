@@ -115,7 +115,7 @@ export function nextWindow(
   const rows = db
     .prepare(
       `SELECT id, kind, ts_start, ts_end, text FROM chunks
-       WHERE session_key = ? AND digested = 0 AND backfill = ? ORDER BY ts_start, id`,
+       WHERE session_key = ? AND digested = 0 AND digest_block_id IS NULL AND backfill = ? ORDER BY ts_start, id`,
     )
     .all(sessionKey, backfill ? 1 : 0) as ChunkRow[];
   if (rows.length === 0) return null;
@@ -279,7 +279,7 @@ function storeDigest(db: DatabaseSync, deps: DomainDeps, window: DigestWindow, v
       values.curated ? 1 : 0,
       deps.now().toISOString(),
     );
-  const mark = db.prepare('UPDATE chunks SET digested = 1 WHERE id = ?');
+  const mark = db.prepare('UPDATE chunks SET digested = 1 WHERE id = ? AND digest_block_id IS NULL');
   for (const id of [...window.chunkIds, ...window.staleChunkIds]) mark.run(id);
   return Number(info.lastInsertRowid);
 }
@@ -294,10 +294,16 @@ export function skipWindow(db: DatabaseSync, deps: DomainDeps, window: DigestWin
   );
 }
 
-/** Persist the refusal without consuming any content; explicit review is required before this session can resume. */
+/** Preserve the rejected input and its run, without consuming its chunks. Caller holds the transaction. */
 export function blockDigest(db: DatabaseSync, deps: DomainDeps, window: DigestWindow, message: string, runId: number): void {
-  db.prepare(`INSERT INTO digest_blocks (session_key, chunk_ids, message, run_id, created_at)
-    VALUES (?, ?, ?, ?, ?) ON CONFLICT(session_key) DO NOTHING`).run(window.sessionKey, JSON.stringify(window.chunkIds), message, runId, deps.now().toISOString());
+  const ids = JSON.stringify(window.chunkIds);
+  const block = db.prepare(`INSERT INTO digest_blocks (session_key, chunk_ids, message, run_id, created_at)
+    VALUES (?, ?, ?, ?, ?)`).run(window.sessionKey, ids, message, runId, deps.now().toISOString());
+  db.prepare('UPDATE chunks SET digest_block_id=? WHERE id IN (SELECT value FROM json_each(?))')
+    .run(block.lastInsertRowid, ids);
+  // Older screen snapshots are superseded by the submitted screen. Do not send an older copy on the next tick.
+  db.prepare('UPDATE chunks SET digested=1 WHERE digest_block_id IS NULL AND id IN (SELECT value FROM json_each(?))')
+    .run(JSON.stringify(window.staleChunkIds));
 }
 
 /**
@@ -314,7 +320,8 @@ export async function runDigest(
   window: DigestWindow,
   opts: { model: string; force: boolean },
 ): Promise<DigestOutcome> {
-  const blocked = db.prepare('SELECT message FROM digest_blocks WHERE session_key = ?').get(window.sessionKey) as { message: string } | undefined;
+  const blocked = db.prepare(`SELECT b.message FROM chunks c JOIN digest_blocks b ON b.id=c.digest_block_id
+    WHERE c.id IN (SELECT value FROM json_each(?)) LIMIT 1`).get(JSON.stringify(window.chunkIds)) as { message: string } | undefined;
   if (blocked) return { status: 'failed', kind: 'refused', message: blocked.message };
   if (opts.force && window.totalChars < MIN_DIGEST_CHARS && !window.hasReport) {
     return { status: 'skipped', digestId: skipWindow(db, deps, window) };
@@ -331,11 +338,13 @@ export async function runDigest(
   };
   const result = await runner(call);
   if (!result.ok) {
-    recordRun(db, deps, call, result);
-    if (result.kind === 'refused') {
-      const row = db.prepare('SELECT last_insert_rowid() AS id').get() as { id: number };
-      blockDigest(db, deps, window, result.message, row.id);
-    }
+    transaction(db, () => {
+      recordRun(db, deps, call, result);
+      if (result.kind === 'refused') {
+        const row = db.prepare('SELECT last_insert_rowid() AS id').get() as { id: number };
+        blockDigest(db, deps, window, result.message, row.id);
+      }
+    });
     return { status: 'failed', kind: result.kind, message: result.message };
   }
 
