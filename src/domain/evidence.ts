@@ -1,7 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 
 import { ContextAddressError,parseAddress } from '../context/address.ts';
-import { readTurn,resolveSession } from '../context/read.ts';
+import { REFUSAL_NOTE, readTurn, resolveSession } from '../context/read.ts';
 import { getSession } from '../server/sessions-repo.ts';
 import type { SessionView } from '../server/sessions-repo.ts';
 import type { Digest } from '../understand/digest.ts';
@@ -51,6 +51,7 @@ export type EvidenceView = {
   ref: string;
   kind: 'digest' | 'chunk' | 'turn';
   turn?: ReturnType<typeof readTurn>;
+  refusal_note?: string;
   missing?:boolean;
   message?:string;
   id: number;
@@ -173,6 +174,7 @@ export function getEvidence(db: DatabaseSync, now: Date, ref: string): EvidenceV
       view.session_key=key;
       view.session=getSession(db,key,now);
       view.turn=readTurn(db,parsed.session,parsed.id);
+      if (view.turn.items.some(item => item.refused)) view.refusal_note = REFUSAL_NOTE;
       const bounds=db.prepare('SELECT ts_start,ts_end FROM turns WHERE session_key=? AND n=?').get(key,parsed.id)!;
       view.ts_start=bounds.ts_start as string|null;view.ts_end=bounds.ts_end as string|null;
     } catch (error) {

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
+import { REFUSAL_NOTE } from '../../src/context/read.ts';
 import type { EvidenceView } from '../../src/domain/evidence.ts';
 import { AUTH_EVENT, setToken } from '../../web/src/api.ts';
 import { EvidenceDrawer, EvidenceLink } from '../../web/src/components/evidence-drawer.tsx';
@@ -372,7 +373,7 @@ test('copying a session tag inside the drawer works like anywhere else', async (
 
 test('a turn reference opens the original messages, refusal note and tool summary',async()=>{
   const ref='s:abcd1234#2';
-  fetchMock.mockResolvedValue(json({ref,kind:'turn',session_key:'claude:abcd1234',session:null,ts_start:null,ts_end:null,
+  fetchMock.mockResolvedValue(json({ref,kind:'turn',refusal_note:REFUSAL_NOTE,session_key:'claude:abcd1234',session:null,ts_start:null,ts_end:null,
     turn:{address:ref,items:[{address:ref+'.1',kind:'user',text:'消息原文',refused:true,tool:null},
       {address:ref+'.2',kind:'tool',text:'',refused:false,tool:{name:'shell',input:'inspect',status:'completed',exit_code:0}}]}}));
   render(<EvidenceLink evidence={ref}/>);

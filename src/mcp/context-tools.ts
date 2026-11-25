@@ -2,8 +2,8 @@ import type { DatabaseSync } from 'node:sqlite';
 
 import { z } from 'zod';
 
-import { ContextAddressError, parseAddress, REFUSAL_NOTE } from '../context/address.ts';
-import { markOverviewRead, readItem, readOverview, readSession, readTurn, ISOLATED_TEXT, resolveSession } from '../context/read.ts';
+import { ContextAddressError, parseAddress } from '../context/address.ts';
+import { markOverviewRead, readItem, readOverview, readSession, readTurn, ISOLATED_TEXT, REFUSAL_NOTE, resolveSession } from '../context/read.ts';
 import type { DomainDeps } from '../domain/types.ts';
 import type { SourceConfig } from '../server/coverage.ts';
 import { searchContext } from '../server/search.ts';

@@ -1,5 +1,3 @@
-export const REFUSAL_NOTE = '此段曾被摘要模型拒绝，中心没有它的摘要';
-
 export class ContextAddressError extends Error {}
 
 export type Address =

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-import { REFUSAL_NOTE } from '../../../src/context/address.ts';
 import type { EvidenceChunk, EvidenceView } from '../../../src/domain/evidence.ts';
 import { AUTH_EVENT, errorText } from '../api.ts';
 import { shortTime } from '../format.ts';
@@ -149,7 +148,7 @@ function Body({ view }: { view: EvidenceView }) {
     if (view.missing) return <p className="dim">{view.message}</p>;
     return <>{view.turn?.items.map(item => <section className="chunk" key={item.address}>
       <div className="dim">{item.kind} · {item.address}</div>
-      {item.refused && <div className="dim">{REFUSAL_NOTE}</div>}
+      {item.refused && <div className="dim">{view.refusal_note}</div>}
       <pre>{item.tool ? `${item.tool.name} ${item.tool.input} · ${item.tool.status} · exit=${item.tool.exit_code??'—'}` : item.text}</pre>
     </section>)}</>;
   }

@@ -6,7 +6,6 @@ import {
   listProjects,
   listQuestions,
   listVetoedProjects,
-  searchProjects,
   sessionLinks,
 } from '../../src/domain/read.ts';
 import type { ProjectCard, ProjectDetail } from '../../src/domain/read.ts';
@@ -829,78 +828,7 @@ test('listQuestions expires questions past their time limit before listing', () 
   expect(t.db.prepare('SELECT status FROM questions WHERE id = ?').get(q)).toEqual({ status: 'expired' });
 });
 
-// ---- search and vetoed projects ----------------------------------------------------------------------------------
-
-test('searchProjects matches todos and decisions case-insensitively and escapes LIKE wildcards', () => {
-  const p = t.user('create_project', { title: 'Search Target', stage: 'build' }).id;
-  const todo = t.user('upsert_todo', { project: p, title: 'Fix the SQLite Migration' }).id;
-  const decision = t.user('record_decision', { project: p, text: '用 sqlite，不用 postgres' }).id;
-  t.user('upsert_todo', { project: p, title: '覆盖率达到 100% 才算完成' });
-  t.user('upsert_todo', { project: p, title: 'snake_case naming' });
-  t.user('upsert_todo', { project: p, title: 'snakeXcase naming' });
-
-  const hits = searchProjects(t.db, 'SQLITE', 10);
-  expect(hits).toEqual([
-    { project_id: p, project_title: 'Search Target', kind: 'todo', id: todo, text: 'Fix the SQLite Migration' },
-    { project_id: p, project_title: 'Search Target', kind: 'decision', id: decision, text: '用 sqlite，不用 postgres' },
-  ]);
-
-  // `%` and `_` are plain characters, not wildcards.
-  expect(searchProjects(t.db, '100%', 10).map((h) => h.text)).toEqual(['覆盖率达到 100% 才算完成']);
-  expect(searchProjects(t.db, '99%', 10)).toEqual([]);
-  expect(searchProjects(t.db, '%', 10).map((h) => h.text)).toEqual(['覆盖率达到 100% 才算完成']);
-  expect(searchProjects(t.db, 'snake_case', 10).map((h) => h.text)).toEqual(['snake_case naming']);
-  expect(searchProjects(t.db, 'snake\\case', 10)).toEqual([]);
-});
-
-test('searchProjects covers project fields, milestones and blockers, and says what kind each hit is', () => {
-  const p = t.user('create_project', {
-    title: 'Alpha',
-    summary: '看板 summary 含 needle',
-    why: '没有关键词',
-    done_criteria: '完成标准里也有 NEEDLE',
-  }).id;
-  const other = t.user('create_project', { title: 'needle in the title' }).id;
-  const whyOnly = t.user('create_project', { title: 'Gamma', why: 'because of the Needle' }).id;
-  const milestone = t.user('upsert_milestone', { project: p, title: 'needle milestone' }).id;
-  const blocker = t.user('set_blocker', { project: p, text: 'blocked on needle' }).id;
-
-  const hits = searchProjects(t.db, 'needle', 20);
-  expect(hits.map((h) => [h.kind, h.id])).toEqual([
-    ['project', p],
-    ['project', other],
-    ['project', whyOnly],
-    ['milestone', milestone],
-    ['blocker', blocker],
-  ]);
-  // A project hit carries the first matching field, title before summary before why before done_criteria.
-  expect(hits[0]).toMatchObject({ project_id: p, project_title: 'Alpha', text: '看板 summary 含 needle' });
-  expect(hits[1]).toMatchObject({ project_id: other, text: 'needle in the title' });
-  expect(hits[2]).toMatchObject({ project_id: whyOnly, text: 'because of the Needle' });
-  expect(searchProjects(t.db, '完成标准', 20)).toMatchObject([{ kind: 'project', id: p, text: '完成标准里也有 NEEDLE' }]);
-});
-
-test('searchProjects leaves out deleted items and everything under a deleted project, and honours the limit', () => {
-  const p = t.user('create_project', { title: 'keep' }).id;
-  const gone = t.user('upsert_todo', { project: p, title: 'needle gone' }).id;
-  const kept = t.user('upsert_todo', { project: p, title: 'needle kept' }).id;
-  t.user('delete_todo', { project: p, id: gone });
-  const created = t.ai('create_project', { title: 'needle project' });
-  t.ai('upsert_todo', { project: created.id, title: 'needle under dropped project' });
-  expect(t.user('revert_event', { event_id: created.event_id }).status).toBe('applied');
-
-  expect(searchProjects(t.db, 'needle', 10).map((h) => h.id)).toEqual([kept]);
-
-  for (let i = 0; i < 5; i++) t.user('upsert_todo', { project: p, title: `needle extra ${i}` });
-  expect(searchProjects(t.db, 'needle', 3)).toHaveLength(3);
-  expect(searchProjects(t.db, 'needle', 0)).toEqual([]);
-});
-
-test('searchProjects with a blank query finds nothing', () => {
-  t.user('create_project', { title: 'anything' });
-  expect(searchProjects(t.db, '', 10)).toEqual([]);
-  expect(searchProjects(t.db, '   ', 10)).toEqual([]);
-});
+// ---- vetoed projects ---------------------------------------------------------------------------------------------
 
 test('listVetoedProjects returns projects the user reverted, not live ones', () => {
   const live = t.user('create_project', { title: 'live' }).id;

@@ -11,6 +11,7 @@ import type { ToolInfo, Truncation } from '../shared/ingest-v2.ts';
 import { assignShortIds, shortIdSource } from '../shared/session-key.ts';
 import { ContextAddressError } from './address.ts';
 
+export const REFUSAL_NOTE = '此段曾被摘要模型拒绝，中心没有它的摘要';
 export const ISOLATED_TEXT = '因摘要被拒而隔离，后台不提供正文';
 
 export function resolveSession(db: DatabaseSync, shortId: string): { key: string; short: string } {

@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 
 import { z } from 'zod';
 
+import { ISOLATED_TEXT } from '../context/read.ts';
 import { sessionProjectName } from '../domain/project-names.ts';
 import { getProject, listProjects } from '../domain/read.ts';
 import type { DomainDeps } from '../domain/types.ts';
@@ -167,7 +168,7 @@ export function nextWindow(
     turnNumbers.add(e.n);
     const meta=JSON.parse(e.meta) as Pick<TimelineEvent,'tool'|'text_truncated'|'item_type'>;
     // Use the event revision the chunk actually received, including its suffix boundary.
-    lines.push(e.refused?'因摘要被拒而隔离，后台不提供正文':renderEvent({...meta,ts:e.ts,kind:e.kind,text:e.text},
+    lines.push(e.refused?ISOLATED_TEXT:renderEvent({...meta,ts:e.ts,kind:e.kind,text:e.text},
       e.disposition==='suffix'?e.text.slice(e.previous?.length??0):undefined));
   }
   return {
