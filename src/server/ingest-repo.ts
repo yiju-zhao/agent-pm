@@ -310,16 +310,16 @@ export function commitBatch(db: DatabaseSync, src: PaseoSource, batch: BatchV2, 
     // (seen on codex: two assistant rows of one message, split by a tool call). A revision is the same row again: same
     // epoch, overlapping seqs. A row with a known id elsewhere in the same epoch is another row, `<key>~<seqStart>`.
     // Identical content under any variant of the key is a duplicate, also across epochs (a replayed history).
-    const findDup = db.prepare('SELECT id, event_key,turn_id FROM source_events WHERE source_id = ? AND stream_id = ? AND base_key = ? AND content_hash = ?');
+    const findDup = db.prepare('SELECT id, event_key, turn_id FROM source_events WHERE source_id = ? AND stream_id = ? AND base_key = ? AND content_hash = ?');
     const fillTurnId = db.prepare('UPDATE source_events SET turn_id=? WHERE session_key=? AND event_key=? AND turn_id IS NULL');
     const sameRow = db.prepare(
-      `SELECT id, event_key, revision, kind, text, meta,turn_id FROM source_events
+      `SELECT id, event_key, revision, kind, text, meta, turn_id FROM source_events
        WHERE source_id = ? AND stream_id = ? AND base_key = ? AND epoch = ? AND seq_start <= ? AND seq_end >= ?
        ORDER BY revision DESC, id DESC LIMIT 1`,
     );
     const sameEpochOther = db.prepare('SELECT 1 FROM source_events WHERE source_id = ? AND stream_id = ? AND base_key = ? AND epoch = ? LIMIT 1');
     const otherEpoch = db.prepare(
-      'SELECT id, event_key, revision, kind, text, meta,turn_id FROM source_events WHERE source_id = ? AND stream_id = ? AND base_key = ? ORDER BY id DESC LIMIT 1',
+      'SELECT id, event_key, revision, kind, text, meta, turn_id FROM source_events WHERE source_id = ? AND stream_id = ? AND base_key = ? ORDER BY id DESC LIMIT 1',
     );
     const insertEvent = db.prepare(
       `INSERT INTO source_events (source_id, stream_id, base_key, event_key, content_hash, revision, session_key, batch_id, epoch,
@@ -348,7 +348,7 @@ export function commitBatch(db: DatabaseSync, src: PaseoSource, batch: BatchV2, 
         duplicates += 1;
         continue;
       }
-      type Prior = { id: number; event_key: string; revision: number; kind: string; text: string; meta: string; turn_id:string|null };
+      type Prior = { id: number; event_key: string; revision: number; kind: string; text: string; meta: string; turn_id: string | null };
       let prev = sameRow.get(src.sourceId, batch.agent_id, e.key, e.epoch, e.seq_end, e.seq_start) as Prior | undefined;
       let eventKey = prev?.event_key ?? e.key;
       if (prev === undefined && sameEpochOther.get(src.sourceId, batch.agent_id, e.key, e.epoch) !== undefined) {
@@ -385,7 +385,7 @@ export function commitBatch(db: DatabaseSync, src: PaseoSource, batch: BatchV2, 
       if (e.ts !== null && (maxTs === null || e.ts > maxTs)) maxTs = e.ts;
     }
 
-    updateTurns(db,key,inserted,shouldRegroup);
+    updateTurns(db, key, inserted, shouldRegroup);
 
     // Chunks: the batch's analysable events in order, packed; each chunk remembers the source events it holds.
     insertPaseoChunks(

@@ -236,13 +236,13 @@ function deleteItem(ctx: OpContext, table: ItemTable, args: { project: string; i
 }
 
 export const ITEM_HANDLERS: Partial<Record<OpName, Handler>> = {
-  mark_checked: (ctx, args:OpArgs<'mark_checked'>) => {
-    const table = ({decision:'decisions',blocker:'blockers',todo:'todos',milestone:'milestones'} as const)[args.item_type];
-    const item = readRow(ctx.db,table,args.id);
-    if (!item) throw new OpRejected('not_found',`找不到条目 ${args.id}`);
+  mark_checked: (ctx, args: OpArgs<'mark_checked'>) => {
+    const table = ({ decision: 'decisions', blocker: 'blockers', todo: 'todos', milestone: 'milestones' } as const)[args.item_type];
+    const item = readRow(ctx.db, table, args.id);
+    if (!item) throw new OpRejected('not_found', `找不到条目 ${args.id}`);
     const project = String(item.project_id);
-    loadProject(ctx,project);
-    loadItem(ctx,table,project,args.id);
+    loadProject(ctx, project);
+    loadItem(ctx, table, project, args.id);
     const [shortId, turn] = args.ref.slice(2).split('#');
     let session: ReturnType<typeof resolveSession>;
     try {
@@ -255,7 +255,7 @@ export const ITEM_HANDLERS: Partial<Record<OpName, Handler>> = {
       throw new OpRejected('not_found', `找不到回合 ${args.ref}`);
     }
     ctx.changes.update(table, args.id, { checked_at: now(ctx), checked_ref: `s:${session.short}#${turn}` });
-    return {id:args.id};
+    return { id: args.id };
   },
   upsert_milestone: upsertMilestone,
   delete_milestone: (ctx, args: OpArgs<'delete_milestone'>) => deleteItem(ctx, 'milestones', args),

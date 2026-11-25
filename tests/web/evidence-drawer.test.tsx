@@ -371,23 +371,30 @@ test('copying a session tag inside the drawer works like anywhere else', async (
   }
 });
 
-test('a turn reference opens the original messages, refusal note and tool summary',async()=>{
-  const ref='s:abcd1234#2';
-  fetchMock.mockResolvedValue(json({ref,kind:'turn',refusal_note:REFUSAL_NOTE,session_key:'claude:abcd1234',session:null,ts_start:null,ts_end:null,
-    turn:{address:ref,items:[{address:ref+'.1',kind:'user',text:'消息原文',refused:true,tool:null},
-      {address:ref+'.2',kind:'tool',text:'',refused:false,tool:{name:'shell',input:'inspect',status:'completed',exit_code:0}}]}}));
-  render(<EvidenceLink evidence={ref}/>);
-  fireEvent.click(screen.getByRole('button',{name:ref}));
+test('a turn reference opens the original messages, refusal note and tool summary', async () => {
+  const ref = 's:abcd1234#2';
+  fetchMock.mockResolvedValue(json({
+    ref, kind: 'turn', refusal_note: REFUSAL_NOTE, session_key: 'claude:abcd1234', session: null, ts_start: null, ts_end: null,
+    turn: {
+      address: ref,
+      items: [
+        { address: ref + '.1', kind: 'user', text: '消息原文', refused: true, tool: null },
+        { address: ref + '.2', kind: 'tool', text: '', refused: false, tool: { name: 'shell', input: 'inspect', status: 'completed', exit_code: 0 } },
+      ],
+    },
+  }));
+  render(<EvidenceLink evidence={ref} />);
+  fireEvent.click(screen.getByRole('button', { name: ref }));
   expect(await screen.findByText('消息原文')).toBeTruthy();
   expect(screen.getByText(/曾被摘要模型拒绝/)).toBeTruthy();
   expect(screen.getByText(/shell inspect.*completed.*0/)).toBeTruthy();
   expect(String(fetchMock.mock.calls[0][0])).toContain(encodeURIComponent(ref));
 });
 
-test('a missing turn is identified in the drawer',async()=>{
-  const ref='s:abcd1234#9';
-  fetchMock.mockResolvedValue(json({ref,kind:'turn',missing:true,message:'找不到回合 '+ref}));
-  render(<EvidenceLink evidence={ref}/>);
-  fireEvent.click(screen.getByRole('button',{name:ref}));
+test('a missing turn is identified in the drawer', async () => {
+  const ref = 's:abcd1234#9';
+  fetchMock.mockResolvedValue(json({ ref, kind: 'turn', missing: true, message: '找不到回合 ' + ref }));
+  render(<EvidenceLink evidence={ref} />);
+  fireEvent.click(screen.getByRole('button', { name: ref }));
   expect(await screen.findByText(/找不到回合/)).toBeTruthy();
 });

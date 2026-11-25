@@ -91,7 +91,7 @@ function digestJson(trivial: boolean): string {
   return JSON.stringify({
     topics: trivial ? [] : [{ label: '调度器', summary: '写调度器', likely_project_ids: [], is_new_topic: false, confidence: 0.8 }],
     decisions: [],
-    session_state:{goal:'goal',state:'active',waiting_on:null,next:null,note:null},
+    session_state: { goal: 'goal', state: 'active', waiting_on: null, next: null, note: null },
     progress: [],
     todos_added: [],
     todos_done: [],

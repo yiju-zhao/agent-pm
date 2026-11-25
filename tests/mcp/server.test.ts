@@ -165,17 +165,21 @@ test('a body over 64 KB is refused with 413 once the token checks out; without a
   expect((await initialize(`Bearer ${MCP_TOKEN}`)).status).toBe(200);
 });
 
-test('overview cursors use the authenticated key ID across stateless HTTP requests',async()=>{
-  const second=createKey(t.db,config,{name:'another reader',scope:'mcp',createdBy:'test'},t.deps.now(),()=> 'another-key');
-  const p=t.user('create_project',{title:'cursor example'}).id;
-  t.user('record_decision',{project:p,text:'decision'});
-  const overview=async (token:string)=>{
-    const response=await app.request(MCP_URL,{method:'POST',headers:{authorization:'Bearer '+token,accept:'application/json, text/event-stream','content-type':'application/json'},
-      body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'pm_overview',arguments:{}}})});
+test('overview cursors use the authenticated key ID across stateless HTTP requests', async () => {
+  const second = createKey(t.db, config, { name: 'another reader', scope: 'mcp', createdBy: 'test' }, t.deps.now(), () => 'another-key');
+  const project = t.user('create_project', { title: 'cursor example' }).id;
+  t.user('record_decision', { project, text: 'decision' });
+  const overview = async (token: string) => {
+    const response = await app.request(MCP_URL, {
+      method: 'POST',
+      headers: { authorization: 'Bearer ' + token, accept: 'application/json, text/event-stream', 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'pm_overview', arguments: {} } }),
+    });
     return (await response.json()).result.content[0].text;
   };
-  expect(await overview(MCP_TOKEN)).toContain(p);
-  expect(await overview(MCP_TOKEN)).not.toContain(p);
-  expect(await overview(second.key)).toContain(p);
-  expect(t.db.prepare('SELECT reader FROM reader_cursors ORDER BY reader').all()).toEqual([{reader:second.view.id},{reader:'config:mcpToken'}].sort((a,b)=>a.reader.localeCompare(b.reader)));
+  expect(await overview(MCP_TOKEN)).toContain(project);
+  expect(await overview(MCP_TOKEN)).not.toContain(project);
+  expect(await overview(second.key)).toContain(project);
+  const readers = [{ reader: second.view.id }, { reader: 'config:mcpToken' }].sort((a, b) => a.reader.localeCompare(b.reader));
+  expect(t.db.prepare('SELECT reader FROM reader_cursors ORDER BY reader').all()).toEqual(readers);
 });

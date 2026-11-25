@@ -34,7 +34,7 @@ export const DIGEST_MAX_TURNS = SDK_STRUCTURED_OUTPUT_RETRIES + 3;
 
 // ---- output ------------------------------------------------------------------------------------------------------
 
-const citedText = z.object({text:z.string(),turns:z.array(z.int())});
+const citedText = z.object({ text: z.string(), turns: z.array(z.int()) });
 export const DigestSchema = z.object({
   topics: z.array(
     z.object({
@@ -45,12 +45,18 @@ export const DigestSchema = z.object({
       confidence: z.number().min(0).max(1),
     }),
   ),
-  decisions: z.array(z.object({ text: z.string(), quote_ref: z.string(), turns:z.array(z.int()) })),
+  decisions: z.array(z.object({ text: z.string(), quote_ref: z.string(), turns: z.array(z.int()) })),
   progress: z.array(citedText),
   todos_added: z.array(citedText),
   todos_done: z.array(citedText),
-  blockers: z.array(z.object({ text: z.string(), turns:z.array(z.int()), kind: z.enum(['user', 'external', 'technical']) })),
-  session_state:z.object({goal:z.string(),state:z.string(),waiting_on:z.string().nullable(),next:z.string().nullable(),note:z.string().nullable()}),
+  blockers: z.array(z.object({ text: z.string(), turns: z.array(z.int()), kind: z.enum(['user', 'external', 'technical']) })),
+  session_state: z.object({
+    goal: z.string(),
+    state: z.string(),
+    waiting_on: z.string().nullable(),
+    next: z.string().nullable(),
+    note: z.string().nullable(),
+  }),
   open_questions: z.array(z.string()),
   trivial: z.boolean(),
 });
@@ -150,33 +156,46 @@ export function nextWindow(
 
   const chosen = rows.filter((r) => placed.has(r.id));
   const turnNumbers = new Set<number>();
-  const sourceRows = db.prepare(`SELECT x.chunk_id,t.n,t.refused,e.ts,e.kind,e.text,e.meta,e.disposition,
+  const sourceRows = db.prepare(`SELECT x.chunk_id, t.n, t.refused, e.ts, e.kind, e.text, e.meta, e.disposition,
     (SELECT previous.text FROM source_events previous WHERE previous.source_id=e.source_id AND previous.stream_id=e.stream_id
        AND previous.event_key=e.event_key AND previous.revision=e.revision-1) AS previous
     FROM chunk_sources x JOIN source_events e ON e.id=x.source_event_id
     JOIN context_turn_events t ON t.session_key=e.session_key AND t.event_key=e.event_key
-    WHERE x.chunk_id IN (SELECT value FROM json_each(?)) ORDER BY x.chunk_id,x.rowid`)
-    .all(JSON.stringify(chosen.map(r=>r.id))) as Array<{chunk_id:number;n:number;refused:number;ts:string|null;kind:TimelineEvent['kind'];
-      text:string;meta:string;disposition:string;previous:string|null}>;
-  const excerpts = new Map<number,string[]>();
+    WHERE x.chunk_id IN (SELECT value FROM json_each(?)) ORDER BY x.chunk_id, x.rowid`)
+    .all(JSON.stringify(chosen.map(row => row.id))) as Array<{
+      chunk_id: number;
+      n: number;
+      refused: number;
+      ts: string | null;
+      kind: TimelineEvent['kind'];
+      text: string;
+      meta: string;
+      disposition: string;
+      previous: string | null;
+    }>;
+  const excerpts = new Map<number, string[]>();
   let previousTurn: number | null = null;
-  for (const e of sourceRows) {
-    let lines=excerpts.get(e.chunk_id);
-    if (!lines) { lines=[]; excerpts.set(e.chunk_id,lines); previousTurn=null; }
-    if (e.n!==previousTurn) lines.push(`【回合 ${e.n}】`);
-    previousTurn=e.n;
-    turnNumbers.add(e.n);
-    const meta=JSON.parse(e.meta) as Pick<TimelineEvent,'tool'|'text_truncated'|'item_type'>;
+  for (const event of sourceRows) {
+    let lines = excerpts.get(event.chunk_id);
+    if (!lines) {
+      lines = [];
+      excerpts.set(event.chunk_id, lines);
+      previousTurn = null;
+    }
+    if (event.n !== previousTurn) lines.push(`【回合 ${event.n}】`);
+    previousTurn = event.n;
+    turnNumbers.add(event.n);
+    const meta = JSON.parse(event.meta) as Pick<TimelineEvent, 'tool' | 'text_truncated' | 'item_type'>;
     // Use the event revision the chunk actually received, including its suffix boundary.
-    lines.push(e.refused?ISOLATED_TEXT:renderEvent({...meta,ts:e.ts,kind:e.kind,text:e.text},
-      e.disposition==='suffix'?e.text.slice(e.previous?.length??0):undefined));
+    const suffix = event.disposition === 'suffix' ? event.text.slice(event.previous?.length ?? 0) : undefined;
+    lines.push(event.refused ? ISOLATED_TEXT : renderEvent({ ...meta, ts: event.ts, kind: event.kind, text: event.text }, suffix));
   }
   return {
     sessionKey,
     chunkIds: chosen.map((r) => r.id),
     staleChunkIds: screens.slice(0, -1).map((r) => r.id),
-    text: chosen.map(r=>chunkTag({...r,text:excerpts.get(r.id)?.join('\n')??r.text})).join('\n\n'),
-    turnNumbers:[...turnNumbers].sort((a,b)=>a-b),
+    text: chosen.map(row => chunkTag({ ...row, text: excerpts.get(row.id)?.join('\n') ?? row.text })).join('\n\n'),
+    turnNumbers: [...turnNumbers].sort((a, b) => a - b),
     tsStart: chosen[0].ts_start,
     tsEnd: chosen.reduce((latest, r) => (r.ts_end > latest ? r.ts_end : latest), chosen[0].ts_end),
     backfill,
@@ -295,7 +314,7 @@ type DigestRowValues = { json: string | null; model: string | null; trivial: boo
 function storeDigest(db: DatabaseSync, deps: DomainDeps, window: DigestWindow, values: DigestRowValues): number {
   const info = db
     .prepare(
-      `INSERT INTO digests (session_key, chunk_ids, json, model, ts_start, ts_end, backfill, trivial, skipped, curated, created_at,turn_start,turn_end)
+      `INSERT INTO digests (session_key, chunk_ids, json, model, ts_start, ts_end, backfill, trivial, skipped, curated, created_at, turn_start, turn_end)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
@@ -309,7 +328,9 @@ function storeDigest(db: DatabaseSync, deps: DomainDeps, window: DigestWindow, v
       values.trivial ? 1 : 0,
       values.skipped ? 1 : 0,
       values.curated ? 1 : 0,
-      deps.now().toISOString(),window.turnNumbers[0]??null,window.turnNumbers.at(-1)??null,
+      deps.now().toISOString(),
+      window.turnNumbers[0] ?? null,
+      window.turnNumbers.at(-1) ?? null,
     );
   const mark = db.prepare('UPDATE chunks SET digested = 1 WHERE id = ? AND digest_block_id IS NULL');
   for (const id of [...window.chunkIds, ...window.staleChunkIds]) mark.run(id);
@@ -389,13 +410,13 @@ export async function runDigest(
   recordRun(db, deps, call, result);
   const digest = parsed.data;
   const covered = new Set(window.turnNumbers);
-  for (const item of [...digest.decisions,...digest.progress,...digest.todos_added,...digest.todos_done,...digest.blockers]) {
-    item.turns = [...new Set(item.turns.filter(n=>covered.has(n)))];
+  for (const item of [...digest.decisions, ...digest.progress, ...digest.todos_added, ...digest.todos_done, ...digest.blockers]) {
+    item.turns = [...new Set(item.turns.filter(n => covered.has(n)))];
   }
   const digestId = transaction(db, () => {
-    const end=window.turnNumbers.at(-1)??null;
+    const end = window.turnNumbers.at(-1) ?? null;
     db.prepare('UPDATE sessions SET card=?,card_as_of_turn=? WHERE key=? AND (card_as_of_turn IS NULL OR card_as_of_turn<=?)')
-      .run(JSON.stringify(digest.session_state),end,window.sessionKey,end);
+      .run(JSON.stringify(digest.session_state), end, window.sessionKey, end);
     return storeDigest(db, deps, window, {
       json: JSON.stringify(digest),
       model: opts.model,

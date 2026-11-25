@@ -334,7 +334,7 @@ function reportTool(db: DatabaseSync, deps: DomainDeps): ToolDef {
  * appends a chunk for the digester; nothing here calls `execute` or changes a project, so an agent on another
  * machine cannot move the board, only tell the PM what it did.
  */
-export function readTools(db: DatabaseSync, deps: DomainDeps, reader='local', sources?:OverviewSources): ToolDef[] {
+export function readTools(db: DatabaseSync, deps: DomainDeps, reader = 'local', sources?: OverviewSources): ToolDef[] {
   return [
     listProjectsTool(db, deps),
     getProjectTool(db, deps),
@@ -343,6 +343,6 @@ export function readTools(db: DatabaseSync, deps: DomainDeps, reader='local', so
     searchTool(db),
     listSessionsTool(db, deps),
     reportTool(db, deps),
-    ...contextTools(db,deps,reader,sources),
+    ...contextTools(db, deps, reader, sources),
   ];
 }

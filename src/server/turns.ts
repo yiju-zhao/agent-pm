@@ -16,7 +16,7 @@ export type Turn = {
 export function listTurns(db: DatabaseSync, sessionKey: string): Turn[] {
   return db
     .prepare(
-      `SELECT n,turn_id,first_key,last_key,ts_start,ts_end,tool_calls,tool_failures
+      `SELECT n, turn_id, first_key, last_key, ts_start, ts_end, tool_calls, tool_failures
     FROM turns WHERE session_key=? ORDER BY n`,
     )
     .all(sessionKey) as Turn[];
@@ -33,18 +33,18 @@ type TurnEvent = {
 };
 
 function indexTurnEvents(db: DatabaseSync, sessionKey: string, events: TurnEvent[]): void {
-  let tail = db.prepare('SELECT n,turn_id,has_user FROM turns WHERE session_key=? ORDER BY n DESC LIMIT 1').get(sessionKey) as
+  let tail = db.prepare('SELECT n, turn_id, has_user FROM turns WHERE session_key=? ORDER BY n DESC LIMIT 1').get(sessionKey) as
     { n: number; turn_id: string | null; has_user: number } | undefined;
-  const start = db.prepare(`INSERT INTO turns(session_key,n,turn_id,first_key,last_key,ts_start,ts_end,tool_calls,tool_failures,has_user)
-    VALUES (?,?,?,?,?,?,?,?,?,?)`);
-  const extend = db.prepare(`UPDATE turns SET last_key=?,ts_end=?,tool_calls=tool_calls+?,tool_failures=tool_failures+?,has_user=?
+  const start = db.prepare(`INSERT INTO turns(session_key, n, turn_id, first_key, last_key, ts_start, ts_end, tool_calls, tool_failures, has_user)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const extend = db.prepare(`UPDATE turns SET last_key=?, ts_end=?, tool_calls=tool_calls+?, tool_failures=tool_failures+?, has_user=?
     WHERE session_key=? AND n=?`);
-  const link = db.prepare('INSERT INTO turn_items(session_key,event_key,n,first_event,latest_event) VALUES (?,?,?,?,?)');
-  const prior = db.prepare(`SELECT i.n,e.kind,e.turn_id,coalesce(json_extract(e.meta,'$.tool.status')='failed',0) AS failed
+  const link = db.prepare('INSERT INTO turn_items(session_key, event_key, n, first_event, latest_event) VALUES (?, ?, ?, ?, ?)');
+  const prior = db.prepare(`SELECT i.n, e.kind, e.turn_id, coalesce(json_extract(e.meta, '$.tool.status')='failed', 0) AS failed
     FROM turn_items i JOIN source_events e ON e.id=i.latest_event WHERE i.session_key=? AND i.event_key=?`);
   const revise = db.prepare('UPDATE turn_items SET latest_event=? WHERE session_key=? AND event_key=?');
   const recount = db.prepare(`UPDATE turns SET tool_failures=tool_failures+?,
-    ts_start=CASE WHEN first_key=? THEN ? ELSE ts_start END,ts_end=CASE WHEN last_key=? THEN ? ELSE ts_end END
+    ts_start=CASE WHEN first_key=? THEN ? ELSE ts_start END, ts_end=CASE WHEN last_key=? THEN ? ELSE ts_end END
     WHERE session_key=? AND n=?`);
   for (const e of events) {
     const previous = prior.get(sessionKey, e.event_key);
@@ -86,7 +86,7 @@ export function rebuildTurns(db: DatabaseSync, sessionKey: string): void {
   const rows = db
     .prepare(
       `SELECT ${eventColumns}, versions.first_event FROM
-    (SELECT min(id) AS first_event,max(id) AS latest_event FROM source_events
+    (SELECT min(id) AS first_event, max(id) AS latest_event FROM source_events
      WHERE session_key=? AND source_id NOT LIKE 'herdr:%' GROUP BY event_key) versions
     JOIN source_events e ON e.id=versions.latest_event ORDER BY versions.first_event`,
     )

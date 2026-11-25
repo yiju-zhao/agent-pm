@@ -47,22 +47,24 @@ export async function main(argv: string[], io: Io): Promise<number> {
       case 'server':
         return await runServer(args, io);
       case 'rebuild-index': {
-        const path = requireConfig(command,args);
-        const {loadServerConfig} = await import('./server/config.ts');
-        const {openDb,transaction} = await import('./server/db.ts');
-        const {rebuildSearchIndex} = await import('./server/search.ts');
-        const {rebuildTurns} = await import('./server/turns.ts');
+        const path = requireConfig(command, args);
+        const { loadServerConfig } = await import('./server/config.ts');
+        const { openDb, transaction } = await import('./server/db.ts');
+        const { rebuildSearchIndex } = await import('./server/search.ts');
+        const { rebuildTurns } = await import('./server/turns.ts');
         const db = openDb(loadServerConfig(path).dbPath);
         try {
           transaction(db, () => {
             db.exec('DELETE FROM turn_items; DELETE FROM turns');
             for (const row of db.prepare("SELECT DISTINCT session_key FROM source_events WHERE source_id NOT LIKE 'herdr:%'").all()) {
-              rebuildTurns(db,String(row.session_key));
+              rebuildTurns(db, String(row.session_key));
             }
             rebuildSearchIndex(db);
           });
           io.stdout('索引重建完成\n');
-        } finally { db.close(); }
+        } finally {
+          db.close();
+        }
         return 0;
       }
       case 'collect':

@@ -14,7 +14,7 @@ type RefInfo = { label: string; /** The reference to ask the server for; `null` 
 
 /** A chunk line suffix is only a hint; the hash in a turn address is part of its identity. */
 function readRef(raw: string): RefInfo {
-  if (/^s:[^\s#]+#[1-9]\d*$/.test(raw)) return {label:raw,openRef:raw};
+  if (/^s:[^\s#]+#[1-9]\d*$/.test(raw)) return { label: raw, openRef: raw };
   const base = raw.split('#', 1)[0];
   const m = /^(digest|chunk|event|question):(.+)$/.exec(base);
   if (m === null) return { label: raw, openRef: null };
@@ -146,11 +146,17 @@ function Chunk({ chunk }: { chunk: EvidenceChunk }) {
 function Body({ view }: { view: EvidenceView }) {
   if (view.kind === 'turn') {
     if (view.missing) return <p className="dim">{view.message}</p>;
-    return <>{view.turn?.items.map(item => <section className="chunk" key={item.address}>
-      <div className="dim">{item.kind} · {item.address}</div>
-      {item.refused && <div className="dim">{view.refusal_note}</div>}
-      <pre>{item.tool ? `${item.tool.name} ${item.tool.input} · ${item.tool.status} · exit=${item.tool.exit_code??'—'}` : item.text}</pre>
-    </section>)}</>;
+    return (
+      <>
+        {view.turn?.items.map(item => (
+          <section className="chunk" key={item.address}>
+            <div className="dim">{item.kind} · {item.address}</div>
+            {item.refused && <div className="dim">{view.refusal_note}</div>}
+            <pre>{item.tool ? `${item.tool.name} ${item.tool.input} · ${item.tool.status} · exit=${item.tool.exit_code ?? '—'}` : item.text}</pre>
+          </section>
+        ))}
+      </>
+    );
   }
   const when = timeRange(view.ts_start, view.ts_end);
   return (

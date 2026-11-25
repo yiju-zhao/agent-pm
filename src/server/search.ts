@@ -13,7 +13,7 @@ export type SearchHit = {
 };
 
 const indexedTables = ['projects', 'milestones', 'todos', 'decisions', 'blockers', 'digests', 'turn_items'];
-const columns = 'rowid,body,ref,kind,project_id,session_key,ts';
+const columns = 'rowid, body, ref, kind, project_id, session_key, ts';
 
 export function rebuildSearchIndex(db: DatabaseSync): void {
   db.exec('SAVEPOINT rebuild_search');
@@ -21,7 +21,7 @@ export function rebuildSearchIndex(db: DatabaseSync): void {
     db.exec('DELETE FROM search_index');
     for (const table of indexedTables)
       db.exec(`INSERT INTO search_index(${columns})
-      SELECT docid,body,ref,kind,project_id,session_key,ts FROM search_${table}`);
+      SELECT docid, body, ref, kind, project_id, session_key, ts FROM search_${table}`);
     db.exec('RELEASE rebuild_search');
   } catch (error) {
     db.exec('ROLLBACK TO rebuild_search; RELEASE rebuild_search');
@@ -47,12 +47,12 @@ export function searchContext(
   const scopes = { all: '1', ledger: 'i.project_id IS NOT NULL', messages: "kind='message'", digests: "kind='digest'" };
   const rows = db
     .prepare(
-      `SELECT i.ref,i.kind,i.session_key,i.ts,i.body,
-    coalesce(i.project_id,(SELECT c.project_id FROM contributions c JOIN projects p ON p.id=c.project_id
+      `SELECT i.ref, i.kind, i.session_key, i.ts, i.body,
+    coalesce(i.project_id, (SELECT c.project_id FROM contributions c JOIN projects p ON p.id=c.project_id
       WHERE c.session_key=i.session_key AND c.deleted_at IS NULL AND p.deleted_at IS NULL AND (? IS NULL OR c.project_id=?) ORDER BY c.project_id LIMIT 1)) AS linked_project
     FROM search_index i WHERE ${match} AND ${scopes[options.scope]}
     AND (i.project_id IS NULL OR EXISTS(SELECT 1 FROM projects p WHERE p.id=i.project_id AND p.deleted_at IS NULL))
-    AND (? IS NULL OR linked_project=?) AND (? IS NULL OR i.session_key=?) ORDER BY i.ts DESC,i.rowid LIMIT ?`,
+    AND (? IS NULL OR linked_project=?) AND (? IS NULL OR i.session_key=?) ORDER BY i.ts DESC, i.rowid LIMIT ?`,
     )
     .all(
       options.projectId ?? null,

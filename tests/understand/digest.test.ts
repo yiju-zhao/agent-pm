@@ -125,12 +125,12 @@ const GOOD_DIGEST = {
       confidence: 0.8,
     },
   ],
-  decisions: [{ text: '屏幕类 session 只摘要最新快照', quote_ref: 'chunk:1', turns:[] }],
-  progress: [{text:'nextWindow 完成',turns:[]}],
-  todos_added: [{text:'补 runDigest 测试',turns:[]}],
+  decisions: [{ text: '屏幕类 session 只摘要最新快照', quote_ref: 'chunk:1', turns: [] }],
+  progress: [{ text: 'nextWindow 完成', turns: [] }],
+  todos_added: [{ text: '补 runDigest 测试', turns: [] }],
   todos_done: [],
-  blockers: [{ text: '等订阅额度恢复', kind: 'external' as const,turns:[] }],
-  session_state:{goal:'目标',state:'进行中',waiting_on:null,next:null,note:null},
+  blockers: [{ text: '等订阅额度恢复', kind: 'external' as const, turns: [] }],
+  session_state: { goal: '目标', state: '进行中', waiting_on: null, next: null, note: null },
   open_questions: ['窗口上限要不要放进配置？'],
   trivial: false,
 };
@@ -341,7 +341,7 @@ test('DIGEST_JSON_SCHEMA has no $schema key', () => {
 test('DIGEST_JSON_SCHEMA describes the same top-level fields', () => {
   const props = Object.keys((DIGEST_JSON_SCHEMA as { properties: Record<string, unknown> }).properties).sort();
   expect(props).toEqual(
-    ['blockers', 'decisions', 'open_questions', 'progress', 'todos_added', 'todos_done', 'topics', 'trivial','session_state'].sort(),
+    ['blockers', 'decisions', 'open_questions', 'progress', 'todos_added', 'todos_done', 'topics', 'trivial', 'session_state'].sort(),
   );
 });
 

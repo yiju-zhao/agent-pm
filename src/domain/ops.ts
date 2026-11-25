@@ -17,7 +17,13 @@ const ItemStatus = z.enum(['todo', 'doing', 'done']);
 const ProjectItem = z.object({ project: Id, id: Id }).strict();
 
 export const OP_SCHEMAS = {
-  mark_checked: z.object({item_type:z.enum(['decision','blocker','todo','milestone']),id:Id,ref:z.string().regex(/^s:[^\s#]+#[1-9]\d*$/).refine(ref => Number.isSafeInteger(Number(ref.split('#')[1])), '地址序号超出范围')}).strict(),
+  mark_checked: z.object({
+    item_type: z.enum(['decision', 'blocker', 'todo', 'milestone']),
+    id: Id,
+    ref: z.string()
+      .regex(/^s:[^\s#]+#[1-9]\d*$/)
+      .refine(ref => Number.isSafeInteger(Number(ref.split('#')[1])), '地址序号超出范围'),
+  }).strict(),
   create_project: z
     .object({
       title: text(200),

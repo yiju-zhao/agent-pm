@@ -1,15 +1,17 @@
 import type { DatabaseSync } from 'node:sqlite';
 
-import { ContextAddressError,parseAddress } from '../context/address.ts';
+import { ContextAddressError, parseAddress } from '../context/address.ts';
 import { REFUSAL_NOTE, readTurn, resolveSession } from '../context/read.ts';
 import { getSession } from '../server/sessions-repo.ts';
 import type { SessionView } from '../server/sessions-repo.ts';
 import type { Digest } from '../understand/digest.ts';
 
-type LegacyDigest = Omit<Digest,'session_state'|'decisions'|'blockers'|'progress'|'todos_added'|'todos_done'> & {
-  decisions: Array<{text:string;quote_ref:string}>;
-  blockers: Array<{text:string;kind:'user'|'external'|'technical'}>;
-  progress:string[]; todos_added:string[]; todos_done:string[];
+type LegacyDigest = Omit<Digest, 'session_state' | 'decisions' | 'blockers' | 'progress' | 'todos_added' | 'todos_done'> & {
+  decisions: Array<{ text: string; quote_ref: string }>;
+  blockers: Array<{ text: string; kind: 'user' | 'external' | 'technical' }>;
+  progress: string[];
+  todos_added: string[];
+  todos_done: string[];
 };
 type StoredDigest = Digest | LegacyDigest;
 
@@ -52,8 +54,8 @@ export type EvidenceView = {
   kind: 'digest' | 'chunk' | 'turn';
   turn?: ReturnType<typeof readTurn>;
   refusal_note?: string;
-  missing?:boolean;
-  message?:string;
+  missing?: boolean;
+  message?: string;
   id: number;
   /** The key recorded on the chunk or digest; `session` is the session it is known by now. */
   session_key: string;
@@ -70,11 +72,11 @@ type ChunkRaw = { id: number; session_key: string; kind: string; ts_start: strin
 type DigestRaw = { id: number; session_key: string; chunk_ids: string | null; json: string | null; ts_start: string | null; ts_end: string | null };
 
 /** Legacy numeric references and turn addresses share the evidence endpoint. */
-export function parseEvidenceRef(ref: string): { kind: 'digest' | 'chunk'; id: number } | {kind:'turn';session:string;id:number} | null {
+export function parseEvidenceRef(ref: string): { kind: 'digest' | 'chunk'; id: number } | { kind: 'turn'; session: string; id: number } | null {
   if (ref.startsWith('s:')) {
     try {
-      const a=parseAddress(ref);
-      return a.kind==='turn'?{kind:'turn',session:a.session,id:a.turn}:null;
+      const address = parseAddress(ref);
+      return address.kind === 'turn' ? { kind: 'turn', session: address.session, id: address.turn } : null;
     } catch (error) {
       if (error instanceof ContextAddressError) return null;
       throw error;
@@ -168,18 +170,23 @@ export function getEvidence(db: DatabaseSync, now: Date, ref: string): EvidenceV
   if (parsed === null) return null;
 
   if (parsed.kind === 'turn') {
-    const view:EvidenceView={ref,kind:'turn',id:parsed.id,session_key:'',session:null,ts_start:null,ts_end:null,digest:null,chunks:[]};
+    const view: EvidenceView = {
+      ref, kind: 'turn', id: parsed.id, session_key: '', session: null,
+      ts_start: null, ts_end: null, digest: null, chunks: [],
+    };
     try {
-      const {key}=resolveSession(db,parsed.session);
-      view.session_key=key;
-      view.session=getSession(db,key,now);
-      view.turn=readTurn(db,parsed.session,parsed.id);
+      const { key } = resolveSession(db, parsed.session);
+      view.session_key = key;
+      view.session = getSession(db, key, now);
+      view.turn = readTurn(db, parsed.session, parsed.id);
       if (view.turn.items.some(item => item.refused)) view.refusal_note = REFUSAL_NOTE;
-      const bounds=db.prepare('SELECT ts_start,ts_end FROM turns WHERE session_key=? AND n=?').get(key,parsed.id)!;
-      view.ts_start=bounds.ts_start as string|null;view.ts_end=bounds.ts_end as string|null;
+      const bounds = db.prepare('SELECT ts_start, ts_end FROM turns WHERE session_key=? AND n=?').get(key, parsed.id)!;
+      view.ts_start = bounds.ts_start as string | null;
+      view.ts_end = bounds.ts_end as string | null;
     } catch (error) {
       if (!(error instanceof ContextAddressError)) throw error;
-      view.missing=true;view.message=error.message;
+      view.missing = true;
+      view.message = error.message;
     }
     return view;
   }

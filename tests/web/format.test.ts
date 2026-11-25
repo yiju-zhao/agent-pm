@@ -38,7 +38,7 @@ test('OP_LABEL uses the agreed names', () => {
     upsert_milestone: '编辑里程碑',
     upsert_todo: '编辑 todo',
     mark_checked: '核对条目',
-  record_decision: '记录决策',
+    record_decision: '记录决策',
     set_blocker: '设置阻塞',
     clear_blocker: '解除阻塞',
     link_session: '关联 session',

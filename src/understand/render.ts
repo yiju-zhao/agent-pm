@@ -71,11 +71,11 @@ function todoLine(todo: TodoRow): string {
 }
 
 function blockerLine(blocker: BlockerRow): string {
-  return `- ${[blocker.id, oneLine(blocker.text), BLOCKER_KIND_LABEL[blocker.kind],...(blocker.checked_ref?['已核对 '+blocker.checked_ref]:[])].join(' · ')}`;
+  return `- ${[blocker.id, oneLine(blocker.text), BLOCKER_KIND_LABEL[blocker.kind],...(blocker.checked_ref ? ['已核对 ' + blocker.checked_ref] : [])].join(' · ')}`;
 }
 
 function decisionLines(decision: DecisionRow, withEvidence: boolean): string[] {
-  const line = `- ${[decision.id, day(decision.decided_at), oneLine(decision.text),...(decision.checked_ref?['已核对 '+decision.checked_ref]:[])].join(' · ')}`;
+  const line = `- ${[decision.id, day(decision.decided_at), oneLine(decision.text),...(decision.checked_ref ? ['已核对 ' + decision.checked_ref] : [])].join(' · ')}`;
   return withEvidence && decision.evidence.length > 0 ? [line, `  证据：${decision.evidence.join(', ')}`] : [line];
 }
 
@@ -122,7 +122,7 @@ function headLines(p: ProjectDetail): string[] {
   if (present(p.done_criteria)) lines.push(`完成标准：${indented(p.done_criteria)}`);
   if (p.current_milestone !== null) {
     const m = p.current_milestone;
-    lines.push(`当前里程碑：${m.id} · ${oneLine(m.title)}（${ITEM_STATUS_LABEL[m.status]}）${m.checked_ref?' · 已核对 '+m.checked_ref:''}`);
+    lines.push(`当前里程碑：${m.id} · ${oneLine(m.title)}（${ITEM_STATUS_LABEL[m.status]}）${m.checked_ref ? ' · 已核对 ' + m.checked_ref : ''}`);
   }
   return lines;
 }
@@ -155,7 +155,7 @@ export function renderProjectMarkdown(p: ProjectDetail): string {
     ...headLines(p),
     ...section(
       '里程碑',
-      p.milestones.map((m) => `- ${[m.id, oneLine(m.title), ITEM_STATUS_LABEL[m.status],...(m.checked_ref?['已核对 '+m.checked_ref]:[])].join(' · ')}`),
+      p.milestones.map((m) => `- ${[m.id, oneLine(m.title), ITEM_STATUS_LABEL[m.status],...(m.checked_ref ? ['已核对 ' + m.checked_ref] : [])].join(' · ')}`),
     ),
     ...section('todo', p.todos.map(todoLine)),
     ...section('未解决阻塞', p.open_blockers.map(blockerLine)),

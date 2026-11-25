@@ -2,7 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 
 import { z } from 'zod';
 
-import { parseAddress,ContextAddressError } from '../context/address.ts';
+import { parseAddress, ContextAddressError } from '../context/address.ts';
 import { resolveSession } from '../context/read.ts';
 import { execute } from '../domain/execute.ts';
 import { OP_SCHEMAS } from '../domain/ops.ts';
@@ -27,7 +27,7 @@ export const CURATOR_ACTOR = 'ai:curator';
 export type CuratorBatch = { digestIds: number[]; landedWrites?: number; closed?: boolean };
 
 /** What every handler gets: the citable ids as a set, and the batch whose counter and flag it reads and updates. */
-type RunState = { inspected:Set<string>; ids: ReadonlySet<number>; batch: CuratorBatch };
+type RunState = { inspected: Set<string>; ids: ReadonlySet<number>; batch: CuratorBatch };
 
 const ENDED: ToolOutput = { text: 'this curate run has ended', isError: true };
 
@@ -83,14 +83,14 @@ function checkEvidence(db: DatabaseSync, batch: ReadonlySet<number>, evidence: s
   for (const ref of evidence) {
     if (ref.startsWith('s:')) {
       try {
-        const a=parseAddress(ref);
-        if (a.kind!=='turn') return {ok:false,message:'需要回合地址'};
-        const {key}=resolveSession(db,a.session);
-        const turn=db.prepare('SELECT ts_end FROM turns WHERE session_key=? AND n=?').get(key,a.turn);
-        if (!turn) return {ok:false,message:`找不到回合 ${ref}`};
-        chunkEnds.push(turn.ts_end as string|null);
+        const address = parseAddress(ref);
+        if (address.kind !== 'turn') return { ok: false, message: '需要回合地址' };
+        const { key } = resolveSession(db, address.session);
+        const turn = db.prepare('SELECT ts_end FROM turns WHERE session_key=? AND n=?').get(key, address.turn);
+        if (!turn) return { ok: false, message: `找不到回合 ${ref}` };
+        chunkEnds.push(turn.ts_end as string | null);
       } catch (error) {
-        if (error instanceof ContextAddressError) return {ok:false,message:error.message};
+        if (error instanceof ContextAddressError) return { ok: false, message: error.message };
         throw error;
       }
       continue;
@@ -240,8 +240,8 @@ function writeTool(db: DatabaseSync, deps: DomainDeps, run: RunState, spec: { op
 
       const cited = checkEvidence(db, run.ids, evidence);
       if (!cited.ok) return rejected('missing_evidence', cited.message);
-      if (op==='mark_checked' && (!run.inspected.has(String(args.ref)) || !evidence.includes(String(args.ref)))) {
-        return rejected('missing_evidence','先用 get_turn 核实该回合，并在 evidence 中引用它');
+      if (op === 'mark_checked' && (!run.inspected.has(String(args.ref)) || !evidence.includes(String(args.ref)))) {
+        return rejected('missing_evidence', '先用 get_turn 核实该回合，并在 evidence 中引用它');
       }
       if (op === 'create_project') {
         const refusal = namingRefusal(db, deps, args as { title: string; from_session?: string }, name_reason);
@@ -337,12 +337,17 @@ function getProjectTool(db: DatabaseSync, deps: DomainDeps, run: RunState): Tool
  * `batch.landedWrites` and stop working once `batch.closed` is set (see `CuratorBatch`).
  */
 export function curatorTools(db: DatabaseSync, deps: DomainDeps, batch: CuratorBatch, opts: { reconcile?: boolean } = {}): ToolDef[] {
-  const run: RunState = { inspected:new Set(), ids: new Set(batch.digestIds), batch };
-  const writes: Array<{ op: OpName; description: string }> = [...WRITE_OPS,{op:'mark_checked',description:'用 get_turn 核实条目后记录核对时间与回合依据。'}];
+  const run: RunState = { inspected: new Set(), ids: new Set(batch.digestIds), batch };
+  const writes: Array<{ op: OpName; description: string }> = [
+    ...WRITE_OPS,
+    { op: 'mark_checked', description: '用 get_turn 核实条目后记录核对时间与回合依据。' },
+  ];
   if (opts.reconcile) for (const op of ['delete_todo','delete_milestone','delete_decision','delete_blocker'] as const) {
     writes.push({ op, description: '项目重新整理时去掉重复或已失效的条目；用户创建或编辑过的条目仍须用户确认，不能用删除伪造完成。' });
   }
-  const reads=sessionTools(db,deps,true,run.inspected).map(tool=>({...tool,
-    handler:async (args:Record<string,unknown>)=>batch.closed?ENDED:tool.handler(args)}));
-  return [...writes.map((spec) => writeTool(db, deps, run, spec)), askTool(db, deps, run), getProjectTool(db, deps, run),...reads];
+  const reads = sessionTools(db, deps, true, run.inspected).map(tool => ({
+    ...tool,
+    handler: async (args: Record<string, unknown>) => batch.closed ? ENDED : tool.handler(args),
+  }));
+  return [...writes.map((spec) => writeTool(db, deps, run, spec)), askTool(db, deps, run), getProjectTool(db, deps, run), ...reads];
 }

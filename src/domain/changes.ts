@@ -99,9 +99,9 @@ export class ChangeSet {
       if (!Object.hasOwn(row, col)) throw new Error(`${table} has no column ${col}`);
     }
     const changed = entries.filter(([col, value]) => row[col] !== value);
-    if (row.checked_ref && patch.checked_ref === undefined && changed.some(([name])=>name==='title'||name==='text')) {
+    if (row.checked_ref && patch.checked_ref === undefined && changed.some(([name]) => name === 'title' || name === 'text')) {
       // Include invalidation in the event, so reverting an edit can also restore its verification.
-      changed.push(['checked_at',null],['checked_ref',null]);
+      changed.push(['checked_at', null], ['checked_ref', null]);
     }
     if (changed.length === 0) return false;
 

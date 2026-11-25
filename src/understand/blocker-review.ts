@@ -163,21 +163,25 @@ export async function runBlockerReview(db: DatabaseSync, deps: DomainDeps, runne
   const related = relatedDigests(db, blockers, own.map((d) => d.id));
   const digestIds = new Set([...own, ...related].map((d) => `digest:${d.id}`));
 
-  const shortIds=assignShortIds(db.prepare('SELECT key FROM sessions').all().map(row=>String(row.key)));
-  const inspected=new Set<string>();
+  const shortIds = assignShortIds(db.prepare('SELECT key FROM sessions').all().map(row => String(row.key)));
+  const inspected = new Set<string>();
   const prompt = [
     `现在是 ${now.toISOString()}。`,
     '摘要中 turns 对应 address 下的回合。可用 get_session、get_turn 核对；确认后在该条 verdict 的 evidence 中引用实际读过的回合地址，以记录核对时间。',
     `## 项目\n<project>${neutralizeTags(renderBrief(project), 'project', 'digest')}</project>`,
     `## 开放的阻塞\n${blockers.map((b) => `- ${b.id} · ${b.kind} · 记于 ${b.created_at.slice(0, 16)} · ${b.text.replace(/\s+/g, ' ')}`).join('\n')}`,
-    `## 本项目 session 在第一条阻塞记下之后的摘要（按时间先后）\n${own.map((d) => digestTag(d,null,shortIds.get(d.session_key))).join('\n') || '（没有新的摘要）'}`,
-    `## 其他 session 里提到同一件事的摘要，以及 agent 的主动上报\n${related.map((d) => digestTag(d,null,shortIds.get(d.session_key))).join('\n') || '（没有）'}`,
+    `## 本项目 session 在第一条阻塞记下之后的摘要（按时间先后）\n${own.map((d) => digestTag(d, null, shortIds.get(d.session_key))).join('\n') || '（没有新的摘要）'}`,
+    `## 其他 session 里提到同一件事的摘要，以及 agent 的主动上报\n${related.map((d) => digestTag(d, null, shortIds.get(d.session_key))).join('\n') || '（没有）'}`,
     `## 项目 session 的当前状态与仓库实际状态（事实：例如"领先上游 0 个提交"说明已推送）\n${neutralizeTags(projectSessionsContext(db, projectId, now), 'project', 'digest')}`,
     `## 系统状态（事实）\n${systemFacts(db)}`,
   ].join('\n\n');
   const schema: Record<string, unknown> = z.toJSONSchema(VerdictSchema);
   delete schema.$schema;
-  const call: LlmCall = { role: 'curate', model, system: SYSTEM, prompt, outputSchema: schema, tools:sessionTools(db,deps,true,inspected), maxTurns: SDK_STRUCTURED_OUTPUT_RETRIES + 3 };
+  const call: LlmCall = {
+    role: 'curate', model, system: SYSTEM, prompt, outputSchema: schema,
+    tools: sessionTools(db, deps, true, inspected),
+    maxTurns: SDK_STRUCTURED_OUTPUT_RETRIES + 3,
+  };
   let result = await runner(call);
   const parsed = result.ok ? VerdictSchema.safeParse(result.structured) : null;
   if (result.ok && !parsed!.success) result = { ok: false, kind: 'bad_output', message: z.prettifyError(parsed!.error), durationMs: result.durationMs };
@@ -198,8 +202,8 @@ export async function runBlockerReview(db: DatabaseSync, deps: DomainDeps, runne
     const run = (op: Parameters<typeof runOp>[2]['op'], args: Record<string, unknown>) => runOp(db, deps, { op, args, actor: ACTOR, reason, evidence });
     try {
       transaction(db, () => {
-        const turnRef=cited.find(ref=>inspected.has(ref));
-        if (turnRef) run('mark_checked',{item_type:'blocker',id:blocker.id,ref:turnRef});
+        const turnRef = cited.find(ref => inspected.has(ref));
+        if (turnRef) run('mark_checked', { item_type: 'blocker', id: blocker.id, ref: turnRef });
         if (v.verdict === 'keep') {
           if (v.kind && v.kind !== blocker.kind) run('set_blocker', { project: projectId, id: blocker.id, kind: v.kind });
           return;

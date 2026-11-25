@@ -101,7 +101,9 @@ describe('rules', () => {
 });
 
 test.each(['turn-a', undefined])('normalization carries the timeline turn ID %s', turnId => {
-  const row: TimelineEntry = { provider:'claude', item:{type:'user_message',text:'question'}, turnId,
-    timestamp:'',seqStart:1,seqEnd:1,sourceSeqRanges:[],collapsed:[] };
-  expect(normalizeEntry(row,'epoch',started)).toMatchObject({ event:{ turn_id: turnId ?? null } });
+  const row: TimelineEntry = {
+    provider: 'claude', item: { type: 'user_message', text: 'question' }, turnId,
+    timestamp: '', seqStart: 1, seqEnd: 1, sourceSeqRanges: [], collapsed: [],
+  };
+  expect(normalizeEntry(row, 'epoch', started)).toMatchObject({ event: { turn_id: turnId ?? null } });
 });

@@ -111,15 +111,16 @@ test('a replaced epoch replays the same event keys without duplicating turns', a
   const events = [userMessage(1, 'a'), reply(2, 'a')];
   const session = await deliver(events);
   const before = listTurns(center.db, session);
-  const next = {epoch:'next', seq:2};
-  const batch = writer.batchBody(AGENT_ID,{epoch:EPOCH,seq:2},next,events.map(e=>({...e,epoch:'next'})),
-    {reset:{previous_epoch:EPOCH,reason:'replacement'}});
+  const next = { epoch: 'next', seq: 2 };
+  const batch = writer.batchBody(AGENT_ID, { epoch: EPOCH, seq: 2 }, next, events.map(e => ({ ...e, epoch: 'next' })), {
+    reset: { previous_epoch: EPOCH, reason: 'replacement' },
+  });
   expect((await writer.batch(batch)).status).toBe(200);
   expect(listTurns(center.db, session)).toEqual(before);
 });
 
 test('a completed tool revision replaces its running observation in the same turn', async () => {
-  const session = await deliver([userMessage(1,'a'),toolCall(2,'a','running')]);
-  await deliver([toolCall(2,'a','failed')],{epoch:EPOCH,seq:2});
-  expect(listTurns(center.db,session)).toMatchObject([{tool_calls:1,tool_failures:1}]);
+  const session = await deliver([userMessage(1, 'a'), toolCall(2, 'a', 'running')]);
+  await deliver([toolCall(2, 'a', 'failed')], { epoch: EPOCH, seq: 2 });
+  expect(listTurns(center.db, session)).toMatchObject([{ tool_calls: 1, tool_failures: 1 }]);
 });

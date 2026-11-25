@@ -150,7 +150,7 @@ export type ProjectCard = {
   last_activity_at: string;
   dormant_days: number | null;
   milestones_progress: { done: number; doing: number; todo: number };
-  current_milestone: { id: string; title: string; status: ItemStatus; checked_ref?:string|null } | null;
+  current_milestone: { id: string; title: string; status: ItemStatus; checked_ref?: string | null } | null;
   open_todos: TodoRow[];
   open_blockers: BlockerRow[];
   active_sessions: SessionTag[];
@@ -259,7 +259,7 @@ const PROJECT_COLUMNS =
 function loadMilestones(db: DatabaseSync, projectId: string): MilestoneRow[] {
   const rows = db
     .prepare(
-      `SELECT id, project_id, title, status, position, locks, created_by, created_at,checked_at,checked_ref
+      `SELECT id, project_id, title, status, position, locks, created_by, created_at, checked_at, checked_ref
        FROM milestones WHERE project_id = ? AND deleted_at IS NULL ORDER BY position, created_at, rowid`,
     )
     .all(projectId);
@@ -269,7 +269,7 @@ function loadMilestones(db: DatabaseSync, projectId: string): MilestoneRow[] {
 function loadTodos(db: DatabaseSync, projectId: string): TodoRow[] {
   const rows = db
     .prepare(
-      `SELECT id, project_id, milestone_id, title, status, priority, locks, created_by, created_at,checked_at,checked_ref
+      `SELECT id, project_id, milestone_id, title, status, priority, locks, created_by, created_at, checked_at, checked_ref
        FROM todos WHERE project_id = ? AND deleted_at IS NULL ORDER BY rowid`,
     )
     .all(projectId);
@@ -281,7 +281,7 @@ function loadTodos(db: DatabaseSync, projectId: string): TodoRow[] {
 function loadDecisions(db: DatabaseSync, projectId: string): DecisionRow[] {
   const rows = db
     .prepare(
-      `SELECT id, project_id, text, decided_at, evidence, created_by, created_at,checked_at,checked_ref
+      `SELECT id, project_id, text, decided_at, evidence, created_by, created_at, checked_at, checked_ref
        FROM decisions WHERE project_id = ? AND deleted_at IS NULL ORDER BY decided_at DESC, rowid DESC`,
     )
     .all(projectId);
@@ -294,7 +294,7 @@ function loadDecisions(db: DatabaseSync, projectId: string): DecisionRow[] {
 function loadBlockers(db: DatabaseSync, projectId: string): BlockerRow[] {
   const rows = db
     .prepare(
-      `SELECT id, project_id, text, kind, status, cleared_at, created_by, created_at,checked_at,checked_ref
+      `SELECT id, project_id, text, kind, status, cleared_at, created_by, created_at, checked_at, checked_ref
        FROM blockers WHERE project_id = ? AND deleted_at IS NULL ORDER BY created_at, rowid`,
     )
     .all(projectId);
@@ -441,7 +441,7 @@ function assemble(db: DatabaseSync, now: Date, project: ProjectRaw, sessions: Ma
       doing: milestones.filter((m) => m.status === 'doing').length,
       todo: milestones.filter((m) => m.status === 'todo').length,
     },
-    current_milestone: current ? { id: current.id, title: current.title, status: current.status, ...(current.checked_ref?{checked_ref:current.checked_ref}:{}) } : null,
+    current_milestone: current ? { id: current.id, title: current.title, status: current.status, ...(current.checked_ref ? { checked_ref: current.checked_ref } : {}) } : null,
     open_todos: todos.filter((todo) => todo.status !== 'done'),
     open_blockers: blockers.filter((b) => b.status !== 'cleared'),
     active_sessions: activeSessions,

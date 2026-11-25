@@ -76,7 +76,7 @@ export function readOverview(db: DatabaseSync, now: Date, reader: string, source
   pending.push(
     ...(db
       .prepare(
-        `SELECT prompt AS text,created_at AS since,id AS ref FROM questions WHERE status='pending'
+        `SELECT prompt AS text, created_at AS since, id AS ref FROM questions WHERE status='pending'
     AND created_at>=? AND (project_id IS NULL OR project_id IN (SELECT id FROM projects WHERE deleted_at IS NULL))`,
       )
       .all(new Date(now.getTime() - QUESTION_TTL_DAYS * 86400_000).toISOString()) as Pending[]),
@@ -84,7 +84,7 @@ export function readOverview(db: DatabaseSync, now: Date, reader: string, source
   pending.sort((a, b) => (a.since ?? '').localeCompare(b.since ?? ''));
   const latestTurn = db.prepare('SELECT n, ts_start FROM turns WHERE session_key=? ORDER BY n DESC LIMIT 1');
   const openingMessage = db.prepare(
-    "SELECT substr(text,1,80) AS text FROM context_turn_events WHERE session_key=? AND n=? AND kind='user' ORDER BY first_event LIMIT 1",
+    "SELECT substr(text, 1, 80) AS text FROM context_turn_events WHERE session_key=? AND n=? AND kind='user' ORDER BY first_event LIMIT 1",
   );
   const running = sessions
     .filter((s) => s.effective_status === 'working' && !s.ignored)
@@ -104,8 +104,8 @@ export function readOverview(db: DatabaseSync, now: Date, reader: string, source
   const dayAgo = new Date(now.getTime() - 24 * 3600_000).toISOString();
   const changes = db
     .prepare(
-      `SELECT project_id,sum(op='transition_stage') stages,sum(op='record_decision') decisions,
-    sum(op='upsert_todo' AND EXISTS(SELECT 1 FROM json_each(after) j WHERE json_extract(j.value,'$.status')='done')) completed_todos,
+      `SELECT project_id, sum(op='transition_stage') stages, sum(op='record_decision') decisions,
+    sum(op='upsert_todo' AND EXISTS(SELECT 1 FROM json_each(after) j WHERE json_extract(j.value, '$.status')='done')) completed_todos,
     sum(op='set_blocker' AND NOT EXISTS(SELECT 1 FROM json_each(before) WHERE type!='null')) new_blockers,
     sum(op='clear_blocker') cleared_blockers FROM events WHERE project_id IS NOT NULL AND ${cursor ? 'id>?' : 'recorded_at>=?'}
     GROUP BY project_id ORDER BY max(id) DESC`,
@@ -116,7 +116,7 @@ export function readOverview(db: DatabaseSync, now: Date, reader: string, source
     pending,
     running,
     changes,
-    last_event_id: Number(db.prepare('SELECT coalesce(max(id),0) n FROM events').get()!.n),
+    last_event_id: Number(db.prepare('SELECT coalesce(max(id), 0) n FROM events').get()!.n),
     undigested: Number(db.prepare(`SELECT count(DISTINCT session_key) n FROM (${PENDING_DIGEST_CHUNKS})`).get()!.n),
     refusals: Number(db.prepare('SELECT count(*) n FROM digest_blocks').get()!.n),
   };
@@ -124,8 +124,8 @@ export function readOverview(db: DatabaseSync, now: Date, reader: string, source
 
 export function markOverviewRead(db: DatabaseSync, reader: string, now: Date, through?: number): void {
   db.prepare(
-    `INSERT INTO reader_cursors(reader,last_event_id,last_seen_at) VALUES (?,coalesce(?,(SELECT coalesce(max(id),0) FROM events)),?)
-    ON CONFLICT(reader) DO UPDATE SET last_event_id=max(last_event_id,excluded.last_event_id),last_seen_at=excluded.last_seen_at`,
+    `INSERT INTO reader_cursors(reader, last_event_id, last_seen_at) VALUES (?, coalesce(?, (SELECT coalesce(max(id), 0) FROM events)), ?)
+    ON CONFLICT(reader) DO UPDATE SET last_event_id=max(last_event_id, excluded.last_event_id), last_seen_at=excluded.last_seen_at`,
   ).run(reader, through ?? null, now.toISOString());
 }
 
@@ -154,23 +154,23 @@ export function readSession(
 ): SessionContext {
   const { key, short } = resolveSession(db, shortId);
   const session = getSession(db, key, now)!;
-  const card = db.prepare('SELECT card,card_as_of_turn FROM sessions WHERE key=?').get(key) as {
+  const card = db.prepare('SELECT card, card_as_of_turn FROM sessions WHERE key=?').get(key) as {
     card: string | null;
     card_as_of_turn: number | null;
   };
   const address = 's:' + short;
-  const total = Number(db.prepare('SELECT coalesce(max(n),0) n FROM turns WHERE session_key=?').get(key)!.n);
+  const total = Number(db.prepare('SELECT coalesce(max(n), 0) n FROM turns WHERE session_key=?').get(key)!.n);
   const turns = db
     .prepare(
-      `SELECT n,turn_id,first_key,last_key,ts_start,ts_end,tool_calls,tool_failures FROM turns
+      `SELECT n, turn_id, first_key, last_key, ts_start, ts_end, tool_calls, tool_failures FROM turns
     WHERE session_key=? AND n<? ORDER BY n DESC LIMIT ?`,
     )
     .all(key, options.before ?? total + 1, options.limit ?? 30) as Turn[];
   const openingMessage = db.prepare(
-    "SELECT substr(text,1,80) AS text, refused FROM context_turn_events WHERE session_key=? AND n=? AND kind='user' ORDER BY first_event LIMIT 1",
+    "SELECT substr(text, 1, 80) AS text, refused FROM context_turn_events WHERE session_key=? AND n=? AND kind='user' ORDER BY first_event LIMIT 1",
   );
   const finalAnswer = db.prepare(
-    "SELECT substr(text,1,120) AS text, refused FROM context_turn_events WHERE session_key=? AND n=? AND kind='assistant' ORDER BY first_event DESC LIMIT 1",
+    "SELECT substr(text, 1, 120) AS text, refused FROM context_turn_events WHERE session_key=? AND n=? AND kind='assistant' ORDER BY first_event DESC LIMIT 1",
   );
   const refusedEvent = db.prepare('SELECT 1 FROM context_turn_events WHERE session_key=? AND n=? AND refused=1 LIMIT 1');
   const outline = turns.reverse().map((t) => {
@@ -191,7 +191,7 @@ export function readSession(
   const digests = total
     ? []
     : (db
-        .prepare('SELECT id,ts_end,json FROM digests WHERE session_key=? AND (? IS NULL OR id<?) ORDER BY id DESC LIMIT ?')
+        .prepare('SELECT id, ts_end, json FROM digests WHERE session_key=? AND (? IS NULL OR id<?) ORDER BY id DESC LIMIT ?')
         .all(key, options.before ?? null, options.before ?? null, options.limit ?? 30) as SessionContext['digests']);
   return {
     key,
@@ -235,7 +235,7 @@ export function readTurn(db: DatabaseSync, shortId: string, turn: number, backgr
   const { key, short } = resolveSession(db, shortId);
   const address = 's:' + short + '#' + turn;
   const rows = db
-    .prepare('SELECT kind,text,meta,refused FROM context_turn_events WHERE session_key=? AND n=? ORDER BY first_event')
+    .prepare('SELECT kind, text, meta, refused FROM context_turn_events WHERE session_key=? AND n=? ORDER BY first_event')
     .all(key, turn) as Pick<StoredItem, 'kind' | 'text' | 'meta' | 'refused'>[];
   if (!rows.length) throw new ContextAddressError(`找不到回合：${address}`);
   return {
@@ -281,13 +281,15 @@ export function readItem(
   const meta = JSON.parse(row.meta ?? '{}') as EventMeta;
   const tool = meta.tool;
   const missing = row.text === null || (!tool && row.text === '');
-  let text = row.text ?? '';
+  let text: string;
   if (tool && !missing) {
     text = [
       tool.input && '【输入】\n' + tool.input,
       tool.output && '【输出】\n' + tool.output,
       tool.error && '【错误】\n' + tool.error,
     ].filter(Boolean).join('\n\n');
+  } else {
+    text = row.text ?? '';
   }
   const chars = Array.from(text);
   const pageSize = 4000;

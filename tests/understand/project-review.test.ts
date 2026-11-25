@@ -104,7 +104,18 @@ test('scheduler digests pending session content first, then invokes project-wide
  const text='需要完整整理的新内容'.repeat(80);
  t.db.prepare(`INSERT INTO chunks(session_key,kind,offset_start,offset_end,ts_start,ts_end,text,backfill,digested,received_at) VALUES (?,'transcript',0,1,?,?,?,1,0,?)`).run(A,NOW,NOW,text,NOW);
  t.user('link_session',{session:A,project:p});let n=0;
- const runner:LlmRunner=async call=>{n++;return call.role==='digest'?{...ok(),ok:true,structured:{topics:[],decisions:[],session_state:{goal:'goal',state:'active',waiting_on:null,next:null,note:null},progress:[{text:'准备完毕',turns:[]}],todos_added:[],todos_done:[],blockers:[],open_questions:[],trivial:false}}:ok();};
+ const runner: LlmRunner = async (call) => {
+   n++;
+   if (call.role !== 'digest') return ok();
+   return {
+     ...ok(), ok: true,
+     structured: {
+       topics: [], decisions: [], progress: [{ text: '准备完毕', turns: [] }],
+       session_state: { goal: 'goal', state: 'active', waiting_on: null, next: null, note: null },
+       todos_added: [], todos_done: [], blockers: [], open_questions: [], trivial: false,
+     },
+   };
+ };
  const s=new Scheduler(t.db,t.deps,runner,{digest:'m',curate:'m'});
  expect(await s.tick()).toBe('digested');expect(await s.tick()).toBe('curated');expect(n).toBe(2);
  expect(s.status().pending_project_reviews).toBe(0);

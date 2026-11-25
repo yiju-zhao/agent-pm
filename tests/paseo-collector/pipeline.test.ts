@@ -87,9 +87,9 @@ const digestRunner = (quote: (chunkIds: number[]) => string): { runner: LlmRunne
       text: '',
       structured: {
         topics: [{ label: '采集器', summary: '修采集器', likely_project_ids: [], is_new_topic: true, confidence: 0.9 }],
-        decisions: [{ text: '用 Paseo SDK 采集', turns:[], quote_ref: quote(ids) }],
-        session_state:{goal:'goal',state:'active',waiting_on:null,next:null,note:null},
-        progress: [{text:'完成第一步',turns:[]}],
+        decisions: [{ text: '用 Paseo SDK 采集', turns: [], quote_ref: quote(ids) }],
+        session_state: { goal: 'goal', state: 'active', waiting_on: null, next: null, note: null },
+        progress: [{ text: '完成第一步', turns: [] }],
         todos_added: [],
         todos_done: [],
         blockers: [],

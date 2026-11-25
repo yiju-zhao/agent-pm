@@ -71,8 +71,8 @@ export function migrateSessionIdentity(db: DatabaseSync, fromKey: string, toKey:
   // Sessions that named the old key as their predecessor now name the new one.
   db.prepare('UPDATE sessions SET predecessor_key = ? WHERE predecessor_key = ? AND key != ?').run(toKey, fromKey, toKey);
   db.prepare(`UPDATE sessions SET merged_into = ?, lifecycle = 'ended', status_changed_at = ? WHERE key = ?`).run(toKey, nowIso, fromKey);
-  rebuildTurns(db,fromKey);
-  rebuildTurns(db,toKey);
+  rebuildTurns(db, fromKey);
+  rebuildTurns(db, toKey);
   return { overlapChunks };
 }
 
