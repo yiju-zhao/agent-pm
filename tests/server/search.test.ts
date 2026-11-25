@@ -48,7 +48,7 @@ test('digest-scoped search excludes matching ledger entries', () => {
   expect(searchContext(center.db, '主题', { scope: 'digests', limit: 10 }).map(hit => hit.kind)).toEqual(['digest']);
 });
 
-test('message search opens the turn containing only the latest revision', async () => {
+async function writeMessageRevision(): Promise<void> {
   const writer = new PaseoWriter(center);
   await writer.lease();
   await writer.snapshot([agent('a', { native_id: 'session1', native_id_origin: 'runtime' })]);
@@ -56,13 +56,22 @@ test('message search opens the turn containing only the latest revision', async 
   const first = event('msg:question', 1, { kind: 'user', text: '寻找旧关键词' });
   await writer.batch(writer.batchBody('a', null, end, [first]));
   await writer.batch(writer.batchBody('a', end, end, [{ ...first, text: '寻找新关键词' }]));
-  expect(search('旧关键词')).toEqual([]);
+}
+
+test('message search opens the turn containing the matching user message', async () => {
+  await writeMessageRevision();
   expect(search('新关键词')).toMatchObject([{ kind: 'message', ref: 's:session1#1' }]);
 });
 
-test('rebuilding the index restores the original hits', () => {
-  const hits = search('订阅驱动');
+test('message search drops the previous text after a revision', async () => {
+  await writeMessageRevision();
+  expect(search('旧关键词')).toEqual([]);
+});
+
+test('rebuilding the index restores the original ledger and message hits', async () => {
+  await writeMessageRevision();
+  const hits = [...search('订阅驱动'), ...search('新关键词')];
   center.db.exec('DELETE FROM search_index');
   rebuildSearchIndex(center.db);
-  expect(search('订阅驱动')).toEqual(hits);
+  expect([...search('订阅驱动'), ...search('新关键词')]).toEqual(hits);
 });
