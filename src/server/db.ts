@@ -1,5 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 
+import { SEARCH_SCHEMA } from './search.ts';
+
 /** Append-only: entry i upgrades a database from `user_version` i to i + 1. Never edit a shipped entry. */
 export const MIGRATIONS: string[] = [
   `
@@ -541,6 +543,7 @@ export const MIGRATIONS: string[] = [
     latest_event INTEGER NOT NULL UNIQUE, PRIMARY KEY(session_key,event_key)
   );
   CREATE INDEX turn_item_order ON turn_items(session_key,n,first_event);`,
+  SEARCH_SCHEMA,
 ];
 
 /** Opens (creating if needed) the central database in WAL mode and applies pending migrations. */
