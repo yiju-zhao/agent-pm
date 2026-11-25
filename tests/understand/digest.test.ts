@@ -1,6 +1,6 @@
-import { readSession } from '../../src/context/read.ts';
-import { agent,event,PaseoWriter,startCenter } from '../helpers/center.ts';
 import { afterEach, beforeEach, expect, test } from 'vitest';
+
+import { readSession } from '../../src/context/read.ts';
 import { SDK_STRUCTURED_OUTPUT_RETRIES } from '../../src/understand/agent-sdk.ts';
 import {
   BACKFILL_WINDOW_CHARS,
@@ -18,6 +18,7 @@ import type { DigestWindow } from '../../src/understand/digest.ts';
 import type { LlmCall, LlmResult, LlmRunner } from '../../src/understand/llm.ts';
 import { NOW, setup } from '../domain/helpers.ts';
 import type { Setup } from '../domain/helpers.ts';
+import { agent,event,PaseoWriter,startCenter } from '../helpers/center.ts';
 
 const MODEL = 'claude-haiku-5-5';
 const KEY = 'claude:sess1111aaaabbbb';

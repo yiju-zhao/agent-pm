@@ -4,6 +4,7 @@ import type { OpArgs, OpName } from '../../src/domain/ops.ts';
 
 /** One minimal valid argument object per operation. */
 const MINIMAL: Record<OpName, unknown> = {
+  mark_checked: {item_type:'decision',id:'d_1',ref:'s:abcd#1'},
   create_project: { title: 'A' },
   update_project: { project: 'p_1', fields: { title: 'B' } },
   transition_stage: { project: 'p_1', stage: 'explore' },

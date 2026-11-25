@@ -1,9 +1,11 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { afterEach, beforeEach, expect, test } from 'vitest';
+
 import { getProject } from '../../src/domain/read.ts';
 import type { ServerConfig } from '../../src/server/config.ts';
 import { createApp } from '../../src/server/http.ts';
+import { createKey } from '../../src/server/keys.ts';
 import { renderBrief } from '../../src/understand/render.ts';
 import { count, NOW, setup } from '../domain/helpers.ts';
 import type { Setup } from '../domain/helpers.ts';
@@ -161,4 +163,19 @@ test('a body over 64 KB is refused with 413 once the token checks out; without a
   expect((await send()).status).toBe(401);
   // A normal request still goes through.
   expect((await initialize(`Bearer ${MCP_TOKEN}`)).status).toBe(200);
+});
+
+test('overview cursors use the authenticated key ID across stateless HTTP requests',async()=>{
+  const second=createKey(t.db,config,{name:'another reader',scope:'mcp',createdBy:'test'},t.deps.now(),()=> 'another-key');
+  const p=t.user('create_project',{title:'cursor example'}).id;
+  t.user('record_decision',{project:p,text:'decision'});
+  const overview=async (token:string)=>{
+    const response=await app.request(MCP_URL,{method:'POST',headers:{authorization:'Bearer '+token,accept:'application/json, text/event-stream','content-type':'application/json'},
+      body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'pm_overview',arguments:{}}})});
+    return (await response.json()).result.content[0].text;
+  };
+  expect(await overview(MCP_TOKEN)).toContain(p);
+  expect(await overview(MCP_TOKEN)).not.toContain(p);
+  expect(await overview(second.key)).toContain(p);
+  expect(t.db.prepare('SELECT reader FROM reader_cursors ORDER BY reader').all()).toEqual([{reader:second.view.id},{reader:'config:mcpToken'}].sort((a,b)=>a.reader.localeCompare(b.reader)));
 });

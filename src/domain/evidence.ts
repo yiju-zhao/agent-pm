@@ -1,4 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
+
+import { ContextAddressError,parseAddress } from '../context/address.ts';
+import { readTurn,resolveSession } from '../context/read.ts';
 import { getSession } from '../server/sessions-repo.ts';
 import type { SessionView } from '../server/sessions-repo.ts';
 import type { Digest } from '../understand/digest.ts';
@@ -46,7 +49,10 @@ export type EvidenceChunk = {
 
 export type EvidenceView = {
   ref: string;
-  kind: 'digest' | 'chunk';
+  kind: 'digest' | 'chunk' | 'turn';
+  turn?: ReturnType<typeof readTurn>;
+  missing?:boolean;
+  message?:string;
   id: number;
   /** The key recorded on the chunk or digest; `session` is the session it is known by now. */
   session_key: string;
@@ -62,8 +68,17 @@ export type EvidenceView = {
 type ChunkRaw = { id: number; session_key: string; kind: string; ts_start: string | null; ts_end: string | null; text: string | null; source_id: string | null };
 type DigestRaw = { id: number; session_key: string; chunk_ids: string | null; json: string | null; ts_start: string | null; ts_end: string | null };
 
-/** Only `digest:<n>` and `chunk:<n>` with `n` a positive integer written without sign, zeros or exponent. */
-export function parseEvidenceRef(ref: string): { kind: 'digest' | 'chunk'; id: number } | null {
+/** Legacy numeric references and turn addresses share the evidence endpoint. */
+export function parseEvidenceRef(ref: string): { kind: 'digest' | 'chunk'; id: number } | {kind:'turn';session:string;id:number} | null {
+  if (ref.startsWith('s:')) {
+    try {
+      const a=parseAddress(ref);
+      return a.kind==='turn'?{kind:'turn',session:a.session,id:a.turn}:null;
+    } catch (error) {
+      if (error instanceof ContextAddressError) return null;
+      throw error;
+    }
+  }
   const m = /^(digest|chunk):([1-9][0-9]*)$/.exec(ref);
   if (m === null) return null;
   const id = Number(m[2]);
@@ -151,6 +166,21 @@ export function getEvidence(db: DatabaseSync, now: Date, ref: string): EvidenceV
   const parsed = parseEvidenceRef(ref);
   if (parsed === null) return null;
 
+  if (parsed.kind === 'turn') {
+    const view:EvidenceView={ref,kind:'turn',id:parsed.id,session_key:'',session:null,ts_start:null,ts_end:null,digest:null,chunks:[]};
+    try {
+      const {key}=resolveSession(db,parsed.session);
+      view.session_key=key;
+      view.session=getSession(db,key,now);
+      view.turn=readTurn(db,parsed.session,parsed.id);
+      const bounds=db.prepare('SELECT ts_start,ts_end FROM turns WHERE session_key=? AND n=?').get(key,parsed.id)!;
+      view.ts_start=bounds.ts_start as string|null;view.ts_end=bounds.ts_end as string|null;
+    } catch (error) {
+      if (!(error instanceof ContextAddressError)) throw error;
+      view.missing=true;view.message=error.message;
+    }
+    return view;
+  }
   if (parsed.kind === 'chunk') {
     const chunk = db.prepare(`SELECT ${CHUNK_COLUMNS} FROM chunks WHERE id = ?`).get(parsed.id) as ChunkRaw | undefined;
     if (chunk === undefined) return null;

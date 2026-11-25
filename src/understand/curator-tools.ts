@@ -1,12 +1,17 @@
 import type { DatabaseSync } from 'node:sqlite';
+
 import { z } from 'zod';
+
+import { parseAddress,ContextAddressError } from '../context/address.ts';
+import { resolveSession } from '../context/read.ts';
 import { execute } from '../domain/execute.ts';
 import { OP_SCHEMAS } from '../domain/ops.ts';
 import type { OpName } from '../domain/ops.ts';
-import { ASK_COMMON_SHAPE, askUser, AskUserInput, ChoiceOption, ConfirmOption, shapeAiQuestion, TextOption } from '../domain/questions.ts';
 import { sessionProjectName, titleUsesName } from '../domain/project-names.ts';
+import { ASK_COMMON_SHAPE, askUser, AskUserInput, ChoiceOption, ConfirmOption, shapeAiQuestion, TextOption } from '../domain/questions.ts';
 import { getProject, listProjects } from '../domain/read.ts';
 import type { DomainDeps, OpResult } from '../domain/types.ts';
+import { sessionTools } from '../mcp/context-tools.ts';
 import { renderProjectMarkdown } from './render.ts';
 import type { ToolDef, ToolOutput } from './tool-def.ts';
 
@@ -22,7 +27,7 @@ export const CURATOR_ACTOR = 'ai:curator';
 export type CuratorBatch = { digestIds: number[]; landedWrites?: number; closed?: boolean };
 
 /** What every handler gets: the citable ids as a set, and the batch whose counter and flag it reads and updates. */
-type RunState = { ids: ReadonlySet<number>; batch: CuratorBatch };
+type RunState = { inspected:Set<string>; ids: ReadonlySet<number>; batch: CuratorBatch };
 
 const ENDED: ToolOutput = { text: 'this curate run has ended', isError: true };
 
@@ -76,6 +81,20 @@ function checkEvidence(db: DatabaseSync, batch: ReadonlySet<number>, evidence: s
   const chunkEnd = db.prepare('SELECT ts_end FROM chunks WHERE id = ?');
 
   for (const ref of evidence) {
+    if (ref.startsWith('s:')) {
+      try {
+        const a=parseAddress(ref);
+        if (a.kind!=='turn') return {ok:false,message:'需要回合地址'};
+        const {key}=resolveSession(db,a.session);
+        const turn=db.prepare('SELECT ts_end FROM turns WHERE session_key=? AND n=?').get(key,a.turn);
+        if (!turn) return {ok:false,message:`找不到回合 ${ref}`};
+        chunkEnds.push(turn.ts_end as string|null);
+      } catch (error) {
+        if (error instanceof ContextAddressError) return {ok:false,message:error.message};
+        throw error;
+      }
+      continue;
+    }
     const match = CHECKED_REF_RE.exec(ref);
     if (!match) continue;
     const [, kind, idText] = match;
@@ -119,14 +138,14 @@ const WRITE_ENVELOPE = {
   evidence: z
     .array(z.string())
     .min(1)
-    .describe('digest:<id> of a digest in this batch, or chunk:<id> (optionally chunk:<id>#L<line>) of an existing chunk'),
+    .describe('Prefer a source turn address s:<short>#<n>, a digest:<id> in this batch, or an existing chunk:<id>'),
   occurred_at: z
     .string()
     .optional()
     .describe('ISO-8601 UTC instant when it happened in the conversation; leave out to use the cited digests'),
 };
 
-const REMINDER = '必须同时给 reason（一句话原因）和 evidence（本批摘要 digest:<id> 或已有 chunk:<id>）。';
+const REMINDER = '必须同时给 reason（一句话原因）和 evidence（优先用 s:<短ID>#<回合>，也可用本批摘要 digest:<id> 或已有 chunk:<id>）。';
 
 const WRITE_OPS = [
   {
@@ -221,6 +240,9 @@ function writeTool(db: DatabaseSync, deps: DomainDeps, run: RunState, spec: { op
 
       const cited = checkEvidence(db, run.ids, evidence);
       if (!cited.ok) return rejected('missing_evidence', cited.message);
+      if (op==='mark_checked' && (!run.inspected.has(String(args.ref)) || !evidence.includes(String(args.ref)))) {
+        return rejected('missing_evidence','先用 get_turn 核实该回合，并在 evidence 中引用它');
+      }
       if (op === 'create_project') {
         const refusal = namingRefusal(db, deps, args as { title: string; from_session?: string }, name_reason);
         if (refusal !== null) return rejected('invalid', refusal);
@@ -259,7 +281,7 @@ const ASK_DESCRIPTION = [
   '给出 recommended（你建议的选项序号；confirm 里 0 是"是"、1 是"否"）和 recommend_reason。',
   '每个选项的 op 和 args 必须是一个合法操作；op 为 null 表示"什么都不做"。',
   '不能让用户移动项目到 done、abandoned、merged、parked，那类提议请直接调用 transition_stage。',
-  '必须给 evidence（本批摘要 digest:<id> 或已有 chunk:<id>）；topic 相同的重复提问会合并。',
+  '必须给 evidence（优先用 s:<短ID>#<回合>，也可用本批摘要 digest:<id> 或已有 chunk:<id>）；topic 相同的重复提问会合并。',
 ].join('');
 
 function askTool(db: DatabaseSync, deps: DomainDeps, run: RunState): ToolDef {
@@ -315,10 +337,12 @@ function getProjectTool(db: DatabaseSync, deps: DomainDeps, run: RunState): Tool
  * `batch.landedWrites` and stop working once `batch.closed` is set (see `CuratorBatch`).
  */
 export function curatorTools(db: DatabaseSync, deps: DomainDeps, batch: CuratorBatch, opts: { reconcile?: boolean } = {}): ToolDef[] {
-  const run: RunState = { ids: new Set(batch.digestIds), batch };
-  const writes: Array<{ op: OpName; description: string }> = [...WRITE_OPS];
+  const run: RunState = { inspected:new Set(), ids: new Set(batch.digestIds), batch };
+  const writes: Array<{ op: OpName; description: string }> = [...WRITE_OPS,{op:'mark_checked',description:'用 get_turn 核实条目后记录核对时间与回合依据。'}];
   if (opts.reconcile) for (const op of ['delete_todo','delete_milestone','delete_decision','delete_blocker'] as const) {
     writes.push({ op, description: '项目重新整理时去掉重复或已失效的条目；用户创建或编辑过的条目仍须用户确认，不能用删除伪造完成。' });
   }
-  return [...writes.map((spec) => writeTool(db, deps, run, spec)), askTool(db, deps, run), getProjectTool(db, deps, run)];
+  const reads=sessionTools(db,deps,true,run.inspected).map(tool=>({...tool,
+    handler:async (args:Record<string,unknown>)=>batch.closed?ENDED:tool.handler(args)}));
+  return [...writes.map((spec) => writeTool(db, deps, run, spec)), askTool(db, deps, run), getProjectTool(db, deps, run),...reads];
 }

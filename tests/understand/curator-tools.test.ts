@@ -105,8 +105,11 @@ test('the curator gets exactly the write tools of spec section 11, ask_user and 
     'clear_blocker',
     'link_session',
     'ignore_session',
+    'mark_checked',
     'ask_user',
     'get_project',
+    'get_session',
+    'get_turn',
   ]);
 });
 
@@ -118,8 +121,8 @@ test('no user-only, delete or unlink tools are exposed', () => {
 });
 
 test('every write tool takes reason, evidence and occurred_at on top of its operation fields, and tells the model so', () => {
-  const writeTools = tools.filter((tool) => tool.name !== 'get_project' && tool.name !== 'ask_user');
-  expect(writeTools).toHaveLength(10);
+  const writeTools = tools.filter((tool) => !tool.name.startsWith('get_') && tool.name !== 'ask_user');
+  expect(writeTools).toHaveLength(11);
   for (const tool of writeTools) {
     expect(Object.keys(tool.input), tool.name).toEqual(expect.arrayContaining(['reason', 'evidence', 'occurred_at']));
     expect(tool.description, tool.name).toContain('reason');

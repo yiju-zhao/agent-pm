@@ -1,6 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
+
 import type { Context, MiddlewareHandler } from 'hono';
+
 import { MachineLabel } from '../shared/protocol.ts';
 import { bearerToken, tokenMatches } from './bearer.ts';
 import type { ServerConfig } from './config.ts';

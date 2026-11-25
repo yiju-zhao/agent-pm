@@ -17,6 +17,7 @@ const ItemStatus = z.enum(['todo', 'doing', 'done']);
 const ProjectItem = z.object({ project: Id, id: Id }).strict();
 
 export const OP_SCHEMAS = {
+  mark_checked: z.object({item_type:z.enum(['decision','blocker','todo','milestone']),id:Id,ref:z.string().regex(/^s:[^\s#]+#[1-9]\d*$/)}).strict(),
   create_project: z
     .object({
       title: text(200),
@@ -127,4 +128,4 @@ export type OpInput = {
 };
 
 /** `chunk:123#L40`, `digest:4812`, `event:7`, `question:q_ab12`. */
-export const EVIDENCE_RE = /^(digest|chunk|event|question):[A-Za-z0-9_]+(#\S+)?$/;
+export const EVIDENCE_RE = /^(?:(?:digest|chunk|event|question):[A-Za-z0-9_]+(?:#\S+)?|s:[^\s#]+#[1-9]\d*)$/;

@@ -16,7 +16,7 @@ export function defineTool<S extends z.ZodRawShape>(
       try {
         return await run(parsed.data as z.infer<z.ZodObject<S>>);
       } catch (error) {
-        if (error instanceof ContextAddressError) return {text:error.message,isError:true};
+        if (error instanceof ContextAddressError) return { text: error.message, isError: true };
         throw error;
       }
     },

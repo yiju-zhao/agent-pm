@@ -436,10 +436,13 @@ test('rebuild-index restores the same session turns on repeated runs', async () 
     await writer.batch(writer.batchBody('first',null,{epoch:'epoch-1',seq:1},[event('msg:first',1)]));
     const before = center.db.prepare('SELECT * FROM turns').all();
     expect(before).toHaveLength(1);
-    center.db.exec('DELETE FROM turns');
+    const documents = center.db.prepare('SELECT rowid,* FROM search_index ORDER BY rowid').all();
+    expect(documents).toHaveLength(1);
+    center.db.exec('DELETE FROM turns; DELETE FROM search_index');
     for (let i=0;i<2;i++) {
       expect((await run(['rebuild-index','--config',configPath])).code).toBe(0);
       expect(center.db.prepare('SELECT * FROM turns').all()).toEqual(before);
+      expect(center.db.prepare('SELECT rowid,* FROM search_index ORDER BY rowid').all()).toEqual(documents);
     }
   } finally { center.close(); }
 });

@@ -1,7 +1,7 @@
-import { contextTools, searchTool, type OverviewSources } from './context-tools.ts';
-import { defineTool } from './define-tool.ts';
 import type { DatabaseSync } from 'node:sqlite';
+
 import { z } from 'zod';
+
 import { getProject, listProjects } from '../domain/read.ts';
 import type { ProjectDetail } from '../domain/read.ts';
 import { CLOSED } from '../domain/stage.ts';
@@ -10,6 +10,8 @@ import type { DomainDeps } from '../domain/types.ts';
 import { findByShortId, listSessions, mergeTarget } from '../server/sessions-repo.ts';
 import { minute, oneLine, renderBrief, renderProjectMarkdown } from '../understand/render.ts';
 import type { ToolDef, ToolOutput } from '../understand/tool-def.ts';
+import { contextTools, searchTool, type OverviewSources } from './context-tools.ts';
+import { defineTool } from './define-tool.ts';
 
 /** The longest report `pm_report` takes, in characters, after trimming. */
 export const MAX_REPORT_CHARS = 20000;
@@ -19,19 +21,13 @@ export const REPORT_INBOX_KEY = 'report:inbox';
 /** Events and contributions listed by `pm_timeline`: the default, and the most one call returns. */
 export const TIMELINE_DEFAULT_LIMIT = 50;
 export const TIMELINE_MAX_LIMIT = 200;
-/** Hits returned by `pm_search`: the default, and the most one call returns. */
 
-/** Characters of one search hit's text a line keeps; a project's `why` can run long. */
 /** Characters of a `project_hint` or `session_hint` that are kept; they are labels, not a second place to put the report. */
 const MAX_HINT_CHARS = 200;
 const REPORT_ACK = '已收到，将在下一轮整理时处理';
 
 // ---- helpers -----------------------------------------------------------------------------------------------------
 
-/**
- * A tool whose handler checks its own arguments (the MCP layer validates against `input` too, but direct callers do
- * not) and answers a bad call with `isError` instead of throwing.
- */
 /** `value` as a whole number in `1..max`; a missing value gives `fallback`. Out-of-range is clamped, not rejected. */
 function clampLimit(value: number | undefined, fallback: number, max: number): number {
   if (value === undefined) return fallback;

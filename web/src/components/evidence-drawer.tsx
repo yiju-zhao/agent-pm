@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+
+import { REFUSAL_NOTE } from '../../../src/context/address.ts';
 import type { EvidenceChunk, EvidenceView } from '../../../src/domain/evidence.ts';
 import { AUTH_EVENT, errorText } from '../api.ts';
 import { shortTime } from '../format.ts';
@@ -11,12 +13,9 @@ import { evidenceSourceLine, SourceBadges } from './source-badges.tsx';
 
 type RefInfo = { label: string; /** The reference to ask the server for; `null` when there is nothing to open. */ openRef: string | null };
 
-/**
- * What a piece of evidence is called on the page, and whether it can be opened. A `#…` suffix (a line in a chunk) is
- * not part of the reference. Only digests and chunks have a text behind them (`GET /evidence/:ref`); events and
- * questions are labels.
- */
+/** A chunk line suffix is only a hint; the hash in a turn address is part of its identity. */
 function readRef(raw: string): RefInfo {
+  if (/^s:[^\s#]+#[1-9]\d*$/.test(raw)) return {label:raw,openRef:raw};
   const base = raw.split('#', 1)[0];
   const m = /^(digest|chunk|event|question):(.+)$/.exec(base);
   if (m === null) return { label: raw, openRef: null };
@@ -146,6 +145,14 @@ function Chunk({ chunk }: { chunk: EvidenceChunk }) {
 }
 
 function Body({ view }: { view: EvidenceView }) {
+  if (view.kind === 'turn') {
+    if (view.missing) return <p className="dim">{view.message}</p>;
+    return <>{view.turn?.items.map(item => <section className="chunk" key={item.address}>
+      <div className="dim">{item.kind} · {item.address}</div>
+      {item.refused && <div className="dim">{REFUSAL_NOTE}</div>}
+      <pre>{item.tool ? `${item.tool.name} ${item.tool.input} · ${item.tool.status} · exit=${item.tool.exit_code??'—'}` : item.text}</pre>
+    </section>)}</>;
+  }
   const when = timeRange(view.ts_start, view.ts_end);
   return (
     <>

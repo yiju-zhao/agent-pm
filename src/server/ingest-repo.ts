@@ -1,6 +1,6 @@
-import { updateTurns } from './turns.ts';
 import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
+
 import { LEASE_TTL_MS } from '../shared/ingest-v2.ts';
 import type {
   AgentObservation,
@@ -15,13 +15,14 @@ import type {
   TimelineEvent,
   V2Error,
 } from '../shared/ingest-v2.ts';
-import { transaction } from './db.ts';
 import { claimContentOwner, insertPaseoChunks, reconsiderOwner } from './content-owner.ts';
+import { transaction } from './db.ts';
 import { renderEvent } from './paseo-content.ts';
 import { isTemporaryKey, migrateSessionIdentity, resolvePaseoKey } from './session-identity.ts';
 import { mergeTarget } from './sessions-repo.ts';
 import { endObservation, ensureSessionRow, refreshSession, upsertObservation } from './sources-repo.ts';
 import type { ObservationFields } from './sources-repo.ts';
+import { updateTurns } from './turns.ts';
 
 // The center side of the v2 (Paseo) ingestion contract. Every write runs in one transaction that also checks the
 // writer's lease, so a second collector instance, a stale instance retrying, or a late snapshot cannot overwrite newer
@@ -309,15 +310,15 @@ export function commitBatch(db: DatabaseSync, src: PaseoSource, batch: BatchV2, 
     // (seen on codex: two assistant rows of one message, split by a tool call). A revision is the same row again: same
     // epoch, overlapping seqs. A row with a known id elsewhere in the same epoch is another row, `<key>~<seqStart>`.
     // Identical content under any variant of the key is a duplicate, also across epochs (a replayed history).
-    const findDup = db.prepare('SELECT id, turn_id FROM source_events WHERE source_id = ? AND stream_id = ? AND base_key = ? AND content_hash = ?');
+    const findDup = db.prepare('SELECT id, event_key,turn_id FROM source_events WHERE source_id = ? AND stream_id = ? AND base_key = ? AND content_hash = ?');
     const sameRow = db.prepare(
-      `SELECT id, event_key, revision, kind, text, meta FROM source_events
+      `SELECT id, event_key, revision, kind, text, meta,turn_id FROM source_events
        WHERE source_id = ? AND stream_id = ? AND base_key = ? AND epoch = ? AND seq_start <= ? AND seq_end >= ?
        ORDER BY revision DESC, id DESC LIMIT 1`,
     );
     const sameEpochOther = db.prepare('SELECT 1 FROM source_events WHERE source_id = ? AND stream_id = ? AND base_key = ? AND epoch = ? LIMIT 1');
     const otherEpoch = db.prepare(
-      'SELECT id, event_key, revision, kind, text, meta FROM source_events WHERE source_id = ? AND stream_id = ? AND base_key = ? ORDER BY id DESC LIMIT 1',
+      'SELECT id, event_key, revision, kind, text, meta,turn_id FROM source_events WHERE source_id = ? AND stream_id = ? AND base_key = ? ORDER BY id DESC LIMIT 1',
     );
     const insertEvent = db.prepare(
       `INSERT INTO source_events (source_id, stream_id, base_key, event_key, content_hash, revision, session_key, batch_id, epoch,
@@ -339,14 +340,14 @@ export function commitBatch(db: DatabaseSync, src: PaseoSource, batch: BatchV2, 
       const h = contentHash(e);
       const duplicate = findDup.get(src.sourceId, batch.agent_id, e.key, h);
       if (duplicate) {
-        if (e.turn_id && duplicate.turn_id === null) {
-          db.prepare('UPDATE source_events SET turn_id=? WHERE id=?').run(e.turn_id, duplicate.id);
+        if (e.turn_id != null && duplicate.turn_id === null) {
+          db.prepare('UPDATE source_events SET turn_id=? WHERE session_key=? AND event_key=? AND turn_id IS NULL').run(e.turn_id,key,duplicate.event_key);
           shouldRegroup = true;
         }
         duplicates += 1;
         continue;
       }
-      type Prior = { id: number; event_key: string; revision: number; kind: string; text: string; meta: string };
+      type Prior = { id: number; event_key: string; revision: number; kind: string; text: string; meta: string; turn_id:string|null };
       let prev = sameRow.get(src.sourceId, batch.agent_id, e.key, e.epoch, e.seq_end, e.seq_start) as Prior | undefined;
       let eventKey = prev?.event_key ?? e.key;
       if (prev === undefined && sameEpochOther.get(src.sourceId, batch.agent_id, e.key, e.epoch) !== undefined) {
@@ -376,7 +377,7 @@ export function commitBatch(db: DatabaseSync, src: PaseoSource, batch: BatchV2, 
       const meta = { item_type: e.item_type, stable_id: e.stable_id, text_truncated: e.text_truncated, tool: e.tool };
       const { lastInsertRowid } = insertEvent.run(
         src.sourceId, batch.agent_id, e.key, eventKey, h, (prev?.revision ?? 0) + 1, key, batch.batch_id, e.epoch, e.seq_start, e.seq_end, e.kind,
-        e.ts, e.ts === null ? 0 : 1, e.backfill ? 1 : 0, nowIso, e.text, JSON.stringify(meta), disposition, e.turn_id ?? null,
+        e.ts, e.ts === null ? 0 : 1, e.backfill ? 1 : 0, nowIso, e.text, JSON.stringify(meta), disposition, e.turn_id ?? prev?.turn_id ?? null,
       );
       inserted.push(Number(lastInsertRowid));
       if (disposition === 'materialized' || disposition === 'suffix') toMaterialize.push({ id: Number(lastInsertRowid), event: e, continuation });

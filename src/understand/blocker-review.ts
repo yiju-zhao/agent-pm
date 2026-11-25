@@ -1,15 +1,19 @@
 import type { DatabaseSync } from 'node:sqlite';
+
 import { z } from 'zod';
-import { transaction } from '../server/db.ts';
+
 import { runOp } from '../domain/execute.ts';
 import { getProject } from '../domain/read.ts';
 import { OpRejected } from '../domain/types.ts';
 import type { DomainDeps } from '../domain/types.ts';
+import { sessionTools } from '../mcp/context-tools.ts';
+import { transaction } from '../server/db.ts';
+import { assignShortIds } from '../shared/session-key.ts';
 import { SDK_STRUCTURED_OUTPUT_RETRIES } from './agent-sdk.ts';
+import { projectSessionsContext } from './context.ts';
 import { digestTag } from './curate.ts';
 import type { BatchDigest } from './curate.ts';
 import { neutralizeTags } from './digest.ts';
-import { projectSessionsContext } from './context.ts';
 import { recordRun } from './llm.ts';
 import type { LlmCall, LlmErrorKind, LlmRunner } from './llm.ts';
 import { renderBrief } from './render.ts';
@@ -159,18 +163,21 @@ export async function runBlockerReview(db: DatabaseSync, deps: DomainDeps, runne
   const related = relatedDigests(db, blockers, own.map((d) => d.id));
   const digestIds = new Set([...own, ...related].map((d) => `digest:${d.id}`));
 
+  const shortIds=assignShortIds(db.prepare('SELECT key FROM sessions').all().map(row=>String(row.key)));
+  const inspected=new Set<string>();
   const prompt = [
     `现在是 ${now.toISOString()}。`,
+    '摘要中 turns 对应 address 下的回合。可用 get_session、get_turn 核对；确认后在该条 verdict 的 evidence 中引用实际读过的回合地址，以记录核对时间。',
     `## 项目\n<project>${neutralizeTags(renderBrief(project), 'project', 'digest')}</project>`,
     `## 开放的阻塞\n${blockers.map((b) => `- ${b.id} · ${b.kind} · 记于 ${b.created_at.slice(0, 16)} · ${b.text.replace(/\s+/g, ' ')}`).join('\n')}`,
-    `## 本项目 session 在第一条阻塞记下之后的摘要（按时间先后）\n${own.map((d) => digestTag(d)).join('\n') || '（没有新的摘要）'}`,
-    `## 其他 session 里提到同一件事的摘要，以及 agent 的主动上报\n${related.map((d) => digestTag(d)).join('\n') || '（没有）'}`,
+    `## 本项目 session 在第一条阻塞记下之后的摘要（按时间先后）\n${own.map((d) => digestTag(d,null,shortIds.get(d.session_key))).join('\n') || '（没有新的摘要）'}`,
+    `## 其他 session 里提到同一件事的摘要，以及 agent 的主动上报\n${related.map((d) => digestTag(d,null,shortIds.get(d.session_key))).join('\n') || '（没有）'}`,
     `## 项目 session 的当前状态与仓库实际状态（事实：例如"领先上游 0 个提交"说明已推送）\n${neutralizeTags(projectSessionsContext(db, projectId, now), 'project', 'digest')}`,
     `## 系统状态（事实）\n${systemFacts(db)}`,
   ].join('\n\n');
   const schema: Record<string, unknown> = z.toJSONSchema(VerdictSchema);
   delete schema.$schema;
-  const call: LlmCall = { role: 'curate', model, system: SYSTEM, prompt, outputSchema: schema, maxTurns: SDK_STRUCTURED_OUTPUT_RETRIES + 3 };
+  const call: LlmCall = { role: 'curate', model, system: SYSTEM, prompt, outputSchema: schema, tools:sessionTools(db,deps,true,inspected), maxTurns: SDK_STRUCTURED_OUTPUT_RETRIES + 3 };
   let result = await runner(call);
   const parsed = result.ok ? VerdictSchema.safeParse(result.structured) : null;
   if (result.ok && !parsed!.success) result = { ok: false, kind: 'bad_output', message: z.prettifyError(parsed!.error), durationMs: result.durationMs };
@@ -181,8 +188,8 @@ export async function runBlockerReview(db: DatabaseSync, deps: DomainDeps, runne
   for (const v of parsed!.data!.verdicts) {
     const blocker = byId.get(v.blocker_id);
     if (blocker === undefined) continue;
-    // Only digests that were shown count; a "resolved" with none of them is not shown to be resolved.
-    const cited = v.evidence.filter((e) => digestIds.has(e));
+    // A resolution needs evidence the reviewer actually saw.
+    const cited = v.evidence.filter((e) => digestIds.has(e) || inspected.has(e));
     if (v.verdict === 'resolved' && cited.length === 0) continue;
     if (v.verdict === 'todo' && !v.todo_title) continue;
     const evidence = cited.length > 0 ? cited : [creationEvent(db, blocker.id)].filter((e): e is string => e !== null);
@@ -191,6 +198,8 @@ export async function runBlockerReview(db: DatabaseSync, deps: DomainDeps, runne
     const run = (op: Parameters<typeof runOp>[2]['op'], args: Record<string, unknown>) => runOp(db, deps, { op, args, actor: ACTOR, reason, evidence });
     try {
       transaction(db, () => {
+        const turnRef=cited.find(ref=>inspected.has(ref));
+        if (turnRef) run('mark_checked',{item_type:'blocker',id:blocker.id,ref:turnRef});
         if (v.verdict === 'keep') {
           if (v.kind && v.kind !== blocker.kind) run('set_blocker', { project: projectId, id: blocker.id, kind: v.kind });
           return;

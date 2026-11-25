@@ -208,8 +208,11 @@ test('the curator gets the curator tool set', async () => {
     'clear_blocker',
     'link_session',
     'ignore_session',
+    'mark_checked',
     'ask_user',
     'get_project',
+    'get_session',
+    'get_turn',
   ]);
 });
 

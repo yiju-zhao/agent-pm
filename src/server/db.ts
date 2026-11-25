@@ -556,6 +556,14 @@ export const MIGRATIONS: string[] = [
    ALTER TABLE digests ADD COLUMN turn_end INTEGER;
    ALTER TABLE sessions ADD COLUMN card TEXT;
    ALTER TABLE sessions ADD COLUMN card_as_of_turn INTEGER;`,
+  ['decisions','blockers','todos','milestones'].map(table => {
+    const column = table==='decisions' || table==='blockers' ? 'text' : 'title';
+    return `ALTER TABLE ${table} ADD COLUMN checked_at TEXT;
+      ALTER TABLE ${table} ADD COLUMN checked_ref TEXT;
+      CREATE TRIGGER invalidate_check_${table} AFTER UPDATE OF ${column} ON ${table}
+      WHEN NEW.${column} IS NOT OLD.${column} AND NEW.checked_ref IS NOT NULL AND OLD.checked_ref IS NEW.checked_ref
+      BEGIN UPDATE ${table} SET checked_ref=NULL,checked_at=NULL WHERE id=NEW.id; END;`;
+  }).join('\n'),
 ];
 
 /** Opens (creating if needed) the central database in WAL mode and applies pending migrations. */

@@ -1,16 +1,18 @@
-import { renderEvent } from '../server/paseo-content.ts';
-import type { TimelineEvent } from '../shared/ingest-v2.ts';
 import type { DatabaseSync } from 'node:sqlite';
+
 import { z } from 'zod';
+
+import { sessionProjectName } from '../domain/project-names.ts';
 import { getProject, listProjects } from '../domain/read.ts';
 import type { DomainDeps } from '../domain/types.ts';
 import { transaction } from '../server/db.ts';
+import { renderEvent } from '../server/paseo-content.ts';
 import type { SessionRow } from '../server/sessions-repo.ts';
+import type { TimelineEvent } from '../shared/ingest-v2.ts';
 import { SDK_STRUCTURED_OUTPUT_RETRIES } from './agent-sdk.ts';
+import { sessionContext } from './context.ts';
 import { recordRun } from './llm.ts';
 import type { LlmCall, LlmErrorKind, LlmRunner } from './llm.ts';
-import { sessionProjectName } from '../domain/project-names.ts';
-import { sessionContext } from './context.ts';
 import { renderBrief, renderProjectIndex } from './render.ts';
 
 /**

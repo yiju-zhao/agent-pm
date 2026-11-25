@@ -1,3 +1,5 @@
+import { ContextAddressError,parseAddress } from '../context/address.ts';
+import { resolveSession } from '../context/read.ts';
 import { addLocks, readLocks, readRow } from './changes.ts';
 import type { Row } from './changes.ts';
 import type { Handler, OpContext } from './execute.ts';
@@ -234,6 +236,27 @@ function deleteItem(ctx: OpContext, table: ItemTable, args: { project: string; i
 }
 
 export const ITEM_HANDLERS: Partial<Record<OpName, Handler>> = {
+  mark_checked: (ctx, args:OpArgs<'mark_checked'>) => {
+    const table = ({decision:'decisions',blocker:'blockers',todo:'todos',milestone:'milestones'} as const)[args.item_type];
+    const item = readRow(ctx.db,table,args.id);
+    if (!item) throw new OpRejected('not_found',`找不到条目 ${args.id}`);
+    const project = String(item.project_id);
+    loadProject(ctx,project);
+    loadItem(ctx,table,project,args.id);
+    try {
+      const address=parseAddress(args.ref);
+      if (address.kind!=='turn') throw new OpRejected('invalid','需要回合地址');
+      const session=resolveSession(ctx.db,address.session);
+      if (!ctx.db.prepare('SELECT 1 FROM turns WHERE session_key=? AND n=?').get(session.key,address.turn)) {
+        throw new OpRejected('not_found',`找不到回合 ${args.ref}`);
+      }
+      ctx.changes.update(table,args.id,{checked_at:now(ctx),checked_ref:`s:${session.short}#${address.turn}`});
+    } catch (error) {
+      if (error instanceof ContextAddressError) throw new OpRejected('invalid',error.message);
+      throw error;
+    }
+    return {id:args.id};
+  },
   upsert_milestone: upsertMilestone,
   delete_milestone: (ctx, args: OpArgs<'delete_milestone'>) => deleteItem(ctx, 'milestones', args),
   upsert_todo: upsertTodo,

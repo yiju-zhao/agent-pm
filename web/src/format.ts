@@ -35,6 +35,7 @@ export const OP_LABEL: Record<string, string> = {
   unlock_field: '解锁字段',
   upsert_milestone: '编辑里程碑',
   upsert_todo: '编辑 todo',
+  mark_checked: '核对条目',
   record_decision: '记录决策',
   set_blocker: '设置阻塞',
   delete_milestone: '删除里程碑',
