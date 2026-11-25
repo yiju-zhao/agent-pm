@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 
+import { ContextAddressError } from './address.ts';
 import { QUESTION_TTL_DAYS } from '../domain/questions.ts';
 import { sessionLinks } from '../domain/read.ts';
 import { listReminders } from '../domain/reminders.ts';
@@ -17,7 +18,7 @@ export function resolveSession(db: DatabaseSync, shortId: string): { key:string;
   const ids = assignShortIds(db.prepare('SELECT key FROM sessions').all().map(s=>String(s.key)));
   const candidates = [...ids].filter(([key,id])=>id===shortId || shortIdSource(key).startsWith(shortId));
   const keys = [...new Set(candidates.map(([key])=>mergeTarget(db,key)))];
-  if (keys.length!==1) throw new Error(keys.length ? `session 短 ID 不唯一：${shortId}` : `找不到 session：${shortId}`);
+  if (keys.length!==1) throw new ContextAddressError(keys.length ? `session 短 ID 不唯一：${shortId}` : `找不到 session：${shortId}`);
   return {key:keys[0],short:ids.get(keys[0])!};
 }
 
@@ -99,7 +100,7 @@ export function readTurn(db: DatabaseSync, shortId: string, turn: number, backgr
   const {key,short}=resolveSession(db,shortId);
   const address='s:'+short+'#'+turn;
   const rows=db.prepare('SELECT kind,text,meta,refused FROM context_turn_events WHERE session_key=? AND n=? ORDER BY first_event').all(key,turn) as Pick<StoredItem,'kind'|'text'|'meta'|'refused'>[];
-  if (!rows.length) throw new Error(`找不到回合：${address}`);
+  if (!rows.length) throw new ContextAddressError(`找不到回合：${address}`);
   return {address,items:rows.map((r,i)=>{
     const isHidden=background&&!!r.refused;
     const tool=isHidden?null:(JSON.parse(r.meta??'{}') as EventMeta).tool;
@@ -115,7 +116,7 @@ export function readItem(db: DatabaseSync, shortId: string, turn: number, item: 
   const {key,short}=resolveSession(db,shortId);
   const address='s:'+short+'#'+turn+'.'+item;
   const row=db.prepare('SELECT * FROM context_turn_events WHERE session_key=? AND n=? ORDER BY first_event LIMIT 1 OFFSET ?').get(key,turn,item-1) as StoredItem|undefined;
-  if (!row) throw new Error(`找不到回合条目：${address}`);
+  if (!row) throw new ContextAddressError(`找不到回合条目：${address}`);
   const meta=JSON.parse(row.meta??'{}') as EventMeta;
   const tool=meta.tool;
   const missing=row.text===null || (!tool && row.text==='');

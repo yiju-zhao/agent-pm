@@ -1,7 +1,9 @@
+import { contextTools, searchTool, type OverviewSources } from './context-tools.ts';
+import { defineTool } from './define-tool.ts';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
-import { getProject, listProjects, searchProjects } from '../domain/read.ts';
-import type { ProjectDetail, SearchHit } from '../domain/read.ts';
+import { getProject, listProjects } from '../domain/read.ts';
+import type { ProjectDetail } from '../domain/read.ts';
 import { CLOSED } from '../domain/stage.ts';
 import { PRIORITIES, STAGE_LABEL, STAGES } from '../domain/types.ts';
 import type { DomainDeps } from '../domain/types.ts';
@@ -18,11 +20,8 @@ export const REPORT_INBOX_KEY = 'report:inbox';
 export const TIMELINE_DEFAULT_LIMIT = 50;
 export const TIMELINE_MAX_LIMIT = 200;
 /** Hits returned by `pm_search`: the default, and the most one call returns. */
-export const SEARCH_DEFAULT_LIMIT = 20;
-export const SEARCH_MAX_LIMIT = 100;
 
 /** Characters of one search hit's text a line keeps; a project's `why` can run long. */
-const HIT_TEXT_CHARS = 200;
 /** Characters of a `project_hint` or `session_hint` that are kept; they are labels, not a second place to put the report. */
 const MAX_HINT_CHARS = 200;
 const REPORT_ACK = '已收到，将在下一轮整理时处理';
@@ -33,21 +32,6 @@ const REPORT_ACK = '已收到，将在下一轮整理时处理';
  * A tool whose handler checks its own arguments (the MCP layer validates against `input` too, but direct callers do
  * not) and answers a bad call with `isError` instead of throwing.
  */
-function defineTool<S extends z.ZodRawShape>(
-  spec: { name: string; description: string; input: S },
-  run: (args: z.infer<z.ZodObject<S>>) => ToolOutput | Promise<ToolOutput>,
-): ToolDef {
-  const schema = z.strictObject(spec.input);
-  return {
-    ...spec,
-    handler: async (raw) => {
-      const parsed = schema.safeParse(raw);
-      if (!parsed.success) return { text: `invalid arguments for ${spec.name}: ${z.prettifyError(parsed.error)}`, isError: true };
-      return run(parsed.data as z.infer<z.ZodObject<S>>);
-    },
-  };
-}
-
 /** `value` as a whole number in `1..max`; a missing value gives `fallback`. Out-of-range is clamped, not rejected. */
 function clampLimit(value: number | undefined, fallback: number, max: number): number {
   if (value === undefined) return fallback;
@@ -224,40 +208,6 @@ function timelineTool(db: DatabaseSync, deps: DomainDeps): ToolDef {
 
 // ---- search ------------------------------------------------------------------------------------------------------
 
-const HIT_KIND_LABEL: Record<SearchHit['kind'], string> = {
-  project: '项目',
-  milestone: '里程碑',
-  todo: 'todo',
-  decision: '决策',
-  blocker: '阻塞',
-};
-
-function searchTool(db: DatabaseSync): ToolDef {
-  return defineTool(
-    {
-      name: 'pm_search',
-      description: [
-        '只读：在所有项目里搜文字。搜项目的标题、一句话、为什么、完成标准，以及里程碑、todo、决策、阻塞的内容；子串匹配，英文不分大小写。',
-        `每条命中一行：类型 · 所属项目（标题和 id）· 条目 id · 文字。limit 默认 ${SEARCH_DEFAULT_LIMIT}，最多 ${SEARCH_MAX_LIMIT}。`,
-        '用来判断某件事是不是已经有项目在做，再用 pm_get_brief 看那个项目。',
-      ].join(''),
-      input: {
-        query: z.string().trim().min(1).describe('text to look for'),
-        limit: z.number().optional().describe(`default ${SEARCH_DEFAULT_LIMIT}, at most ${SEARCH_MAX_LIMIT}`),
-      },
-    },
-    (args) => {
-      const hits = searchProjects(db, args.query, clampLimit(args.limit, SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT));
-      if (hits.length === 0) return nothing('匹配的内容');
-      return {
-        text: hits
-          .map((h) => `- ${[HIT_KIND_LABEL[h.kind], `${oneLine(h.project_title)}（${h.project_id}）`, h.id, clip(oneLine(h.text), HIT_TEXT_CHARS)].join(' · ')}`)
-          .join('\n'),
-      };
-    },
-  );
-}
-
 // ---- sessions ----------------------------------------------------------------------------------------------------
 
 /** Titles of the live projects each session is linked to, in the order the links were made. */
@@ -388,7 +338,7 @@ function reportTool(db: DatabaseSync, deps: DomainDeps): ToolDef {
  * appends a chunk for the digester; nothing here calls `execute` or changes a project, so an agent on another
  * machine cannot move the board, only tell the PM what it did.
  */
-export function readTools(db: DatabaseSync, deps: DomainDeps): ToolDef[] {
+export function readTools(db: DatabaseSync, deps: DomainDeps, reader='local', sources?:OverviewSources): ToolDef[] {
   return [
     listProjectsTool(db, deps),
     getProjectTool(db, deps),
@@ -397,5 +347,6 @@ export function readTools(db: DatabaseSync, deps: DomainDeps): ToolDef[] {
     searchTool(db),
     listSessionsTool(db, deps),
     reportTool(db, deps),
+    ...contextTools(db,deps,reader,sources),
   ];
 }

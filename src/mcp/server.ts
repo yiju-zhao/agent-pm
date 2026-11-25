@@ -26,6 +26,7 @@ const VERSION = (JSON.parse(readFileSync(new URL('../../package.json', import.me
  * clients take as "no stream here".
  */
 export function mountMcp(app: Hono, db: DatabaseSync, config: ServerConfig, deps: DomainDeps): void {
+  const startedAt=deps.now();
   const limitBody = bodyLimit({
     maxSize: MAX_BODY_BYTES,
     onError: (c) =>
@@ -37,7 +38,7 @@ export function mountMcp(app: Hono, db: DatabaseSync, config: ServerConfig, deps
       return c.json({ jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed.' }, id: null }, 405);
     }
     const server = new McpServer({ name: 'agent-pm', version: VERSION });
-    for (const tool of readTools(db, deps)) {
+    for (const tool of readTools(db, deps, c.get('keyPrincipal').id, {config,startedAt})) {
       server.registerTool(tool.name, { description: tool.description, inputSchema: tool.input }, async (args) => {
         const out = await tool.handler(args);
         return { content: [{ type: 'text', text: out.text }], isError: out.isError };

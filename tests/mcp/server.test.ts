@@ -96,7 +96,7 @@ test('the mcp token is not accepted on the write routes or on ingest', async () 
 
 test('a client lists exactly the read tools and pm_report', async () => {
   const names = (await client.listTools()).tools.map((tool) => tool.name).sort();
-  expect(names).toEqual(['pm_get_brief', 'pm_get_project', 'pm_list_projects', 'pm_list_sessions', 'pm_report', 'pm_search', 'pm_timeline']);
+  expect(names).toEqual(['pm_get_brief', 'pm_get_project', 'pm_get_session', 'pm_get_turn', 'pm_list_projects', 'pm_list_sessions', 'pm_overview', 'pm_read_raw', 'pm_report', 'pm_search', 'pm_timeline']);
 });
 
 test('calling pm_get_brief over HTTP returns the brief text', async () => {

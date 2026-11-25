@@ -81,7 +81,7 @@ export function searchContext(db: DatabaseSync, query: string, options: {
       WHERE c.session_key=i.session_key AND c.deleted_at IS NULL AND p.deleted_at IS NULL AND (? IS NULL OR c.project_id=?) ORDER BY c.project_id LIMIT 1)) AS linked_project
     FROM search_index i WHERE ${match} AND ${scopes[options.scope]}
     AND (i.project_id IS NULL OR EXISTS(SELECT 1 FROM projects p WHERE p.id=i.project_id AND p.deleted_at IS NULL))
-    AND (? IS NULL OR linked_project=?) AND (? IS NULL OR i.session_key=?) ORDER BY i.ts DESC,i.rowid DESC LIMIT ?`)
+    AND (? IS NULL OR linked_project=?) AND (? IS NULL OR i.session_key=?) ORDER BY i.ts DESC,i.rowid LIMIT ?`)
     .all(options.projectId??null,options.projectId??null,needle,options.projectId??null,options.projectId??null,
       options.sessionKey??null,options.sessionKey??null,options.limit) as Array<Omit<SearchHit,'snippet'|'project_id'> & {body:string;linked_project:string|null}>;
   // A later session can extend an earlier short ID. Resolve the display address against today's complete directory.

@@ -21,6 +21,10 @@ export type Scope =
   | { kind: 'ingest_herdr'; machine: string }
   | { kind: 'ingest_paseo'; source: string };
 
+declare module 'hono' {
+  interface ContextVariableMap { keyPrincipal: Principal }
+}
+
 export type Principal = { id: string; name: string; scope: Scope; origin: 'config' | 'db' };
 
 export function scopeText(s: Scope): string {
@@ -113,6 +117,7 @@ export function requireScope(
       c.header('WWW-Authenticate', 'Bearer');
       return c.json({ error: 'unauthorized', message }, 401);
     }
+    c.set('keyPrincipal',p);
     await next();
   };
 }
