@@ -422,3 +422,24 @@ test('the Paseo collector and its SDK are loaded only by collect-paseo, so the h
   // The build keeps it out of the single-file binary.
   expect(readFileSync(new URL('../scripts/build-collector.sh', import.meta.url), 'utf8')).toMatch(/--external @getpaseo\/client/);
 });
+
+test('rebuild-index restores the same session turns on repeated runs', async () => {
+  const {startCenter, config, PaseoWriter, agent, event} = await import('./helpers/center.ts');
+  const dbPath = join(dir,'index.db');
+  const configPath = join(dir,'index.json');
+  writeFileSync(configPath, JSON.stringify({...config,dbPath}));
+  const center = startCenter(dbPath);
+  try {
+    const writer = new PaseoWriter(center);
+    await writer.lease();
+    await writer.snapshot([agent('first')]);
+    await writer.batch(writer.batchBody('first',null,{epoch:'epoch-1',seq:1},[event('msg:first',1)]));
+    const before = center.db.prepare('SELECT * FROM turns').all();
+    expect(before).toHaveLength(1);
+    center.db.exec('DELETE FROM turns');
+    for (let i=0;i<2;i++) {
+      expect((await run(['rebuild-index','--config',configPath])).code).toBe(0);
+      expect(center.db.prepare('SELECT * FROM turns').all()).toEqual(before);
+    }
+  } finally { center.close(); }
+});

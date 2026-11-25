@@ -531,6 +531,16 @@ export const MIGRATIONS: string[] = [
   DROP TABLE old_digest_blocks;
   `,
   `ALTER TABLE source_events ADD COLUMN turn_id TEXT;`,
+  `CREATE TABLE turns (
+    session_key TEXT NOT NULL, n INTEGER NOT NULL, turn_id TEXT, first_key TEXT NOT NULL, last_key TEXT NOT NULL,
+    ts_start TEXT, ts_end TEXT, tool_calls INTEGER NOT NULL, tool_failures INTEGER NOT NULL, has_user INTEGER NOT NULL,
+    PRIMARY KEY(session_key,n)
+  );
+  CREATE TABLE turn_items (
+    session_key TEXT NOT NULL, event_key TEXT NOT NULL, n INTEGER NOT NULL, first_event INTEGER NOT NULL,
+    latest_event INTEGER NOT NULL UNIQUE, PRIMARY KEY(session_key,event_key)
+  );
+  CREATE INDEX turn_item_order ON turn_items(session_key,n,first_event);`,
 ];
 
 /** Opens (creating if needed) the central database in WAL mode and applies pending migrations. */

@@ -1,3 +1,4 @@
+import { updateTurns } from './turns.ts';
 import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { LEASE_TTL_MS } from '../shared/ingest-v2.ts';
@@ -327,6 +328,8 @@ export function commitBatch(db: DatabaseSync, src: PaseoSource, batch: BatchV2, 
     // A replacement re-reads the new epoch over several batches; until then every id-less row up to what was already
     // received may be a repeat. The boundary only ever grows.
     const overlapUntil = batch.reset !== null && lastTs !== null && (stream?.overlap_until == null || lastTs > stream.overlap_until) ? lastTs : (stream?.overlap_until ?? null);
+    const inserted: number[] = [];
+    let shouldRegroup = false;
     let duplicates = 0;
     let review = 0;
     let standbyCount = 0;
@@ -336,7 +339,10 @@ export function commitBatch(db: DatabaseSync, src: PaseoSource, batch: BatchV2, 
       const h = contentHash(e);
       const duplicate = findDup.get(src.sourceId, batch.agent_id, e.key, h);
       if (duplicate) {
-        if (e.turn_id && duplicate.turn_id === null) db.prepare('UPDATE source_events SET turn_id=? WHERE id=?').run(e.turn_id, duplicate.id);
+        if (e.turn_id && duplicate.turn_id === null) {
+          db.prepare('UPDATE source_events SET turn_id=? WHERE id=?').run(e.turn_id, duplicate.id);
+          shouldRegroup = true;
+        }
         duplicates += 1;
         continue;
       }
@@ -372,9 +378,12 @@ export function commitBatch(db: DatabaseSync, src: PaseoSource, batch: BatchV2, 
         src.sourceId, batch.agent_id, e.key, eventKey, h, (prev?.revision ?? 0) + 1, key, batch.batch_id, e.epoch, e.seq_start, e.seq_end, e.kind,
         e.ts, e.ts === null ? 0 : 1, e.backfill ? 1 : 0, nowIso, e.text, JSON.stringify(meta), disposition, e.turn_id ?? null,
       );
+      inserted.push(Number(lastInsertRowid));
       if (disposition === 'materialized' || disposition === 'suffix') toMaterialize.push({ id: Number(lastInsertRowid), event: e, continuation });
       if (e.ts !== null && (maxTs === null || e.ts > maxTs)) maxTs = e.ts;
     }
+
+    updateTurns(db,key,inserted,shouldRegroup);
 
     // Chunks: the batch's analysable events in order, packed; each chunk remembers the source events it holds.
     insertPaseoChunks(

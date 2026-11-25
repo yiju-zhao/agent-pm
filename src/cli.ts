@@ -30,6 +30,7 @@ const DEFAULT_SERVER = 'http://localhost:7718';
 
 const USAGE = `Usage:
   agent-pm server --config <path>                      run the central server
+  agent-pm rebuild-index --config <path>               rebuild stored context indexes
   agent-pm collect --config <path>                     run the collector on this machine
   agent-pm collect-paseo --config <path>               run a Paseo collector for one daemon (node 26)
   agent-pm sessions [--server <url>] [--machine <m>]   list sessions known to the central server
@@ -45,6 +46,23 @@ export async function main(argv: string[], io: Io): Promise<number> {
     switch (command) {
       case 'server':
         return await runServer(args, io);
+      case 'rebuild-index': {
+        const path = requireConfig(command,args);
+        const {loadServerConfig} = await import('./server/config.ts');
+        const {openDb,transaction} = await import('./server/db.ts');
+        const {rebuildTurns} = await import('./server/turns.ts');
+        const db = openDb(loadServerConfig(path).dbPath);
+        try {
+          transaction(db, () => {
+            db.exec('DELETE FROM turn_items; DELETE FROM turns');
+            for (const row of db.prepare("SELECT DISTINCT session_key FROM source_events WHERE source_id NOT LIKE 'herdr:%'").all()) {
+              rebuildTurns(db,String(row.session_key));
+            }
+          });
+          io.stdout('索引重建完成\n');
+        } finally { db.close(); }
+        return 0;
+      }
       case 'collect':
         return await runCollect(args, io);
       case 'collect-paseo':
