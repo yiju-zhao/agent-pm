@@ -544,6 +544,14 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX turn_item_order ON turn_items(session_key,n,first_event);`,
   SEARCH_SCHEMA,
+  `CREATE TABLE reader_cursors(reader TEXT PRIMARY KEY,last_event_id INTEGER NOT NULL,last_seen_at TEXT NOT NULL);
+   CREATE VIEW context_turn_events AS
+   SELECT i.session_key,i.n,i.first_event,i.latest_event,i.event_key,e.kind,e.text,e.meta,e.ts,e.stream_id,s.server_id,
+     EXISTS(SELECT 1 FROM source_events v JOIN chunk_sources x ON x.source_event_id=v.id
+       JOIN chunks c ON c.id=x.chunk_id WHERE v.session_key=i.session_key AND v.event_key=i.event_key
+       AND c.digest_block_id IS NOT NULL) AS refused
+   FROM turn_items i JOIN source_events e ON e.id=i.latest_event JOIN ingest_sources s ON s.source_id=e.source_id;
+   CREATE INDEX source_event_revisions ON source_events(session_key,event_key,id);`,
 ];
 
 /** Opens (creating if needed) the central database in WAL mode and applies pending migrations. */
