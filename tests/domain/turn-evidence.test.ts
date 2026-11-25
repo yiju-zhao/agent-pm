@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 import { ChangeSet } from '../../src/domain/changes.ts';
 import { getEvidence } from '../../src/domain/evidence.ts';
@@ -42,61 +42,97 @@ beforeEach(async () => {
 });
 afterEach(() => center.close());
 
-test('turn evidence resolves messages and explicitly reports a dangling turn address', () => {
+test('turn evidence returns the messages and tool summary', () => {
   expect(getEvidence(center.db, center.now, ref)).toMatchObject({
     kind: 'turn',
     turn: { items: [{ text: 'private-question' }, { text: 'private-answer' }, { tool: { name: 'shell' } }] },
   });
+});
+
+test('turn evidence identifies a dangling address', () => {
   expect(getEvidence(center.db, center.now, 's:abcd1234#9')).toMatchObject({ kind: 'turn', missing: true });
 });
 
-test('checking a decision is rendered, reversible, and invalidated by a change of wording', () => {
+describe('decision checks', () => {
   const op = (name: Parameters<typeof execute>[2]['op'], args: Record<string, unknown>) =>
     execute(center.db, deps, { op: name, args, actor: 'user' });
-  op('create_project', { title: 'sample' });
-  op('record_decision', { project: 'p_sample', text: 'choice' });
   const mark = (address: string) => op('mark_checked', { item_type: 'decision', id: 'd_sample', ref: address });
-  expect(mark('s:abcd1234').status).toBe('rejected');
-  const checked = mark(ref);
-  expect(checked.status).toBe('applied');
-  const p = getProject(center.db, center.now, 'p_sample')!;
-  expect(p.decisions[0]).toMatchObject({ checked_at: center.now.toISOString(), checked_ref: ref });
-  expect(renderProjectMarkdown(p)).toMatch(/choice.*已核对.*s:abcd1234#1/);
-  if (checked.status !== 'applied') throw Error('expected a checked event');
-  op('revert_event', { event_id: checked.event_id });
-  expect(getProject(center.db, center.now, 'p_sample')!.decisions[0]).toMatchObject({ checked_ref: null, checked_at: null });
-  mark(ref);
-  new ChangeSet(center.db).update('decisions', 'd_sample', { text: 'different' });
-  expect(getProject(center.db, center.now, 'p_sample')!.decisions[0]).toMatchObject({ checked_ref: null, checked_at: null });
+  const project = () => getProject(center.db, center.now, 'p_sample')!;
+
+  beforeEach(() => {
+    op('create_project', { title: 'sample' });
+    op('record_decision', { project: 'p_sample', text: 'choice' });
+  });
+
+  test('a decision check rejects a session address', () => {
+    expect(mark('s:abcd1234').status).toBe('rejected');
+  });
+
+  test('a decision check records the turn, time and ledger event', () => {
+    const checked = mark(ref);
+    expect(checked.status).toBe('applied');
+    expect(project().decisions[0]).toMatchObject({ checked_at: center.now.toISOString(), checked_ref: ref });
+    expect(center.db.prepare("SELECT count(*) n FROM events WHERE op='mark_checked'").get()).toEqual({ n: 1 });
+  });
+
+  test('a checked decision renders its evidence address on the same line', () => {
+    mark(ref);
+    expect(renderProjectMarkdown(project())).toMatch(/choice.*已核对.*s:abcd1234#1/);
+  });
+
+  test('reverting a check restores the original decision fields', () => {
+    const checked = mark(ref);
+    if (checked.status !== 'applied') throw Error('expected a checked event');
+    op('revert_event', { event_id: checked.event_id });
+    expect(project().decisions[0]).toMatchObject({ checked_ref: null, checked_at: null });
+  });
+
+  test('a wording change invalidates the decision check in the recorded change', () => {
+    mark(ref);
+    const changes = new ChangeSet(center.db);
+    changes.update('decisions', 'd_sample', { text: 'different' });
+    expect(changes.changes[0]).toMatchObject({
+      before: { text: 'choice', checked_ref: ref, checked_at: center.now.toISOString() },
+      after: { text: 'different', checked_ref: null, checked_at: null },
+    });
+    expect(project().decisions[0]).toMatchObject({ checked_ref: null, checked_at: null });
+  });
 });
 
-test('only explicit reads return refused text, both readers retain the gap and its addresses', async () => {
-  const model = curatorTools(center.db, deps, { digestIds: [] });
-  const mcp = readTools(center.db, deps);
-  const read = (name: string, args: Record<string, string>, background: boolean) =>
-    (background ? model : mcp).find((t) => t.name === (background ? name : 'pm_' + name))!.handler(args);
-  expect((await read('get_turn', { turn: ref }, true)).text).toEqual((await read('get_turn', { turn: ref }, false)).text);
-  expect((await read('get_session', { session: 's:abcd1234' }, true)).text).toEqual(
-    (await read('get_session', { session: 's:abcd1234' }, false)).text,
-  );
-  center.db.exec('UPDATE chunks SET digest_block_id=1');
-  for (const [name, args] of [
-    ['get_session', { session: 's:abcd1234' }],
-    ['get_turn', { turn: ref }],
-  ] as const) {
-    const hidden = await read(name, args, true),
-      explicit = await read(name, args, false);
-    expect(hidden.text).not.toMatch(/private-question|private-answer|private-command/);
-    expect(hidden.text).toContain('后台不提供正文');
-    expect(hidden.text).toContain(ref);
-    expect(explicit.text).toContain('private-question');
-    expect(explicit.text).toContain('private-answer');
-    expect(explicit.text).toContain('中心没有它的摘要');
-    if (name === 'get_turn') expect(explicit.text).toContain('private-command');
+describe('refusal visibility', () => {
+  function read(name: string, args: Record<string, string>, background: boolean) {
+    const tools = background ? curatorTools(center.db, deps, { digestIds: [] }) : readTools(center.db, deps);
+    return tools.find(tool => tool.name === (background ? name : 'pm_' + name))!.handler(args);
   }
-  const raw = await mcp.find((t) => t.name === 'pm_read_raw')!.handler({ item: ref + '.1' });
-  expect(raw.text).toContain('private-question');
-  expect(raw.text).toContain('中心没有它的摘要');
+
+  test('both readers return identical unquarantined content', async () => {
+    for (const [name, args] of [['get_turn', { turn: ref }], ['get_session', { session: 's:abcd1234' }]] as const) {
+      expect((await read(name, args, true)).text).toBe((await read(name, args, false)).text);
+    }
+  });
+
+  test('the background reader masks quarantined excerpts and tool inputs while retaining addresses', async () => {
+    center.db.exec('UPDATE chunks SET digest_block_id=1');
+    for (const [name, args] of [['get_turn', { turn: ref }], ['get_session', { session: 's:abcd1234' }]] as const) {
+      const hidden = await read(name, args, true);
+      expect(hidden.text).not.toMatch(/private-question|private-answer|private-command/);
+      expect(hidden.text).toContain('后台不提供正文');
+      expect(hidden.text).toContain(ref);
+    }
+  });
+
+  test('explicit reads show quarantined text with the missing-summary notice', async () => {
+    center.db.exec('UPDATE chunks SET digest_block_id=1');
+    const session = await read('get_session', { session: 's:abcd1234' }, false);
+    const turn = await read('get_turn', { turn: ref }, false);
+    const raw = await read('read_raw', { item: ref + '.1' }, false);
+    for (const response of [session, turn, raw]) {
+      expect(response.text).toContain('private-question');
+      expect(response.text).toContain('中心没有它的摘要');
+    }
+    expect(session.text).toContain('private-answer');
+    expect(turn.text).toContain('private-command');
+  });
 });
 
 test('blocker review records a check when the model opens and cites a turn', async () => {

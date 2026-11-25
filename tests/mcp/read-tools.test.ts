@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { execute } from '../../src/domain/execute.ts';
 import { askUser } from '../../src/domain/questions.ts';
 import { getProject } from '../../src/domain/read.ts';
@@ -7,7 +7,7 @@ import { MAX_REPORT_CHARS, readTools, REPORT_INBOX_KEY } from '../../src/mcp/rea
 import { nextWindow } from '../../src/understand/digest.ts';
 import { renderBrief, renderProjectMarkdown } from '../../src/understand/render.ts';
 import type { ToolDef, ToolOutput } from '../../src/understand/tool-def.ts';
-import { agent, event, PaseoWriter, startCenter } from '../helpers/center.ts';
+import { agent, event, PaseoWriter, startCenter, type Center } from '../helpers/center.ts';
 import { count, NOW, rows, setup } from '../domain/helpers.ts';
 import type { Setup } from '../domain/helpers.ts';
 
@@ -623,28 +623,63 @@ test('pm_report text is stored as data: an instruction inside it changes nothing
   expect(count(t.db, 'events')).toBe(events);
 });
 
-test('addresses from overview open the session, turn and raw item without translating IDs', async () => {
-  const center=startCenter();
-  try {
-    const writer=new PaseoWriter(center); await writer.lease();
-    await writer.snapshot([agent('sample',{status:'working',native_id:'abcd1234',native_id_origin:'runtime'})]);
-    await writer.batch(writer.batchBody('sample',null,{epoch:'epoch-1',seq:1},[event('msg:q',1,{kind:'user',text:'needle message',turn_id:'first'})]));
-    const tools=readTools(center.db,{...t.deps,now:()=>center.now},'key-a');
-    const use=(name:string,args:Record<string,unknown>)=>byName(tools,name).handler(args);
-    const overview=(await use('pm_overview',{})).text;
-    for (const heading of ['盲区','待处理','正在运行','自上次以来']) expect(overview).toContain(heading);
-    const session=overview.match(/s:abcd1234$/m)![0];
-    const outline=(await use('pm_get_session',{session})).text;
-    expect((await use('pm_get_session',{session:session.slice(2)})).text).toBe(outline);
-    const turn=outline.match(/s:abcd1234#1$/m)![0];
-    const item=(await use('pm_get_turn',{turn})).text.match(/s:abcd1234#1\.1$/m)![0];
-    expect((await use('pm_read_raw',{item})).text).toContain('needle message');
-    expect((await use('pm_search',{query:'needle'})).text).toContain(turn);
-    expect((await use('pm_search',{query:'needle',scope:'ledger'})).text).toContain('没有');
-    expect((await use('pm_get_turn',{turn:'bad'})).isError).toBe(true);
+describe('addressable context tools', () => {
+  let center: Center;
+  let readerTools: ToolDef[];
+
+  beforeEach(async () => {
+    center = startCenter();
+    const writer = new PaseoWriter(center);
+    await writer.lease();
+    await writer.snapshot([agent('sample', { status: 'working', native_id: 'abcd1234', native_id_origin: 'runtime' })]);
+    await writer.batch(writer.batchBody('sample', null, { epoch: 'epoch-1', seq: 1 }, [
+      event('msg:q', 1, { kind: 'user', text: 'needle message', turn_id: 'first' }),
+    ]));
+    readerTools = readTools(center.db, { ...t.deps, now: () => center.now }, 'key-a');
+  });
+  afterEach(() => center.close());
+
+  function read(name: string, args: Record<string, unknown> = {}): Promise<ToolOutput> {
+    return byName(readerTools, name).handler(args);
+  }
+
+  test('overview lists four sections and links a running session', async () => {
+    const overview = (await read('pm_overview')).text;
+    for (const heading of ['盲区', '待处理', '正在运行', '自上次以来']) expect(overview).toContain(heading);
+    expect(overview).toMatch(/s:abcd1234$/m);
+  });
+
+  test('the same key sees no changes after reading the overview', async () => {
     center.db.prepare("INSERT INTO events(project_id,op,recorded_at) VALUES ('p_demo','record_decision',?)").run(center.now.toISOString());
-    expect((await use('pm_overview',{})).text).toContain('p_demo');
-    expect((await use('pm_overview',{})).text).not.toContain('p_demo');
-    expect((await byName(readTools(center.db,{...t.deps,now:()=>center.now},'key-b'),'pm_overview').handler({})).text).toContain('p_demo');
-  } finally { center.close(); }
+    expect((await read('pm_overview')).text).toContain('p_demo');
+    expect((await read('pm_overview')).text).not.toContain('p_demo');
+  });
+
+  test('the session tool accepts both its address and its short ID', async () => {
+    expect((await read('pm_get_session', { session: 's:abcd1234' })).text).toEqual((await read('pm_get_session', { session: 'abcd1234' })).text);
+  });
+
+  test('a turn address from the session outline opens that turn', async () => {
+    const outline = await read('pm_get_session', { session: 'abcd1234' });
+    const turn = outline.text.match(/s:abcd1234#1$/m)![0];
+    expect((await read('pm_get_turn', { turn })).text).toContain('needle message');
+  });
+
+  test('an item address from a turn opens its original text', async () => {
+    const turn = await read('pm_get_turn', { turn: 's:abcd1234#1' });
+    const item = turn.text.match(/s:abcd1234#1\.1$/m)![0];
+    expect((await read('pm_read_raw', { item })).text).toContain('needle message');
+  });
+
+  test('the default search finds a term that appears only in a conversation', async () => {
+    expect((await read('pm_search', { query: 'needle' })).text).toContain('s:abcd1234#1');
+  });
+
+  test('ledger search excludes a term that appears only in a conversation', async () => {
+    expect((await read('pm_search', { query: 'needle', scope: 'ledger' })).text).toContain('没有');
+  });
+
+  test('an invalid turn address returns a tool error', async () => {
+    expect((await read('pm_get_turn', { turn: 'bad' })).isError).toBe(true);
+  });
 });

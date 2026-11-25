@@ -6,49 +6,63 @@ import { agent, event, PaseoWriter, startCenter, type Center } from '../helpers/
 let center: Center;
 beforeEach(() => {
   center = startCenter();
+  center.db.exec(`INSERT INTO projects(id,title,created_at) VALUES ('p_old','主题','2026-01-01'),('p_new','主题','2026-02-01');
+    INSERT INTO decisions(id,project_id,text) VALUES ('d_one','p_old','采集改为订阅驱动，解决阻塞 HTTP');`);
 });
 afterEach(() => center.close());
 const search = (query: string) => searchContext(center.db, query, { scope: 'all', limit: 10 });
 
-test('ledger search matches literal Chinese substrings and ignores English case', () => {
-  center.db.exec(
-    "INSERT INTO projects(id,title) VALUES ('p_one','采集'); INSERT INTO decisions(id,project_id,text) VALUES ('d_one','p_one','采集改为订阅驱动，解决阻塞 HTTP')",
-  );
-  for (const term of ['订阅驱动', '阻塞', 'http']) expect(search(term).map((h) => h.ref)).toEqual(['d_one']);
-  expect(search('驱动')[0].snippet).toContain('驱动');
+test('a Chinese substring opens its decision', () => {
+  expect(search('订阅驱动')).toMatchObject([{ ref: 'd_one', kind: 'decision', snippet: expect.stringContaining('订阅驱动') }]);
 });
 
-test('editing and deleting ledger items updates their searchable text', () => {
-  center.db.exec(
-    "INSERT INTO projects(id,title) VALUES ('p_one','测试'); INSERT INTO todos(id,project_id,title) VALUES ('t_one','p_one','旧的条目')",
-  );
-  center.db.exec("UPDATE todos SET title='新的文字' WHERE id='t_one'");
+test('two-character Chinese terms find ledger entries', () => {
+  expect(search('阻塞').map(hit => hit.ref)).toEqual(['d_one']);
+});
+
+test('English search ignores case', () => {
+  expect(search('http').map(hit => hit.ref)).toEqual(['d_one']);
+});
+
+test('editing a todo replaces its searchable text', () => {
+  center.db.exec("INSERT INTO todos(id,project_id,title) VALUES ('t_one','p_old','旧的条目'); UPDATE todos SET title='新的文字' WHERE id='t_one'");
   expect(search('旧的条目')).toEqual([]);
   expect(search('新的文字')).toHaveLength(1);
-  center.db.exec("UPDATE todos SET deleted_at='today' WHERE id='t_one'");
-  expect(search('新的文字')).toEqual([]);
 });
 
-test('scope, project membership, time ordering and limit narrow the results', () => {
-  center.db.exec("INSERT INTO projects(id,title,created_at) VALUES ('p_old','主题','2026-01-01'),('p_new','主题','2026-02-01')");
-  expect(searchContext(center.db, '主题', { scope: 'ledger', limit: 1 })[0].ref).toBe('p_new');
-  expect(searchContext(center.db, '主题', { scope: 'ledger', limit: 1, projectId: 'p_old' })[0].ref).toBe('p_old');
+test('deleted decisions no longer appear in search', () => {
+  center.db.exec("UPDATE decisions SET deleted_at='today' WHERE id='d_one'");
+  expect(search('订阅驱动')).toEqual([]);
+});
+
+test('a limited search returns the newest match first', () => {
+  expect(searchContext(center.db, '主题', { scope: 'ledger', limit: 1 }).map(hit => hit.ref)).toEqual(['p_new']);
+});
+
+test('project-scoped search returns only that project’s matches', () => {
+  expect(searchContext(center.db, '主题', { scope: 'all', limit: 10, projectId: 'p_old' }).map(hit => hit.ref)).toEqual(['p_old']);
+});
+
+test('digest-scoped search excludes matching ledger entries', () => {
   center.db.prepare("INSERT INTO digests(session_key,json) VALUES ('claude:session',?)").run(JSON.stringify({ progress: ['摘要主题'] }));
-  expect(searchContext(center.db, '主题', { scope: 'digests', limit: 10 }).map((h) => h.kind)).toEqual(['digest']);
+  expect(searchContext(center.db, '主题', { scope: 'digests', limit: 10 }).map(hit => hit.kind)).toEqual(['digest']);
 });
 
-test('message revisions are searchable at their turn address before and after rebuilding', async () => {
-  const w = new PaseoWriter(center);
-  await w.lease();
-  await w.snapshot([agent('a', { native_id: 'session1', native_id_origin: 'runtime' })]);
+test('message search opens the turn containing only the latest revision', async () => {
+  const writer = new PaseoWriter(center);
+  await writer.lease();
+  await writer.snapshot([agent('a', { native_id: 'session1', native_id_origin: 'runtime' })]);
   const end = { epoch: 'epoch-1', seq: 1 };
   const first = event('msg:question', 1, { kind: 'user', text: '寻找旧关键词' });
-  await w.batch(w.batchBody('a', null, end, [first]));
-  await w.batch(w.batchBody('a', end, end, [{ ...first, text: '寻找新关键词' }]));
+  await writer.batch(writer.batchBody('a', null, end, [first]));
+  await writer.batch(writer.batchBody('a', end, end, [{ ...first, text: '寻找新关键词' }]));
   expect(search('旧关键词')).toEqual([]);
-  const hits = search('新关键词');
-  expect(hits).toMatchObject([{ kind: 'message', ref: 's:session1#1' }]);
+  expect(search('新关键词')).toMatchObject([{ kind: 'message', ref: 's:session1#1' }]);
+});
+
+test('rebuilding the index restores the original hits', () => {
+  const hits = search('订阅驱动');
   center.db.exec('DELETE FROM search_index');
   rebuildSearchIndex(center.db);
-  expect(search('新关键词')).toEqual(hits);
+  expect(search('订阅驱动')).toEqual(hits);
 });

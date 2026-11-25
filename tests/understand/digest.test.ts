@@ -1,5 +1,7 @@
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
+import { applySnapshot, insertChunks } from '../../src/server/sessions-repo.ts';
+import { sessionContext } from '../../src/understand/context.ts';
 import { readSession } from '../../src/context/read.ts';
 import { SDK_STRUCTURED_OUTPUT_RETRIES } from '../../src/understand/agent-sdk.ts';
 import {
@@ -18,7 +20,7 @@ import type { DigestWindow } from '../../src/understand/digest.ts';
 import type { LlmCall, LlmResult, LlmRunner } from '../../src/understand/llm.ts';
 import { NOW, setup } from '../domain/helpers.ts';
 import type { Setup } from '../domain/helpers.ts';
-import { agent,event,PaseoWriter,startCenter } from '../helpers/center.ts';
+import { agent, event, herdrChunks, herdrSession, herdrSnapshot, PaseoWriter, startCenter, type Center } from '../helpers/center.ts';
 
 const MODEL = 'claude-haiku-5-5';
 const KEY = 'claude:sess1111aaaabbbb';
@@ -594,31 +596,102 @@ test('unlinked sessions do not get briefs of projects the user unlinked', () => 
   expect(loadDigestContext(t.db, new Date(NOW), KEY).linkedBriefs).toEqual([]);
 });
 
-test('packed turns are marked in the prompt and only grounded turns and the latest card are stored',async()=>{
-  const center=startCenter();
-  try {
-    const w=new PaseoWriter(center);await w.lease();await w.snapshot([agent('a',{native_id:'abcd1234',native_id_origin:'runtime'})]);
-    const msg=(n:number)=>event('msg:'+n,n,{kind:'user',turn_id:'turn-'+n,text:'message '+n});
-    await w.batch(w.batchBody('a',null,{epoch:'epoch-1',seq:2},[msg(1),msg(2)]));
+test('earlier work renders progress from a stored legacy string array', () => {
+  addSession(KEY);
+  t.db.prepare('INSERT INTO digests(session_key, ts_end, json) VALUES (?, ?, ?)')
+    .run(KEY, NOW, JSON.stringify({ progress: ['原有的摘要进展'] }));
+  expect(sessionContext(t.db, KEY, t.deps.now())).toContain('原有的摘要进展');
+});
+
+test('a herdr transcript can be digested without any turn columns or citations', async () => {
+  applySnapshot(t.db, herdrSnapshot([herdrSession(KEY)]), t.deps.now());
+  insertChunks(t.db, herdrChunks(KEY, 0, 10, 'herdr text'), t.deps.now());
+  const structured = { ...GOOD_DIGEST, progress: [{ text: 'progress', turns: [1] }] };
+  const { runner } = fakeRunner({ ...SUCCESS, structured });
+  const outcome = await runDigest(t.db, t.deps, runner, nextWindow(t.db, KEY, 'realtime')!, { model: MODEL, force: false });
+  expect(outcome.status).toBe('digested');
+  const digest = t.db.prepare('SELECT json, turn_start, turn_end FROM digests WHERE session_key=?').get(KEY)!;
+  expect(digest).toMatchObject({ turn_start: null, turn_end: null });
+  expect(JSON.parse(String(digest.json)).progress).toEqual([{ text: 'progress', turns: [] }]);
+  expect(t.db.prepare('SELECT card_as_of_turn FROM sessions WHERE key=?').get(KEY)).toEqual({ card_as_of_turn: null });
+});
+
+describe('turn-grounded digests', () => {
+  let center: Center;
+  let writer: PaseoWriter;
+  let key: string;
+  const card = { goal: 'goal', state: 'working', waiting_on: null, next: 'review', note: 'note' };
+  const message = (turn: number) => event('msg:' + turn, turn, { kind: 'user', turn_id: 'turn-' + turn, text: 'message ' + turn });
+  const digest = () => center.db.prepare('SELECT turn_start, turn_end, json FROM digests WHERE session_key=? ORDER BY id DESC LIMIT 1').get(key)!;
+
+  beforeEach(async () => {
+    center = startCenter();
+    writer = new PaseoWriter(center);
+    await writer.lease();
+    await writer.snapshot([agent('a', { native_id: 'abcd1234', native_id_origin: 'runtime' })]);
+    await writer.batch(writer.batchBody('a', null, { epoch: 'epoch-1', seq: 2 }, [message(1), message(2)]));
     center.db.exec('UPDATE chunks SET digested=1');
-    const sent=await w.batch(w.batchBody('a',{epoch:'epoch-1',seq:2},{epoch:'epoch-1',seq:5},[msg(3),msg(4),msg(5)]));
-    const key=String(sent.json.session_key);
-    const card={goal:'goal',state:'working',waiting_on:null,next:'review',note:'note'};
-    const {runner,calls}=fakeRunner({...SUCCESS,structured:{...GOOD_DIGEST,decisions:[{text:'choice',quote_ref:'',turns:[4,9]}],session_state:card}});
-    const window=nextWindow(center.db,key,'realtime')!;
-    expect((await runDigest(center.db,t.deps,runner,window,{model:MODEL,force:false})).status).toBe('digested');
-    expect(calls[0].prompt).toMatch(/回合 3[^]*message 3[^]*回合 4[^]*message 4[^]*回合 5[^]*message 5/);
-    const digest=center.db.prepare('SELECT turn_start,turn_end,json FROM digests').get()!;
-    expect(digest).toMatchObject({turn_start:3,turn_end:5});
-    expect(JSON.parse(String(digest.json)).decisions[0].turns).toEqual([4]);
-    await w.batch(w.batchBody('a',{epoch:'epoch-1',seq:5},{epoch:'epoch-1',seq:6},[msg(6)]));
-    expect(readSession(center.db,center.now,'abcd1234',{})).toMatchObject({card,card_as_of_turn:5,card_lag:1});
-    const next=nextWindow(center.db,key,'realtime')!;
-    const refused=fakeRunner({ok:false,kind:'refused',message:'declined',durationMs:1});
-    await runDigest(center.db,t.deps,refused.runner,next,{model:MODEL,force:false});
-    expect(readSession(center.db,center.now,'abcd1234',{})).toMatchObject({card,card_as_of_turn:5});
-    await w.batch(w.batchBody('a',{epoch:'epoch-1',seq:6},{epoch:'epoch-1',seq:7},[msg(7)]));
-    await runDigest(center.db,t.deps,runner,nextWindow(center.db,key,'realtime')!,{model:MODEL,force:false});
-    expect(readSession(center.db,center.now,'abcd1234',{})).toMatchObject({card_as_of_turn:7,card_lag:0});
-  } finally { center.close(); }
+    const batch = await writer.batch(writer.batchBody('a', { epoch: 'epoch-1', seq: 2 }, { epoch: 'epoch-1', seq: 5 }, [message(3), message(4), message(5)]));
+    key = String(batch.json.session_key);
+  });
+  afterEach(() => center.close());
+
+  async function summarize(turns: number[] = [], state = card) {
+    const { runner, calls } = fakeRunner({ ...SUCCESS, structured: {
+      ...GOOD_DIGEST, decisions: [{ text: 'choice', quote_ref: '', turns }], session_state: state,
+    } });
+    const outcome = await runDigest(center.db, t.deps, runner, nextWindow(center.db, key, 'realtime')!, { model: MODEL, force: false });
+    expect(outcome.status).toBe('digested');
+    return calls[0].prompt;
+  }
+
+  async function appendSixthTurn(): Promise<void> {
+    await writer.batch(writer.batchBody('a', { epoch: 'epoch-1', seq: 5 }, { epoch: 'epoch-1', seq: 6 }, [message(6)]));
+  }
+
+  test('the prompt marks every turn in the packed window', async () => {
+    expect(await summarize()).toMatch(/回合 3[^]*message 3[^]*回合 4[^]*message 4[^]*回合 5[^]*message 5/);
+  });
+
+  test('the stored turn bounds cover exactly the summarized window', async () => {
+    await summarize();
+    expect(digest()).toMatchObject({ turn_start: 3, turn_end: 5 });
+  });
+
+  test('an in-window decision citation survives storage', async () => {
+    await summarize([4]);
+    expect(JSON.parse(String(digest().json)).decisions[0].turns).toEqual([4]);
+  });
+
+  test('an out-of-window citation is removed without dropping the decision', async () => {
+    await summarize([9]);
+    expect(JSON.parse(String(digest().json)).decisions).toEqual([{ text: 'choice', quote_ref: '', turns: [] }]);
+  });
+
+  test('a successful digest stores the model’s card as of its last turn', async () => {
+    await summarize();
+    expect(readSession(center.db, center.now, 'abcd1234', {})).toMatchObject({ card, card_as_of_turn: 5 });
+  });
+
+  test('a newly received turn increases the visible card lag', async () => {
+    await summarize();
+    await appendSixthTurn();
+    expect(readSession(center.db, center.now, 'abcd1234', {}).card_lag).toBe(1);
+  });
+
+  test('a refused window preserves the previous card and its turn number', async () => {
+    await summarize();
+    await appendSixthTurn();
+    const { runner } = fakeRunner({ ok: false, kind: 'refused', message: 'declined', durationMs: 1 });
+    await runDigest(center.db, t.deps, runner, nextWindow(center.db, key, 'realtime')!, { model: MODEL, force: false });
+    expect(readSession(center.db, center.now, 'abcd1234', {})).toMatchObject({ card, card_as_of_turn: 5 });
+  });
+
+  test('the next successful digest replaces the card and advances its turn number', async () => {
+    await summarize();
+    await appendSixthTurn();
+    const nextCard = { ...card, state: 'reviewed' };
+    await summarize([6], nextCard);
+    expect(readSession(center.db, center.now, 'abcd1234', {})).toMatchObject({ card: nextCard, card_as_of_turn: 6, card_lag: 0 });
+  });
 });
