@@ -114,6 +114,14 @@ export function configuredSources(db: DatabaseSync, config: SourceConfig) {
 
 export const PENDING_DIGEST_CHUNKS = 'SELECT session_key, source_id FROM chunks WHERE digested = 0 AND digest_block_id IS NULL';
 
+export function sourceState(source: SourceRow | undefined, now: Date): SourceCoverage['state'] {
+  if (!source || source.collector_heartbeat === null) return 'never_reported';
+  const health = sourceHealth(source, now);
+  if (!health.collectorAlive) return 'offline';
+  if (!health.daemonOk) return 'daemon_down';
+  return 'ok';
+}
+
 export function sourceCoverage(db: DatabaseSync, config: ServerConfig, now: Date): SourceCoverage[] {
   const configured = configuredSources(db, config);
   const rows = new Map((db.prepare('SELECT * FROM ingest_sources').all() as SourceRow[]).map((r) => [r.source_id, r]));
@@ -122,7 +130,6 @@ export function sourceCoverage(db: DatabaseSync, config: ServerConfig, now: Date
   return ids.map((id): SourceCoverage => {
     const row = rows.get(id);
     const kind = (row?.kind ?? configured.get(id)!.kind) as SourceKind;
-    const health = row ? sourceHealth(row, now) : { collectorAlive: false, daemonOk: false };
     const lifecycle = Object.fromEntries(
       (db.prepare('SELECT lifecycle, count(*) AS n FROM session_sources WHERE source_id = ? GROUP BY lifecycle').all(id) as Array<{ lifecycle: string; n: number }>).map((r) => [r.lifecycle, r.n]),
     );
@@ -139,7 +146,7 @@ export function sourceCoverage(db: DatabaseSync, config: ServerConfig, now: Date
       kind,
       machine: row?.machine ?? configured.get(id)!.machine,
       configured: configured.has(id),
-      state: !row || row.collector_heartbeat === null ? 'never_reported' : !health.collectorAlive ? 'offline' : !health.daemonOk ? 'daemon_down' : 'ok',
+      state: sourceState(row, now),
       collector_heartbeat: row?.collector_heartbeat ?? null,
       collector_version: row?.collector_version ?? null,
       daemon_status: row?.daemon_status ?? null,

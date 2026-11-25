@@ -70,7 +70,7 @@ export type DigestWindow = {
   sessionKey: string;
   /** Chunks whose text is in `text`, ordered by `ts_start` then id. */
   chunkIds: number[];
-  turnNumbers?: number[];
+  turnNumbers: number[];
   /** Older screen snapshots the newest one makes redundant: marked digested without going to the model. */
   staleChunkIds: number[];
   text: string;
@@ -309,7 +309,7 @@ function storeDigest(db: DatabaseSync, deps: DomainDeps, window: DigestWindow, v
       values.trivial ? 1 : 0,
       values.skipped ? 1 : 0,
       values.curated ? 1 : 0,
-      deps.now().toISOString(),window.turnNumbers?.[0]??null,window.turnNumbers?.at(-1)??null,
+      deps.now().toISOString(),window.turnNumbers[0]??null,window.turnNumbers.at(-1)??null,
     );
   const mark = db.prepare('UPDATE chunks SET digested = 1 WHERE id = ? AND digest_block_id IS NULL');
   for (const id of [...window.chunkIds, ...window.staleChunkIds]) mark.run(id);
@@ -393,7 +393,7 @@ export async function runDigest(
     item.turns = [...new Set(item.turns.filter(n=>covered.has(n)))];
   }
   const digestId = transaction(db, () => {
-    const end=window.turnNumbers?.at(-1)??null;
+    const end=window.turnNumbers.at(-1)??null;
     db.prepare('UPDATE sessions SET card=?,card_as_of_turn=? WHERE key=? AND (card_as_of_turn IS NULL OR card_as_of_turn<=?)')
       .run(JSON.stringify(digest.session_state),end,window.sessionKey,end);
     return storeDigest(db, deps, window, {

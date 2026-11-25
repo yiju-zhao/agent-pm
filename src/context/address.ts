@@ -7,7 +7,7 @@ export type Address =
 
 export function parseAddress(text: string): Address {
   const parts = /^s:([^\s#]+)(?:#([1-9]\d*)(?:\.([1-9]\d*))?)?$/.exec(text);
-  if (!parts || text.trim() !== text) throw new ContextAddressError(`无效的地址：${text}`);
+  if (!parts) throw new ContextAddressError(`无效的地址：${text}`);
   const [, session, turn, item] = parts;
   if (!turn) return { kind: 'session', session };
   if (!Number.isSafeInteger(Number(turn)) || (item && !Number.isSafeInteger(Number(item))))

@@ -148,6 +148,7 @@ function fakeRunner(result: LlmResult | ((call: LlmCall) => LlmResult)): { runne
 function windowOf(chunkIds: number[], over: Partial<DigestWindow> = {}): DigestWindow {
   return {
     sessionKey: KEY,
+    turnNumbers: [],
     chunkIds,
     staleChunkIds: [],
     text: chunkIds.map((id) => `<chunk id="${id}">x</chunk>`).join('\n\n'),

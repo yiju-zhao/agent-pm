@@ -11,11 +11,13 @@ import { oneLine } from '../understand/render.ts';
 import type { ToolDef } from '../understand/tool-def.ts';
 import { defineTool } from './define-tool.ts';
 
+const OVERVIEW_SECTION_CHARS = 330;
+
 export type OverviewSources = { config: SourceConfig; startedAt: Date };
 
 export function searchTool(db: DatabaseSync): ToolDef {
-  const defaultLimit = 20,
-    maxLimit = 100;
+  const defaultLimit = 20;
+  const maxLimit = 100;
   const labels = { project: '项目', milestone: '里程碑', todo: 'todo', decision: '决策', blocker: '阻塞', digest: '摘要', message: '消息' };
   return defineTool(
     {
@@ -119,8 +121,8 @@ export function contextTools(db: DatabaseSync, deps: DomainDeps, reader: string,
         input: {},
       },
       () => {
-        const now = deps.now(),
-          overview = readOverview(db, now, reader, sources);
+        const now = deps.now();
+        const overview = readOverview(db, now, reader, sources);
         const parts = [
           [
             '盲区',
@@ -153,7 +155,7 @@ export function contextTools(db: DatabaseSync, deps: DomainDeps, reader: string,
             let section = title;
             let shown = 0;
             for (const line of lines) {
-              if (section.length + line.length > 330) break;
+              if (section.length + line.length > OVERVIEW_SECTION_CHARS) break;
               section += '\n- ' + line;
               shown++;
             }

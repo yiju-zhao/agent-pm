@@ -311,6 +311,7 @@ export function commitBatch(db: DatabaseSync, src: PaseoSource, batch: BatchV2, 
     // epoch, overlapping seqs. A row with a known id elsewhere in the same epoch is another row, `<key>~<seqStart>`.
     // Identical content under any variant of the key is a duplicate, also across epochs (a replayed history).
     const findDup = db.prepare('SELECT id, event_key,turn_id FROM source_events WHERE source_id = ? AND stream_id = ? AND base_key = ? AND content_hash = ?');
+    const fillTurnId = db.prepare('UPDATE source_events SET turn_id=? WHERE session_key=? AND event_key=? AND turn_id IS NULL');
     const sameRow = db.prepare(
       `SELECT id, event_key, revision, kind, text, meta,turn_id FROM source_events
        WHERE source_id = ? AND stream_id = ? AND base_key = ? AND epoch = ? AND seq_start <= ? AND seq_end >= ?
@@ -341,7 +342,7 @@ export function commitBatch(db: DatabaseSync, src: PaseoSource, batch: BatchV2, 
       const duplicate = findDup.get(src.sourceId, batch.agent_id, e.key, h);
       if (duplicate) {
         if (e.turn_id != null && duplicate.turn_id === null) {
-          db.prepare('UPDATE source_events SET turn_id=? WHERE session_key=? AND event_key=? AND turn_id IS NULL').run(e.turn_id,key,duplicate.event_key);
+          fillTurnId.run(e.turn_id, key, duplicate.event_key);
           shouldRegroup = true;
         }
         duplicates += 1;

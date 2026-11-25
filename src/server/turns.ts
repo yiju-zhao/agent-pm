@@ -59,7 +59,13 @@ function indexTurnEvents(db: DatabaseSync, sessionKey: string, events: TurnEvent
     }
     const isUser = e.kind === 'user';
     const isTool = Number(e.kind === 'tool');
-    if (!tail || (e.turn_id !== null ? e.turn_id !== tail.turn_id : isUser && (tail.has_user === 1 || tail.turn_id !== null))) {
+    let hasBoundary: boolean;
+    if (e.turn_id !== null) {
+      hasBoundary = e.turn_id !== tail?.turn_id;
+    } else {
+      hasBoundary = isUser && (tail?.has_user === 1 || tail?.turn_id != null);
+    }
+    if (!tail || hasBoundary) {
       tail = { n: (tail?.n ?? 0) + 1, turn_id: e.turn_id, has_user: Number(isUser) };
       start.run(sessionKey, tail.n, e.turn_id, e.event_key, e.event_key, e.ts, e.ts, isTool, e.failed, tail.has_user);
     } else {

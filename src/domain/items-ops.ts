@@ -1,4 +1,4 @@
-import { ContextAddressError,parseAddress } from '../context/address.ts';
+import { ContextAddressError } from '../context/address.ts';
 import { resolveSession } from '../context/read.ts';
 import { addLocks, readLocks, readRow } from './changes.ts';
 import type { Row } from './changes.ts';
@@ -243,18 +243,18 @@ export const ITEM_HANDLERS: Partial<Record<OpName, Handler>> = {
     const project = String(item.project_id);
     loadProject(ctx,project);
     loadItem(ctx,table,project,args.id);
+    const [shortId, turn] = args.ref.slice(2).split('#');
+    let session: ReturnType<typeof resolveSession>;
     try {
-      const address=parseAddress(args.ref);
-      if (address.kind!=='turn') throw new OpRejected('invalid','需要回合地址');
-      const session=resolveSession(ctx.db,address.session);
-      if (!ctx.db.prepare('SELECT 1 FROM turns WHERE session_key=? AND n=?').get(session.key,address.turn)) {
-        throw new OpRejected('not_found',`找不到回合 ${args.ref}`);
-      }
-      ctx.changes.update(table,args.id,{checked_at:now(ctx),checked_ref:`s:${session.short}#${address.turn}`});
+      session = resolveSession(ctx.db, shortId);
     } catch (error) {
-      if (error instanceof ContextAddressError) throw new OpRejected('invalid',error.message);
+      if (error instanceof ContextAddressError) throw new OpRejected('invalid', error.message);
       throw error;
     }
+    if (!ctx.db.prepare('SELECT 1 FROM turns WHERE session_key=? AND n=?').get(session.key, Number(turn))) {
+      throw new OpRejected('not_found', `找不到回合 ${args.ref}`);
+    }
+    ctx.changes.update(table, args.id, { checked_at: now(ctx), checked_ref: `s:${session.short}#${turn}` });
     return {id:args.id};
   },
   upsert_milestone: upsertMilestone,

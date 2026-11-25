@@ -67,6 +67,7 @@ test.skipIf(!live)(
       {
         sessionKey: 'claude:live1111aaaabbbb',
         chunkIds: [1],
+        turnNumbers: [],
         staleChunkIds: [],
         text: `<chunk id="1">${text}</chunk>`,
         tsStart: '2026-10-29T10:00:00.000Z',

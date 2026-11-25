@@ -3,9 +3,9 @@ import type { DatabaseSync } from 'node:sqlite';
 import { QUESTION_TTL_DAYS } from '../domain/questions.ts';
 import { sessionLinks } from '../domain/read.ts';
 import { listReminders } from '../domain/reminders.ts';
-import { configuredSources, PENDING_DIGEST_CHUNKS, type SourceConfig } from '../server/coverage.ts';
+import { configuredSources, PENDING_DIGEST_CHUNKS, sourceState, type SourceConfig } from '../server/coverage.ts';
 import { getSession, listSessions, mergeTarget } from '../server/sessions-repo.ts';
-import { sourceHealth, type SourceRow } from '../server/sources-repo.ts';
+import type { SourceRow } from '../server/sources-repo.ts';
 import type { Turn } from '../server/turns.ts';
 import type { ToolInfo, Truncation } from '../shared/ingest-v2.ts';
 import { assignShortIds, shortIdSource } from '../shared/session-key.ts';
@@ -58,14 +58,11 @@ type Overview = {
 
 export function readOverview(db: DatabaseSync, now: Date, reader: string, sources?: { config: SourceConfig; startedAt: Date }): Overview {
   const rows = db.prepare('SELECT * FROM ingest_sources ORDER BY source_id').all() as SourceRow[];
-  const coverage = rows.map((s) => {
-    const h = sourceHealth(s, now);
-    return {
-      id: s.source_id,
-      state: !s.collector_heartbeat ? 'never_reported' : !h.collectorAlive ? 'offline' : !h.daemonOk ? 'daemon_down' : 'ok',
-      last_sync: s.last_snapshot_at ?? s.collector_heartbeat,
-    };
-  });
+  const coverage = rows.map(source => ({
+    id: source.source_id,
+    state: sourceState(source, now),
+    last_sync: source.last_snapshot_at ?? source.collector_heartbeat,
+  }));
   for (const [id] of configuredSources(db, sources?.config ?? { collectors: {} })) {
     if (!coverage.some((s) => s.id === id)) coverage.push({ id, state: 'never_reported', last_sync: null });
   }
@@ -85,17 +82,15 @@ export function readOverview(db: DatabaseSync, now: Date, reader: string, source
       .all(new Date(now.getTime() - QUESTION_TTL_DAYS * 86400_000).toISOString()) as Pending[]),
   );
   pending.sort((a, b) => (a.since ?? '').localeCompare(b.since ?? ''));
+  const latestTurn = db.prepare('SELECT n, ts_start FROM turns WHERE session_key=? ORDER BY n DESC LIMIT 1');
+  const openingMessage = db.prepare(
+    "SELECT substr(text,1,80) AS text FROM context_turn_events WHERE session_key=? AND n=? AND kind='user' ORDER BY first_event LIMIT 1",
+  );
   const running = sessions
     .filter((s) => s.effective_status === 'working' && !s.ignored)
     .map((s) => {
-      const turn = db.prepare('SELECT n,ts_start FROM turns WHERE session_key=? ORDER BY n DESC LIMIT 1').get(s.key);
-      const user =
-        turn &&
-        db
-          .prepare(
-            "SELECT substr(text,1,80) AS text FROM context_turn_events WHERE session_key=? AND n=? AND kind='user' ORDER BY first_event LIMIT 1",
-          )
-          .get(s.key, turn.n);
+      const turn = latestTurn.get(s.key);
+      const user = turn && openingMessage.get(s.key, turn.n);
       return {
         address: 's:' + s.short_id,
         machine: s.machine,
@@ -171,18 +166,17 @@ export function readSession(
     WHERE session_key=? AND n<? ORDER BY n DESC LIMIT ?`,
     )
     .all(key, options.before ?? total + 1, options.limit ?? 30) as Turn[];
+  const openingMessage = db.prepare(
+    "SELECT substr(text,1,80) AS text, refused FROM context_turn_events WHERE session_key=? AND n=? AND kind='user' ORDER BY first_event LIMIT 1",
+  );
+  const finalAnswer = db.prepare(
+    "SELECT substr(text,1,120) AS text, refused FROM context_turn_events WHERE session_key=? AND n=? AND kind='assistant' ORDER BY first_event DESC LIMIT 1",
+  );
+  const refusedEvent = db.prepare('SELECT 1 FROM context_turn_events WHERE session_key=? AND n=? AND refused=1 LIMIT 1');
   const outline = turns.reverse().map((t) => {
-    const first = db
-      .prepare(
-        "SELECT substr(text,1,80) text,refused FROM context_turn_events WHERE session_key=? AND n=? AND kind='user' ORDER BY first_event LIMIT 1",
-      )
-      .get(key, t.n);
-    const last = db
-      .prepare(
-        "SELECT substr(text,1,120) text,refused FROM context_turn_events WHERE session_key=? AND n=? AND kind='assistant' ORDER BY first_event DESC LIMIT 1",
-      )
-      .get(key, t.n);
-    const refused = !!db.prepare('SELECT 1 FROM context_turn_events WHERE session_key=? AND n=? AND refused=1 LIMIT 1').get(key, t.n);
+    const first = openingMessage.get(key, t.n);
+    const last = finalAnswer.get(key, t.n);
+    const refused = !!refusedEvent.get(key, t.n);
     return {
       ...t,
       refused,
