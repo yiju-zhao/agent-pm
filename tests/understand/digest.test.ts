@@ -1,3 +1,5 @@
+import { readSession } from '../../src/context/read.ts';
+import { agent,event,PaseoWriter,startCenter } from '../helpers/center.ts';
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import { SDK_STRUCTURED_OUTPUT_RETRIES } from '../../src/understand/agent-sdk.ts';
 import {
@@ -120,11 +122,12 @@ const GOOD_DIGEST = {
       confidence: 0.8,
     },
   ],
-  decisions: [{ text: '屏幕类 session 只摘要最新快照', quote_ref: 'chunk:1' }],
-  progress: ['nextWindow 完成'],
-  todos_added: ['补 runDigest 测试'],
+  decisions: [{ text: '屏幕类 session 只摘要最新快照', quote_ref: 'chunk:1', turns:[] }],
+  progress: [{text:'nextWindow 完成',turns:[]}],
+  todos_added: [{text:'补 runDigest 测试',turns:[]}],
   todos_done: [],
-  blockers: [{ text: '等订阅额度恢复', kind: 'external' as const }],
+  blockers: [{ text: '等订阅额度恢复', kind: 'external' as const,turns:[] }],
+  session_state:{goal:'目标',state:'进行中',waiting_on:null,next:null,note:null},
   open_questions: ['窗口上限要不要放进配置？'],
   trivial: false,
 };
@@ -334,7 +337,7 @@ test('DIGEST_JSON_SCHEMA has no $schema key', () => {
 test('DIGEST_JSON_SCHEMA describes the same top-level fields', () => {
   const props = Object.keys((DIGEST_JSON_SCHEMA as { properties: Record<string, unknown> }).properties).sort();
   expect(props).toEqual(
-    ['blockers', 'decisions', 'open_questions', 'progress', 'todos_added', 'todos_done', 'topics', 'trivial'].sort(),
+    ['blockers', 'decisions', 'open_questions', 'progress', 'todos_added', 'todos_done', 'topics', 'trivial','session_state'].sort(),
   );
 });
 
@@ -588,4 +591,33 @@ test('unlinked sessions do not get briefs of projects the user unlinked', () => 
   expect(loadDigestContext(t.db, new Date(NOW), KEY).linkedBriefs).toHaveLength(1);
   expect(t.user('unlink_session', { session: KEY, project: p }).status).toBe('applied');
   expect(loadDigestContext(t.db, new Date(NOW), KEY).linkedBriefs).toEqual([]);
+});
+
+test('packed turns are marked in the prompt and only grounded turns and the latest card are stored',async()=>{
+  const center=startCenter();
+  try {
+    const w=new PaseoWriter(center);await w.lease();await w.snapshot([agent('a',{native_id:'abcd1234',native_id_origin:'runtime'})]);
+    const msg=(n:number)=>event('msg:'+n,n,{kind:'user',turn_id:'turn-'+n,text:'message '+n});
+    await w.batch(w.batchBody('a',null,{epoch:'epoch-1',seq:2},[msg(1),msg(2)]));
+    center.db.exec('UPDATE chunks SET digested=1');
+    const sent=await w.batch(w.batchBody('a',{epoch:'epoch-1',seq:2},{epoch:'epoch-1',seq:5},[msg(3),msg(4),msg(5)]));
+    const key=String(sent.json.session_key);
+    const card={goal:'goal',state:'working',waiting_on:null,next:'review',note:'note'};
+    const {runner,calls}=fakeRunner({...SUCCESS,structured:{...GOOD_DIGEST,decisions:[{text:'choice',quote_ref:'',turns:[4,9]}],session_state:card}});
+    const window=nextWindow(center.db,key,'realtime')!;
+    expect((await runDigest(center.db,t.deps,runner,window,{model:MODEL,force:false})).status).toBe('digested');
+    expect(calls[0].prompt).toMatch(/回合 3[^]*message 3[^]*回合 4[^]*message 4[^]*回合 5[^]*message 5/);
+    const digest=center.db.prepare('SELECT turn_start,turn_end,json FROM digests').get()!;
+    expect(digest).toMatchObject({turn_start:3,turn_end:5});
+    expect(JSON.parse(String(digest.json)).decisions[0].turns).toEqual([4]);
+    await w.batch(w.batchBody('a',{epoch:'epoch-1',seq:5},{epoch:'epoch-1',seq:6},[msg(6)]));
+    expect(readSession(center.db,center.now,'abcd1234',{})).toMatchObject({card,card_as_of_turn:5,card_lag:1});
+    const next=nextWindow(center.db,key,'realtime')!;
+    const refused=fakeRunner({ok:false,kind:'refused',message:'declined',durationMs:1});
+    await runDigest(center.db,t.deps,refused.runner,next,{model:MODEL,force:false});
+    expect(readSession(center.db,center.now,'abcd1234',{})).toMatchObject({card,card_as_of_turn:5});
+    await w.batch(w.batchBody('a',{epoch:'epoch-1',seq:6},{epoch:'epoch-1',seq:7},[msg(7)]));
+    await runDigest(center.db,t.deps,runner,nextWindow(center.db,key,'realtime')!,{model:MODEL,force:false});
+    expect(readSession(center.db,center.now,'abcd1234',{})).toMatchObject({card_as_of_turn:7,card_lag:0});
+  } finally { center.close(); }
 });

@@ -46,8 +46,8 @@ function earlierWork(db: DatabaseSync, key: string, before?: string): string[] {
   const lines: string[] = [];
   for (const r of rows.reverse()) {
     try {
-      const d = JSON.parse(r.json) as { progress?: string[]; decisions?: Array<{ text: string }>; topics?: Array<{ label: string }> };
-      const parts = [...(d.topics ?? []).map((t) => t.label), ...(d.progress ?? []), ...(d.decisions ?? []).map((x) => `决定：${x.text}`)].slice(0, 6);
+      const d = JSON.parse(r.json) as { progress?: Array<string|{text:string}>; decisions?: Array<{ text: string }>; topics?: Array<{ label: string }> };
+      const parts = [...(d.topics ?? []).map((t) => t.label), ...(d.progress ?? []).map(p=>typeof p==='string'?p:p.text), ...(d.decisions ?? []).map((x) => `决定：${x.text}`)].slice(0, 6);
       if (parts.length > 0) lines.push(`  - ${(r.ts_end ?? '').slice(0, 16)}：${clean(parts.join('；')).slice(0, 400)}`);
     } catch {
       // A digest that does not parse says nothing here.

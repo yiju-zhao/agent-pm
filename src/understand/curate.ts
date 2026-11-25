@@ -117,7 +117,7 @@ export function digestTag(digest: BatchDigest, projectName?: string | null): str
 /** The project ids a digest names as likely; none when its json is not a digest. */
 function likelyProjectIds(json: string): string[] {
   try {
-    const parsed = DigestSchema.safeParse(JSON.parse(json));
+    const parsed = DigestSchema.pick({topics:true}).safeParse(JSON.parse(json));
     return parsed.success ? parsed.data.topics.flatMap((topic) => topic.likely_project_ids) : [];
   } catch {
     return [];

@@ -3,6 +3,13 @@ import { getSession } from '../server/sessions-repo.ts';
 import type { SessionView } from '../server/sessions-repo.ts';
 import type { Digest } from '../understand/digest.ts';
 
+type LegacyDigest = Omit<Digest,'session_state'|'decisions'|'blockers'|'progress'|'todos_added'|'todos_done'> & {
+  decisions: Array<{text:string;quote_ref:string}>;
+  blockers: Array<{text:string;kind:'user'|'external'|'technical'}>;
+  progress:string[]; todos_added:string[]; todos_done:string[];
+};
+type StoredDigest = Digest | LegacyDigest;
+
 /** A digest shows at most this many of its chunks, lowest id first. */
 export const EVIDENCE_MAX_CHUNKS = 20;
 /** A chunk's text is cut to this many characters. */
@@ -47,7 +54,7 @@ export type EvidenceView = {
   ts_start: string | null;
   ts_end: string | null;
   /** Always `null` for a chunk, and when the digest's JSON cannot be read. */
-  digest: Digest | null;
+  digest: StoredDigest | null;
   /** A chunk: itself. A digest: the first `EVIDENCE_MAX_CHUNKS` of its `chunk_ids` by id. */
   chunks: EvidenceChunk[];
 };
@@ -112,11 +119,11 @@ function chunkView(db: DatabaseSync, r: ChunkRaw): EvidenceChunk {
 }
 
 /** The digest JSON as an object; `null` when it is missing, not JSON, or not an object. */
-function parseDigest(text: string | null): Digest | null {
+function parseDigest(text: string | null): StoredDigest | null {
   if (text === null) return null;
   try {
     const parsed: unknown = JSON.parse(text);
-    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? (parsed as Digest) : null;
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? (parsed as StoredDigest) : null;
   } catch {
     return null;
   }

@@ -89,7 +89,7 @@ test('digests and llm_runs carry the agreed columns and defaults', () => {
       (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
     expect(columns('digests')).toEqual([
       'id', 'session_key', 'chunk_ids', 'json', 'model', 'ts_start', 'ts_end', 'backfill', 'trivial',
-      'skipped', 'curated', 'created_at',
+      'skipped', 'curated', 'created_at', 'turn_start','turn_end',
     ]);
     expect(columns('llm_runs')).toEqual([
       'id', 'role', 'model', 'input_tokens', 'output_tokens', 'cache_read_tokens', 'cost_usd',

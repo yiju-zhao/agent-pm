@@ -24,6 +24,7 @@ export function resolveSession(db: DatabaseSync, shortId: string): { key:string;
 
 type ChangeSummary = {project_id:string;stages:number;decisions:number;completed_todos:number;new_blockers:number;cleared_blockers:number};
 type Pending = {text:string;since:string|null;ref:string};
+type SessionCard = {goal:string;state:string;waiting_on:string|null;next:string|null;note:string|null};
 type SessionOutline = Turn & {address:string;user:string;assistant:string;user_refused:boolean;assistant_refused:boolean;in_progress:boolean};
 type Overview = {
   sources: {id:string;state:string;last_sync:string|null}[]; undigested:number; refusals:number;
@@ -71,11 +72,12 @@ export function markOverviewRead(db: DatabaseSync, reader: string, now: Date, th
 
 export type SessionContext = {
   key:string;address:string;title:string;machine:string;status:string;projects:string[];turns:SessionOutline[];earlier:number;
-  no_turn_index:boolean;digests:{id:number;ts_end:string|null;json:string|null}[];
+  card:SessionCard|null;card_as_of_turn:number|null;card_lag:number|null;no_turn_index:boolean;digests:{id:number;ts_end:string|null;json:string|null}[];
 };
 export function readSession(db: DatabaseSync, now: Date, shortId: string, options:{before?:number;limit?:number}, background=false): SessionContext {
   const {key,short}=resolveSession(db,shortId);
   const session=getSession(db,key,now)!;
+  const card=db.prepare('SELECT card,card_as_of_turn FROM sessions WHERE key=?').get(key) as {card:string|null;card_as_of_turn:number|null};
   const address='s:'+short;
   const total=Number(db.prepare('SELECT coalesce(max(n),0) n FROM turns WHERE session_key=?').get(key)!.n);
   const turns=db.prepare(`SELECT n,turn_id,first_key,last_key,ts_start,ts_end,tool_calls,tool_failures FROM turns
@@ -89,6 +91,7 @@ export function readSession(db: DatabaseSync, now: Date, shortId: string, option
   });
   const digests=total?[]:db.prepare('SELECT id,ts_end,json FROM digests WHERE session_key=? ORDER BY id DESC LIMIT ?').all(key,options.limit??30) as SessionContext['digests'];
   return {key,address,title:session.title,machine:session.machine,status:session.effective_status,projects:(sessionLinks(db).get(key)??[]).map(p=>p.title),
+    card:card.card?JSON.parse(card.card) as SessionCard:null,card_as_of_turn:card.card_as_of_turn,card_lag:card.card_as_of_turn===null?null:total-card.card_as_of_turn,
     turns:outline,earlier:turns.length?turns[0].n-1:0,no_turn_index:total===0,digests};
 }
 

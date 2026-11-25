@@ -33,6 +33,7 @@ export function sessionTools(db:DatabaseSync,deps:DomainDeps,background:boolean)
       if (addr.kind!=='session') throw new ContextAddressError('需要 session 地址');
       const s=readSession(db,deps.now(),addr.session,args,background);
       const lines=[`${s.title} · ${s.machine} · ${s.status} · ${s.projects.join('、')} · ${s.address}`];
+      if (s.card) lines.push(`目标：${s.card.goal} · 状态：${s.card.state} · 等待：${s.card.waiting_on??'—'} · 下一步：${s.card.next??'—'} · 备注：${s.card.note??'—'} · 截至回合 ${s.card_as_of_turn??'—'}，落后 ${s.card_lag??'—'} · ${s.address}`);
       if (s.no_turn_index) lines.push('没有回合索引',...s.digests.map(d=>`${d.ts_end??''} · ${oneLine(d.json??'').slice(0,200)} · digest:${d.id}`));
       for (const t of s.turns) lines.push(`- ${t.ts_start??'?'}–${t.ts_end??'?'} · ${oneLine(t.user)} → ${oneLine(t.assistant)} · 工具 ${t.tool_calls}/失败 ${t.tool_failures}${t.in_progress?' · 进行中':''}${!background&&(t.user_refused||t.assistant_refused)?' · '+REFUSAL_NOTE:''} · ${t.address}`);
       if (s.earlier) lines.push(`更早还有 ${s.earlier} 回合，传 before=${s.turns[0].n} · ${s.address}`);

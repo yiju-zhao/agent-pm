@@ -552,6 +552,10 @@ export const MIGRATIONS: string[] = [
        AND c.digest_block_id IS NOT NULL) AS refused
    FROM turn_items i JOIN source_events e ON e.id=i.latest_event JOIN ingest_sources s ON s.source_id=e.source_id;
    CREATE INDEX source_event_revisions ON source_events(session_key,event_key,id);`,
+  `ALTER TABLE digests ADD COLUMN turn_start INTEGER;
+   ALTER TABLE digests ADD COLUMN turn_end INTEGER;
+   ALTER TABLE sessions ADD COLUMN card TEXT;
+   ALTER TABLE sessions ADD COLUMN card_as_of_turn INTEGER;`,
 ];
 
 /** Opens (creating if needed) the central database in WAL mode and applies pending migrations. */
