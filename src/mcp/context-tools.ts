@@ -176,12 +176,20 @@ export function contextTools(db: DatabaseSync, deps: DomainDeps, reader: string,
         const a = parseAddress(args.item);
         if (a.kind !== 'item') throw new ContextAddressError('需要条目地址');
         const raw = readItem(db, a.session, a.turn, a.item, { offset: args.offset ?? 0 });
+        const truncations: string[] = [];
+        if (raw.truncated && 'input' in raw.truncated) {
+          for (const [section, cut] of [['输入', raw.truncated.input], ['输出', raw.truncated.output]] as const) {
+            if (cut) truncations.push(`${section}采集截断：原长 ${cut.original_chars}，保留 ${cut.kept_chars}`);
+          }
+        } else if (raw.truncated) {
+          truncations.push(`采集截断：原长 ${raw.truncated.original_chars}，保留 ${raw.truncated.kept_chars}`);
+        }
         return {
           text: [
             raw.text,
             raw.refused ? REFUSAL_NOTE : null,
             raw.missing ? JSON.stringify(raw.pointer) : null,
-            raw.truncated ? `采集截断：原长 ${raw.truncated.original_chars}，保留 ${raw.truncated.kept_chars}` : null,
+            ...truncations,
             `共 ${raw.total} 字符${raw.next_offset !== null ? `，还有 ${raw.total - raw.next_offset}，传 offset=${raw.next_offset}` : ''} · ${raw.address}`,
           ]
             .filter(Boolean)

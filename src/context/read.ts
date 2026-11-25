@@ -3,7 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { QUESTION_TTL_DAYS } from '../domain/questions.ts';
 import { sessionLinks } from '../domain/read.ts';
 import { listReminders } from '../domain/reminders.ts';
-import { configuredSources, type SourceConfig } from '../server/coverage.ts';
+import { configuredSources, PENDING_DIGEST_CHUNKS, type SourceConfig } from '../server/coverage.ts';
 import { getSession, listSessions, mergeTarget } from '../server/sessions-repo.ts';
 import { sourceHealth, type SourceRow } from '../server/sources-repo.ts';
 import type { Turn } from '../server/turns.ts';
@@ -121,7 +121,7 @@ export function readOverview(db: DatabaseSync, now: Date, reader: string, source
     running,
     changes,
     last_event_id: Number(db.prepare('SELECT coalesce(max(id),0) n FROM events').get()!.n),
-    undigested: Number(db.prepare('SELECT count(DISTINCT session_key) n FROM chunks WHERE digested=0').get()!.n),
+    undigested: Number(db.prepare(`SELECT count(DISTINCT session_key) n FROM (${PENDING_DIGEST_CHUNKS})`).get()!.n),
     refusals: Number(db.prepare('SELECT count(*) n FROM digest_blocks').get()!.n),
   };
 }
@@ -273,7 +273,7 @@ export function readItem(
   missing: boolean;
   total: number;
   next_offset: number | null;
-  truncated: Truncation;
+  truncated: Truncation | { input: Truncation; output: Truncation };
   refused: boolean;
   pointer: { server_id: string; agent_id: string; event_key: string };
 } {
@@ -286,7 +286,15 @@ export function readItem(
   const meta = JSON.parse(row.meta ?? '{}') as EventMeta;
   const tool = meta.tool;
   const missing = row.text === null || (!tool && row.text === '');
-  const chars = Array.from(missing ? '' : tool ? tool.output || tool.error || tool.input : row.text!);
+  let text = row.text ?? '';
+  if (tool && !missing) {
+    text = [
+      tool.input && '【输入】\n' + tool.input,
+      tool.output && '【输出】\n' + tool.output,
+      tool.error && '【错误】\n' + tool.error,
+    ].filter(Boolean).join('\n\n');
+  }
+  const chars = Array.from(text);
   const pageSize = 4000;
   return {
     address,
@@ -294,7 +302,7 @@ export function readItem(
     text: missing ? '原文不在库里' : chars.slice(offset, offset + pageSize).join(''),
     total: chars.length,
     next_offset: offset + pageSize < chars.length ? offset + pageSize : null,
-    truncated: (tool ? (tool.output ? tool.output_truncated : tool.input_truncated) : meta.text_truncated) ?? null,
+    truncated: tool ? { input: tool.input_truncated, output: tool.output_truncated } : (meta.text_truncated ?? null),
     refused: !!row.refused,
     pointer: { server_id: row.server_id, agent_id: row.stream_id, event_key: row.event_key },
   };

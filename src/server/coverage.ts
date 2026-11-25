@@ -112,6 +112,8 @@ export function configuredSources(db: DatabaseSync, config: SourceConfig) {
   return configured;
 }
 
+export const PENDING_DIGEST_CHUNKS = 'SELECT session_key, source_id FROM chunks WHERE digested = 0 AND digest_block_id IS NULL';
+
 export function sourceCoverage(db: DatabaseSync, config: ServerConfig, now: Date): SourceCoverage[] {
   const configured = configuredSources(db, config);
   const rows = new Map((db.prepare('SELECT * FROM ingest_sources').all() as SourceRow[]).map((r) => [r.source_id, r]));
@@ -153,7 +155,7 @@ export function sourceCoverage(db: DatabaseSync, config: ServerConfig, now: Date
         error: state.error ?? 0,
         chunks: count('SELECT count(*) AS n FROM chunks WHERE source_id = ?', id),
         ...cutCounts(db, id),
-        undigested_chunks: count('SELECT count(*) AS n FROM chunks WHERE source_id = ? AND digested = 0 AND digest_block_id IS NULL', id),
+        undigested_chunks: count(`SELECT count(*) AS n FROM (${PENDING_DIGEST_CHUNKS}) WHERE source_id = ?`, id),
         refused_chunks: count('SELECT count(*) AS n FROM chunks WHERE source_id = ? AND digest_block_id IS NOT NULL', id),
       },
       gaps: Object.fromEntries((db.prepare('SELECT reason, count(*) AS n FROM ingest_gaps WHERE source_id = ? GROUP BY reason').all(id) as Array<{ reason: string; n: number }>).map((r) => [r.reason, r.n])),
