@@ -12,63 +12,8 @@ export type SearchHit = {
   snippet: string;
 };
 
-const ledger = [
-  [
-    'projects',
-    'project',
-    "trim(coalesce(title,'')||' '||coalesce(summary,'')||' '||coalesce(why,'')||' '||coalesce(done_criteria,''))",
-    'id',
-    'created_at',
-  ],
-  ['milestones', 'milestone', 'title', 'project_id', 'created_at'],
-  ['todos', 'todo', 'title', 'project_id', 'created_at'],
-  ['decisions', 'decision', 'text', 'project_id', 'coalesce(decided_at,created_at)'],
-  ['blockers', 'blocker', 'text', 'project_id', 'created_at'],
-] as const;
-const indexedTables = [...ledger.map(([table]) => table), 'digests', 'turn_items'];
+const indexedTables = ['projects', 'milestones', 'todos', 'decisions', 'blockers', 'digests', 'turn_items'];
 const columns = 'rowid,body,ref,kind,project_id,session_key,ts';
-// Disjoint rowids let every trigger replace exactly one document even when several messages share an address.
-const stride = 8;
-const digestText = ['topics', 'progress', 'decisions', 'blockers']
-  .map(
-    (field) =>
-      `coalesce((SELECT group_concat(CASE WHEN j.type='object' THEN trim(coalesce(json_extract(j.value,'$.label'),'')||' '||coalesce(json_extract(j.value,'$.summary'),json_extract(j.value,'$.text'),'')) ELSE j.value END, ' ')
-   FROM json_each(d.json,'$.${field}') j),'')`,
-  )
-  .join("||' '||");
-
-export const SEARCH_SCHEMA = `
-  CREATE VIRTUAL TABLE search_index USING fts5(body,ref UNINDEXED,kind UNINDEXED,project_id UNINDEXED,session_key UNINDEXED,ts UNINDEXED,tokenize='trigram');
-  ${ledger
-    .map(
-      ([table, kind, body, project, time], i) => `CREATE VIEW search_${table} AS SELECT rowid AS identity,
-    rowid*${stride}+${i} AS docid,${body} AS body,id AS ref,'${kind}' AS kind,${project} AS project_id,
-    NULL AS session_key,${time} AS ts FROM ${table} WHERE deleted_at IS NULL;`,
-    )
-    .join('\n')}
-  CREATE VIEW search_digests AS SELECT id AS identity,id*${stride}+5 AS docid,${digestText} AS body,
-    'digest:'||id AS ref,'digest' AS kind,NULL AS project_id,session_key,coalesce(ts_end,created_at) AS ts
-    FROM digests d WHERE json_valid(json) AND skipped=0;
-  CREATE VIEW search_turn_items AS SELECT i.latest_event AS identity,i.latest_event*${stride}+6 AS docid,e.text AS body,
-    's:'||substr(coalesce(s.native_id,s.terminal_id,substr(i.session_key,instr(i.session_key,':')+1)),1,8)||'#'||i.n AS ref,
-    'message' AS kind,NULL AS project_id,i.session_key,e.ts
-    FROM turn_items i JOIN source_events e ON e.id=i.latest_event LEFT JOIN sessions s ON s.key=i.session_key
-    WHERE e.kind IN ('user','assistant') AND e.text IS NOT NULL;
-  ${indexedTables
-    .map((table, i) => {
-      const pk = table === 'turn_items' ? 'latest_event' : 'rowid';
-      const insert = `INSERT INTO search_index(${columns}) SELECT docid,body,ref,kind,project_id,session_key,ts FROM search_${table} WHERE identity=NEW.${pk};`;
-      const remove = `DELETE FROM search_index WHERE rowid=OLD.${pk}*${stride}+${i};`;
-      return `CREATE TRIGGER index_${table}_insert AFTER INSERT ON ${table} BEGIN ${insert} END;
-      CREATE TRIGGER index_${table}_update AFTER UPDATE ON ${table} BEGIN ${remove} ${insert} END;
-      CREATE TRIGGER index_${table}_delete AFTER DELETE ON ${table} BEGIN ${remove} END;`;
-    })
-    .join('\n')}
-  CREATE TRIGGER index_message_text AFTER UPDATE OF text ON source_events WHEN OLD.kind IN ('user','assistant') BEGIN
-    DELETE FROM search_index WHERE rowid=OLD.id*${stride}+6;
-    INSERT INTO search_index(${columns}) SELECT docid,body,ref,kind,project_id,session_key,ts FROM search_turn_items WHERE identity=NEW.id;
-  END;
-`;
 
 export function rebuildSearchIndex(db: DatabaseSync): void {
   db.exec('SAVEPOINT rebuild_search');

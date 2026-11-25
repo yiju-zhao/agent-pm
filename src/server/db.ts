@@ -1,7 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
 
-import { SEARCH_SCHEMA } from './search.ts';
-
 /** Append-only: entry i upgrades a database from `user_version` i to i + 1. Never edit a shipped entry. */
 export const MIGRATIONS: string[] = [
   `
@@ -543,7 +541,61 @@ export const MIGRATIONS: string[] = [
     latest_event INTEGER NOT NULL UNIQUE, PRIMARY KEY(session_key,event_key)
   );
   CREATE INDEX turn_item_order ON turn_items(session_key,n,first_event);`,
-  SEARCH_SCHEMA,
+  `
+  CREATE VIRTUAL TABLE search_index USING fts5(body,ref UNINDEXED,kind UNINDEXED,project_id UNINDEXED,session_key UNINDEXED,ts UNINDEXED,tokenize='trigram');
+  CREATE VIEW search_projects AS SELECT rowid AS identity,
+    rowid*8+0 AS docid,trim(coalesce(title,'')||' '||coalesce(summary,'')||' '||coalesce(why,'')||' '||coalesce(done_criteria,'')) AS body,id AS ref,'project' AS kind,id AS project_id,
+    NULL AS session_key,created_at AS ts FROM projects WHERE deleted_at IS NULL;
+CREATE VIEW search_milestones AS SELECT rowid AS identity,
+    rowid*8+1 AS docid,title AS body,id AS ref,'milestone' AS kind,project_id AS project_id,
+    NULL AS session_key,created_at AS ts FROM milestones WHERE deleted_at IS NULL;
+CREATE VIEW search_todos AS SELECT rowid AS identity,
+    rowid*8+2 AS docid,title AS body,id AS ref,'todo' AS kind,project_id AS project_id,
+    NULL AS session_key,created_at AS ts FROM todos WHERE deleted_at IS NULL;
+CREATE VIEW search_decisions AS SELECT rowid AS identity,
+    rowid*8+3 AS docid,text AS body,id AS ref,'decision' AS kind,project_id AS project_id,
+    NULL AS session_key,coalesce(decided_at,created_at) AS ts FROM decisions WHERE deleted_at IS NULL;
+CREATE VIEW search_blockers AS SELECT rowid AS identity,
+    rowid*8+4 AS docid,text AS body,id AS ref,'blocker' AS kind,project_id AS project_id,
+    NULL AS session_key,created_at AS ts FROM blockers WHERE deleted_at IS NULL;
+  CREATE VIEW search_digests AS SELECT id AS identity,id*8+5 AS docid,coalesce((SELECT group_concat(CASE WHEN j.type='object' THEN trim(coalesce(json_extract(j.value,'$.label'),'')||' '||coalesce(json_extract(j.value,'$.summary'),json_extract(j.value,'$.text'),'')) ELSE j.value END, ' ')
+   FROM json_each(d.json,'$.topics') j),'')||' '||coalesce((SELECT group_concat(CASE WHEN j.type='object' THEN trim(coalesce(json_extract(j.value,'$.label'),'')||' '||coalesce(json_extract(j.value,'$.summary'),json_extract(j.value,'$.text'),'')) ELSE j.value END, ' ')
+   FROM json_each(d.json,'$.progress') j),'')||' '||coalesce((SELECT group_concat(CASE WHEN j.type='object' THEN trim(coalesce(json_extract(j.value,'$.label'),'')||' '||coalesce(json_extract(j.value,'$.summary'),json_extract(j.value,'$.text'),'')) ELSE j.value END, ' ')
+   FROM json_each(d.json,'$.decisions') j),'')||' '||coalesce((SELECT group_concat(CASE WHEN j.type='object' THEN trim(coalesce(json_extract(j.value,'$.label'),'')||' '||coalesce(json_extract(j.value,'$.summary'),json_extract(j.value,'$.text'),'')) ELSE j.value END, ' ')
+   FROM json_each(d.json,'$.blockers') j),'') AS body,
+    'digest:'||id AS ref,'digest' AS kind,NULL AS project_id,session_key,coalesce(ts_end,created_at) AS ts
+    FROM digests d WHERE json_valid(json) AND skipped=0;
+  CREATE VIEW search_turn_items AS SELECT i.latest_event AS identity,i.latest_event*8+6 AS docid,e.text AS body,
+    's:'||substr(coalesce(s.native_id,s.terminal_id,substr(i.session_key,instr(i.session_key,':')+1)),1,8)||'#'||i.n AS ref,
+    'message' AS kind,NULL AS project_id,i.session_key,e.ts
+    FROM turn_items i JOIN source_events e ON e.id=i.latest_event LEFT JOIN sessions s ON s.key=i.session_key
+    WHERE e.kind IN ('user','assistant') AND e.text IS NOT NULL;
+  CREATE TRIGGER index_projects_insert AFTER INSERT ON projects BEGIN INSERT INTO search_index(rowid,body,ref,kind,project_id,session_key,ts) SELECT docid,body,ref,kind,project_id,session_key,ts FROM search_projects WHERE identity=NEW.rowid; END;
+      CREATE TRIGGER index_projects_update AFTER UPDATE ON projects BEGIN DELETE FROM search_index WHERE rowid=OLD.rowid*8+0; INSERT INTO search_index(rowid,body,ref,kind,project_id,session_key,ts) SELECT docid,body,ref,kind,project_id,session_key,ts FROM search_projects WHERE identity=NEW.rowid; END;
+      CREATE TRIGGER index_projects_delete AFTER DELETE ON projects BEGIN DELETE FROM search_index WHERE rowid=OLD.rowid*8+0; END;
+CREATE TRIGGER index_milestones_insert AFTER INSERT ON milestones BEGIN INSERT INTO search_index(rowid,body,ref,kind,project_id,session_key,ts) SELECT docid,body,ref,kind,project_id,session_key,ts FROM search_milestones WHERE identity=NEW.rowid; END;
+      CREATE TRIGGER index_milestones_update AFTER UPDATE ON milestones BEGIN DELETE FROM search_index WHERE rowid=OLD.rowid*8+1; INSERT INTO search_index(rowid,body,ref,kind,project_id,session_key,ts) SELECT docid,body,ref,kind,project_id,session_key,ts FROM search_milestones WHERE identity=NEW.rowid; END;
+      CREATE TRIGGER index_milestones_delete AFTER DELETE ON milestones BEGIN DELETE FROM search_index WHERE rowid=OLD.rowid*8+1; END;
+CREATE TRIGGER index_todos_insert AFTER INSERT ON todos BEGIN INSERT INTO search_index(rowid,body,ref,kind,project_id,session_key,ts) SELECT docid,body,ref,kind,project_id,session_key,ts FROM search_todos WHERE identity=NEW.rowid; END;
+      CREATE TRIGGER index_todos_update AFTER UPDATE ON todos BEGIN DELETE FROM search_index WHERE rowid=OLD.rowid*8+2; INSERT INTO search_index(rowid,body,ref,kind,project_id,session_key,ts) SELECT docid,body,ref,kind,project_id,session_key,ts FROM search_todos WHERE identity=NEW.rowid; END;
+      CREATE TRIGGER index_todos_delete AFTER DELETE ON todos BEGIN DELETE FROM search_index WHERE rowid=OLD.rowid*8+2; END;
+CREATE TRIGGER index_decisions_insert AFTER INSERT ON decisions BEGIN INSERT INTO search_index(rowid,body,ref,kind,project_id,session_key,ts) SELECT docid,body,ref,kind,project_id,session_key,ts FROM search_decisions WHERE identity=NEW.rowid; END;
+      CREATE TRIGGER index_decisions_update AFTER UPDATE ON decisions BEGIN DELETE FROM search_index WHERE rowid=OLD.rowid*8+3; INSERT INTO search_index(rowid,body,ref,kind,project_id,session_key,ts) SELECT docid,body,ref,kind,project_id,session_key,ts FROM search_decisions WHERE identity=NEW.rowid; END;
+      CREATE TRIGGER index_decisions_delete AFTER DELETE ON decisions BEGIN DELETE FROM search_index WHERE rowid=OLD.rowid*8+3; END;
+CREATE TRIGGER index_blockers_insert AFTER INSERT ON blockers BEGIN INSERT INTO search_index(rowid,body,ref,kind,project_id,session_key,ts) SELECT docid,body,ref,kind,project_id,session_key,ts FROM search_blockers WHERE identity=NEW.rowid; END;
+      CREATE TRIGGER index_blockers_update AFTER UPDATE ON blockers BEGIN DELETE FROM search_index WHERE rowid=OLD.rowid*8+4; INSERT INTO search_index(rowid,body,ref,kind,project_id,session_key,ts) SELECT docid,body,ref,kind,project_id,session_key,ts FROM search_blockers WHERE identity=NEW.rowid; END;
+      CREATE TRIGGER index_blockers_delete AFTER DELETE ON blockers BEGIN DELETE FROM search_index WHERE rowid=OLD.rowid*8+4; END;
+CREATE TRIGGER index_digests_insert AFTER INSERT ON digests BEGIN INSERT INTO search_index(rowid,body,ref,kind,project_id,session_key,ts) SELECT docid,body,ref,kind,project_id,session_key,ts FROM search_digests WHERE identity=NEW.rowid; END;
+      CREATE TRIGGER index_digests_update AFTER UPDATE ON digests BEGIN DELETE FROM search_index WHERE rowid=OLD.rowid*8+5; INSERT INTO search_index(rowid,body,ref,kind,project_id,session_key,ts) SELECT docid,body,ref,kind,project_id,session_key,ts FROM search_digests WHERE identity=NEW.rowid; END;
+      CREATE TRIGGER index_digests_delete AFTER DELETE ON digests BEGIN DELETE FROM search_index WHERE rowid=OLD.rowid*8+5; END;
+CREATE TRIGGER index_turn_items_insert AFTER INSERT ON turn_items BEGIN INSERT INTO search_index(rowid,body,ref,kind,project_id,session_key,ts) SELECT docid,body,ref,kind,project_id,session_key,ts FROM search_turn_items WHERE identity=NEW.latest_event; END;
+      CREATE TRIGGER index_turn_items_update AFTER UPDATE ON turn_items BEGIN DELETE FROM search_index WHERE rowid=OLD.latest_event*8+6; INSERT INTO search_index(rowid,body,ref,kind,project_id,session_key,ts) SELECT docid,body,ref,kind,project_id,session_key,ts FROM search_turn_items WHERE identity=NEW.latest_event; END;
+      CREATE TRIGGER index_turn_items_delete AFTER DELETE ON turn_items BEGIN DELETE FROM search_index WHERE rowid=OLD.latest_event*8+6; END;
+  CREATE TRIGGER index_message_text AFTER UPDATE OF text ON source_events WHEN OLD.kind IN ('user','assistant') BEGIN
+    DELETE FROM search_index WHERE rowid=OLD.id*8+6;
+    INSERT INTO search_index(rowid,body,ref,kind,project_id,session_key,ts) SELECT docid,body,ref,kind,project_id,session_key,ts FROM search_turn_items WHERE identity=NEW.id;
+  END;
+`,
   `CREATE TABLE reader_cursors(reader TEXT PRIMARY KEY,last_event_id INTEGER NOT NULL,last_seen_at TEXT NOT NULL);
    CREATE VIEW context_turn_events AS
    SELECT i.session_key,i.n,i.first_event,i.latest_event,i.event_key,e.kind,e.text,e.meta,e.ts,e.stream_id,s.server_id,
@@ -564,6 +616,10 @@ export const MIGRATIONS: string[] = [
       WHEN NEW.${column} IS NOT OLD.${column} AND NEW.checked_ref IS NOT NULL AND OLD.checked_ref IS NEW.checked_ref
       BEGIN UPDATE ${table} SET checked_ref=NULL,checked_at=NULL WHERE id=NEW.id; END;`;
   }).join('\n'),
+  `DROP TRIGGER invalidate_check_decisions;
+   DROP TRIGGER invalidate_check_blockers;
+   DROP TRIGGER invalidate_check_todos;
+   DROP TRIGGER invalidate_check_milestones;`,
 ];
 
 /** Opens (creating if needed) the central database in WAL mode and applies pending migrations. */

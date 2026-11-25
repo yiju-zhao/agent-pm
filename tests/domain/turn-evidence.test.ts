@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test } from 'vitest';
 
+import { ChangeSet } from '../../src/domain/changes.ts';
 import { getEvidence } from '../../src/domain/evidence.ts';
 import { execute } from '../../src/domain/execute.ts';
 import { getProject } from '../../src/domain/read.ts';
@@ -65,7 +66,7 @@ test('checking a decision is rendered, reversible, and invalidated by a change o
   op('revert_event', { event_id: checked.event_id });
   expect(getProject(center.db, center.now, 'p_sample')!.decisions[0]).toMatchObject({ checked_ref: null, checked_at: null });
   mark(ref);
-  center.db.exec("UPDATE decisions SET text='different' WHERE id='d_sample'");
+  new ChangeSet(center.db).update('decisions', 'd_sample', { text: 'different' });
   expect(getProject(center.db, center.now, 'p_sample')!.decisions[0]).toMatchObject({ checked_ref: null, checked_at: null });
 });
 
