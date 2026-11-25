@@ -93,6 +93,7 @@ export function normalizeEntry(entry: TimelineEntry, epoch: string, startedAt: D
   const ts = tsOk ? new Date(entry.timestamp).toISOString() : null;
   const rowKey = `row:${epoch}:${entry.seqStart}:${item.type}`;
   const base = {
+    turn_id: entry.turnId ?? null,
     item_type: item.type,
     epoch,
     seq_start: entry.seqStart,

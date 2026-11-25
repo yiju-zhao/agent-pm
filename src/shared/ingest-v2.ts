@@ -119,6 +119,7 @@ export type ToolInfo = z.infer<typeof ToolInfo>;
  * `stable_id` false). A later version of the same key with other content is a revision, never an overwrite.
  */
 export const TimelineEvent = z.object({
+  turn_id: z.string().max(200).nullable().optional(),
   key: z.string().min(1).max(400),
   stable_id: z.boolean(),
   kind: z.enum(['user', 'assistant', 'tool', 'error', 'notice', 'other']),

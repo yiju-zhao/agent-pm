@@ -188,3 +188,15 @@ describe('revisions and overlap', () => {
     expect(count(center.db, "SELECT count(*) AS n FROM ingest_gaps WHERE reason = 'epoch_replaced'")).toBe(1);
   });
 });
+
+test('a legacy event can acquire its turn ID on replay without a new revision or chunk', async () => {
+  const first = event('msg:first', 1);
+  const position = {epoch:'epoch',seq:1};
+  expect((await w.batch(w.batchBody(A,null,position,[first]))).status).toBe(200);
+  expect(center.db.prepare('SELECT turn_id FROM source_events').get()).toEqual({turn_id:null});
+  const before = chunks();
+  const replay = await w.batch(w.batchBody(A,position,position,[{...first,turn_id:'turn-a'}]));
+  expect(replay.json).toMatchObject({duplicates:1,accepted:0});
+  expect(center.db.prepare('SELECT turn_id FROM source_events').all()).toEqual([{turn_id:'turn-a'}]);
+  expect(chunks()).toBe(before);
+});

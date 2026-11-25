@@ -530,6 +530,7 @@ export const MIGRATIONS: string[] = [
                ELSE EXISTS (SELECT 1 FROM json_each(b.chunk_ids) WHERE type!='integer') END;
   DROP TABLE old_digest_blocks;
   `,
+  `ALTER TABLE source_events ADD COLUMN turn_id TEXT;`,
 ];
 
 /** Opens (creating if needed) the central database in WAL mode and applies pending migrations. */

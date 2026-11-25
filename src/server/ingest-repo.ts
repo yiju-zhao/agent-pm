@@ -308,7 +308,7 @@ export function commitBatch(db: DatabaseSync, src: PaseoSource, batch: BatchV2, 
     // (seen on codex: two assistant rows of one message, split by a tool call). A revision is the same row again: same
     // epoch, overlapping seqs. A row with a known id elsewhere in the same epoch is another row, `<key>~<seqStart>`.
     // Identical content under any variant of the key is a duplicate, also across epochs (a replayed history).
-    const findDup = db.prepare('SELECT 1 FROM source_events WHERE source_id = ? AND stream_id = ? AND base_key = ? AND content_hash = ?');
+    const findDup = db.prepare('SELECT id, turn_id FROM source_events WHERE source_id = ? AND stream_id = ? AND base_key = ? AND content_hash = ?');
     const sameRow = db.prepare(
       `SELECT id, event_key, revision, kind, text, meta FROM source_events
        WHERE source_id = ? AND stream_id = ? AND base_key = ? AND epoch = ? AND seq_start <= ? AND seq_end >= ?
@@ -320,8 +320,8 @@ export function commitBatch(db: DatabaseSync, src: PaseoSource, batch: BatchV2, 
     );
     const insertEvent = db.prepare(
       `INSERT INTO source_events (source_id, stream_id, base_key, event_key, content_hash, revision, session_key, batch_id, epoch,
-         seq_start, seq_end, kind, ts, ts_known, backfill, received_at, text, meta, disposition)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         seq_start, seq_end, kind, ts, ts_known, backfill, received_at, text, meta, disposition, turn_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     const lastTs = stream?.last_event_ts ?? null;
     // A replacement re-reads the new epoch over several batches; until then every id-less row up to what was already
@@ -334,7 +334,9 @@ export function commitBatch(db: DatabaseSync, src: PaseoSource, batch: BatchV2, 
     const toMaterialize: Array<{ id: number; event: TimelineEvent; continuation?: string }> = [];
     for (const e of batch.events) {
       const h = contentHash(e);
-      if (findDup.get(src.sourceId, batch.agent_id, e.key, h) !== undefined) {
+      const duplicate = findDup.get(src.sourceId, batch.agent_id, e.key, h);
+      if (duplicate) {
+        if (e.turn_id && duplicate.turn_id === null) db.prepare('UPDATE source_events SET turn_id=? WHERE id=?').run(e.turn_id, duplicate.id);
         duplicates += 1;
         continue;
       }
@@ -368,7 +370,7 @@ export function commitBatch(db: DatabaseSync, src: PaseoSource, batch: BatchV2, 
       const meta = { item_type: e.item_type, stable_id: e.stable_id, text_truncated: e.text_truncated, tool: e.tool };
       const { lastInsertRowid } = insertEvent.run(
         src.sourceId, batch.agent_id, e.key, eventKey, h, (prev?.revision ?? 0) + 1, key, batch.batch_id, e.epoch, e.seq_start, e.seq_end, e.kind,
-        e.ts, e.ts === null ? 0 : 1, e.backfill ? 1 : 0, nowIso, e.text, JSON.stringify(meta), disposition,
+        e.ts, e.ts === null ? 0 : 1, e.backfill ? 1 : 0, nowIso, e.text, JSON.stringify(meta), disposition, e.turn_id ?? null,
       );
       if (disposition === 'materialized' || disposition === 'suffix') toMaterialize.push({ id: Number(lastInsertRowid), event: e, continuation });
       if (e.ts !== null && (maxTs === null || e.ts > maxTs)) maxTs = e.ts;
